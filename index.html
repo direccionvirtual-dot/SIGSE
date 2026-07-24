@@ -92,6 +92,23 @@
 
         .bg-blue-900\/80 { background-color: rgba(0, 25, 51, 0.8) !important; }
         .bg-blue-800\/50 { background-color: rgba(0, 34, 68, 0.5) !important; }
+        /* Estilos intercambiados solicitados: */
+        .style-from-christian {
+            font-family: "Helvetica Neue", Arial, sans-serif;
+            font-weight: 700;
+            font-size: 16px; /* ajustado: no menor que 14px */
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.8) !important; /* blanco más sutil */
+        }
+        .style-from-admin {
+            font-family: "Times New Roman", Georgia, serif;
+            font-weight: 300;
+            font-size: 11px;
+            letter-spacing: 0.02em;
+            text-transform: none;
+            color: rgba(255,255,255,0.6) !important; /* más pequeño y sutil */
+        }
     </style>
 </head>
 <body class="bg-gray-50 text-gray-800 font-sans">
@@ -163,6 +180,9 @@
                         if (key === 'prodep_admins' && Array.isArray(remote.adminUsers)) {
                             setStoredValue(remote.adminUsers);
                         }
+                        if (key === 'prodep_zoom_accounts' && Array.isArray(remote.zoomAccounts)) {
+                            setStoredValue(remote.zoomAccounts);
+                        }
                     } catch (error) {
                         console.warn('Firebase: no se pudo inicializar el estado.', error);
                     }
@@ -185,6 +205,9 @@
                         }
                         if (key === 'prodep_admins') {
                             saveRemoteState({ adminUsers: valueToStore });
+                        }
+                        if (key === 'prodep_zoom_accounts') {
+                            saveRemoteState({ zoomAccounts: valueToStore });
                         }
                     }
                 } catch (error) {
@@ -381,16 +404,51 @@
             const [basesDeDatos, setBasesDeDatos] = useFirestoreState('prodep_dbs', []);
             const [personalGlobal, setPersonalGlobal] = useFirestoreState('prodep_asesores_global', []);
             const [adminUsers, setAdminUsers] = useFirestoreState('prodep_admins', [{ id: 'ADMIN-1', nombre: 'Administrador Principal', password: 'admin' }]);
+            const [zoomAccounts, setZoomAccounts] = useFirestoreState('prodep_zoom_accounts', []);
             const [adminSection, setAdminSection] = useState('menu');
+            const [coursesSection, setCoursesSection] = useState('new');
+            const [controlSection, setControlSection] = useState('zoom');
+            const [coursesOffersFilter, setCoursesOffersFilter] = useState('');
+            const [coursesPersonalFilter, setCoursesPersonalFilter] = useState('');
             const [newAdminName, setNewAdminName] = useState('');
             const [newAdminPass, setNewAdminPass] = useState('');
+            const [newZoomUser, setNewZoomUser] = useState('');
+            const [newZoomPassword, setNewZoomPassword] = useState('');
+            const [newZoomNotes, setNewZoomNotes] = useState('');
+            const [newSessionDbId, setNewSessionDbId] = useState('');
+            const [newSessionGroupId, setNewSessionGroupId] = useState('');
+            const [newSessionNumber, setNewSessionNumber] = useState('1');
+            const [newSessionDay, setNewSessionDay] = useState('');
+            const [newSessionTime, setNewSessionTime] = useState('');
+            const [newSessionZoomId, setNewSessionZoomId] = useState('');
+            const [newSessionInvite, setNewSessionInvite] = useState('');
+            const [newSessionTotal, setNewSessionTotal] = useState('');
+            const [editSessionModal, setEditSessionModal] = useState({ show: false, dbId: null, id: null, numero: 1, dia: '', horario: '', zoomAccountId: '', invitacion: '' });
+            const [expandedSessionIds, setExpandedSessionIds] = useState([]);
+            const [newAttendanceDbId, setNewAttendanceDbId] = useState('');
+            const [newAttendanceNumber, setNewAttendanceNumber] = useState('1');
+            const [newAttendanceTotal, setNewAttendanceTotal] = useState('');
+            const [newAttendanceFormUrl, setNewAttendanceFormUrl] = useState('');
+            const [newAttendanceResponsesUrl, setNewAttendanceResponsesUrl] = useState('');
+            const [newEvidenceDbId, setNewEvidenceDbId] = useState('');
+            const [newEvidenceGroupId, setNewEvidenceGroupId] = useState('');
+            const [newEvidenceFolderUrl, setNewEvidenceFolderUrl] = useState('');
+            const [editAttendanceModal, setEditAttendanceModal] = useState({ show: false, dbId: null, id: null, numeroSesion: 1, formularioUrl: '', respuestasUrl: '' });
+            const [editEvidenceModal, setEditEvidenceModal] = useState({ show: false, dbId: null, id: null, carpetaUrl: '' });
+            const [controlTableFilters, setControlTableFilters] = useState({ zoom: '', sessions: '', attendances: '', evidences: '' });
+            const [controlSessionFilters, setControlSessionFilters] = useState({ year: '', estado: '', curso: '', grupo: '' });
+            const [controlAttendanceFilters, setControlAttendanceFilters] = useState({ year: '', estado: '', curso: '' });
+            const [controlEvidenceFilters, setControlEvidenceFilters] = useState({ year: '', estado: '', curso: '', grupo: '' });
+            const [controlTableSort, setControlTableSort] = useState({ table: 'sessions', key: 'numero', direction: 'asc' });
             const [activeDbId, setActiveDbId] = useState(null);
             const [firebaseStatus, setFirebaseStatus] = useState('checking');
             const [firebaseStatusMessage, setFirebaseStatusMessage] = useState('Verificando conexión a Firebase...');
             
             const [modoPersonal, setModoPersonal] = useState({ activo: false, grupoId: null, personalId: null, personalName: '', roleInProject: null });
             const [showLoginPersonal, setShowLoginPersonal] = useState(false);
+            const [showLoginAdmin, setShowLoginAdmin] = useState(false);
             const [loginPass, setLoginPass] = useState('');
+            const [loginAdminPass, setLoginAdminPass] = useState('');
 
             // Campos de Creación Nueva BD
             const [anio, setAnio] = useState(new Date().getFullYear().toString());
@@ -523,6 +581,30 @@
                 }, {});
             }, [basesDeDatos]);
 
+            const ofertasFiltradas = useMemo(() => {
+                const search = (coursesOffersFilter || '').toLowerCase().trim();
+                if (!search) return ofertasAgrupadas;
+                return basesDeDatos.reduce((acc, db) => {
+                    const matcher = [db.info.siglas, db.info.idEstado, db.info.anio, db.info.nombreCurso, db.info.estado, db.info.sectorFormativo].filter(Boolean).join(' ').toLowerCase();
+                    if (!matcher.includes(search)) return acc;
+                    const yearKey = db.info.anio || 'Sin Año';
+                    const sectorKey = db.info.sectorFormativo || 'Sin Sector';
+                    if (!acc[yearKey]) acc[yearKey] = {};
+                    if (!acc[yearKey][sectorKey]) acc[yearKey][sectorKey] = [];
+                    acc[yearKey][sectorKey].push(db);
+                    return acc;
+                }, {});
+            }, [basesDeDatos, coursesOffersFilter, ofertasAgrupadas]);
+
+            const personalFiltrado = useMemo(() => {
+                const search = (coursesPersonalFilter || '').toLowerCase().trim();
+                if (!search) return personalGlobal;
+                return personalGlobal.filter(personal => {
+                    const matcher = [personal.nombre, personal.password].filter(Boolean).join(' ').toLowerCase();
+                    return matcher.includes(search);
+                });
+            }, [personalGlobal, coursesPersonalFilter]);
+
             const guardarBaseDeDatos = () => {
                 if (!estadoSeleccionado || !siglas || participantesProcesados.length === 0) return alert("Faltan datos o información válida.");
                 const sectorFormativoFinal = sectorFormativoTipo === 'Otros' ? (sectorFormativoOtro.trim() || 'Otros') : sectorFormativoTipo;
@@ -583,13 +665,14 @@
             };
 
             const loginAdministrador = () => {
-                const pass = prompt("Ingrese contraseña de Administrador:");
-                const adminFound = adminUsers.find(a => a.password === pass);
+                const adminFound = adminUsers.find(a => a.password === loginAdminPass);
                 if (adminFound) {
                     setAdminSection('menu');
+                    setShowLoginAdmin(false);
+                    setLoginAdminPass('');
                     setAppView('admin_dashboard');
                 } else {
-                    alert("Contraseña incorrecta.");
+                    alert("Contraseña de administrador incorrecta.");
                 }
             };
 
@@ -611,6 +694,266 @@
                 if (confirm('¿Seguro que deseas eliminar a este administrador?')) {
                     setAdminUsers(prev => prev.filter(admin => admin.id !== id));
                 }
+            };
+
+            const agregarCuentaZoom = () => {
+                const usuario = newZoomUser.trim();
+                const password = newZoomPassword.trim();
+                if (!usuario || !password) return alert('El usuario y la contraseña de Zoom son obligatorios.');
+                if (zoomAccounts.some(account => account.usuario.toLowerCase() === usuario.toLowerCase())) return alert('Ese usuario de Zoom ya está registrado.');
+                setZoomAccounts(prev => [...prev, { id: `ZOOM-${Date.now()}`, usuario, password, estado: 'disponible', observaciones: newZoomNotes.trim() }]);
+                setNewZoomUser('');
+                setNewZoomPassword('');
+                setNewZoomNotes('');
+            };
+
+            const actualizarCuentaZoom = (id, changes) => {
+                setZoomAccounts(prev => prev.map(account => account.id === id ? { ...account, ...changes } : account));
+            };
+
+            const eliminarCuentaZoom = (id) => {
+                if (confirm('¿Eliminar esta cuenta Zoom del catálogo?')) {
+                    setZoomAccounts(prev => prev.filter(account => account.id !== id));
+                }
+            };
+
+            const getControlSessions = () => basesDeDatos.flatMap(db => (db.controlSesiones || []).map(session => ({ ...session, db })));
+            const ordenarControl = (rows, table, getValue) => {
+                const { key, direction } = controlTableSort;
+                if (controlTableSort.table !== table) return rows;
+                return [...rows].sort((left, right) => {
+                    const leftValue = getValue(left, key);
+                    const rightValue = getValue(right, key);
+                    return String(leftValue ?? '').localeCompare(String(rightValue ?? ''), 'es', { numeric: true, sensitivity: 'base' }) * (direction === 'asc' ? 1 : -1);
+                });
+            };
+            const zoomAccountsVisible = useMemo(() => {
+                const search = controlTableFilters.zoom.trim().toLowerCase();
+                const rows = zoomAccounts.filter(account => !search || [account.usuario, account.estado, account.observaciones].some(value => String(value || '').toLowerCase().includes(search)));
+                return ordenarControl(rows, 'zoom', (row, key) => row[key]);
+            }, [zoomAccounts, controlTableFilters.zoom, controlTableSort]);
+            const controlSessionsVisible = useMemo(() => {
+                const search = controlTableFilters.sessions.trim().toLowerCase();
+                const rows = getControlSessions().filter(({ db, ...session }) => {
+                    const group = db.grupos.find(item => item.id === session.grupoId);
+                    const matchesSearch = !search || [db.info.siglas, db.info.idEstado, db.info.anio, group?.nombre, group?.asesor, session.dia, session.horario].some(value => String(value || '').toLowerCase().includes(search));
+                    const matchesYear = !controlSessionFilters.year || String(db.info.anio) === controlSessionFilters.year;
+                    const matchesEstado = !controlSessionFilters.estado || String(db.info.idEstado || db.info.estado) === controlSessionFilters.estado;
+                    const matchesCurso = !controlSessionFilters.curso || String(db.info.siglas) === controlSessionFilters.curso;
+                    const matchesGrupo = !controlSessionFilters.grupo || String(group?.id) === controlSessionFilters.grupo;
+                    return matchesSearch && matchesYear && matchesEstado && matchesCurso && matchesGrupo;
+                });
+                return ordenarControl(rows, 'sessions', (row, key) => key === 'curso' ? row.db.info.siglas : key === 'grupo' ? row.db.grupos.find(item => item.id === row.grupoId)?.nombre : row[key]);
+            }, [basesDeDatos, controlTableFilters.sessions, controlTableSort, controlSessionFilters]);
+            const controlAttendancesVisible = useMemo(() => {
+                const search = controlTableFilters.attendances.trim().toLowerCase();
+                const rows = basesDeDatos.flatMap(db => (db.controlAsistencias || []).map(row => ({ ...row, db }))).filter(row => {
+                    const matchesSearch = !search || [row.db.info.siglas, row.db.info.idEstado, row.db.info.anio, row.numeroSesion].some(value => String(value || '').toLowerCase().includes(search));
+                    const matchesYear = !controlAttendanceFilters.year || String(row.db.info.anio) === controlAttendanceFilters.year;
+                    const matchesEstado = !controlAttendanceFilters.estado || String(row.db.info.idEstado || row.db.info.estado) === controlAttendanceFilters.estado;
+                    const matchesCurso = !controlAttendanceFilters.curso || String(row.db.info.siglas) === controlAttendanceFilters.curso;
+                    return matchesSearch && matchesYear && matchesEstado && matchesCurso;
+                });
+                return ordenarControl(rows, 'attendances', (row, key) => key === 'curso' ? row.db.info.siglas : row[key]);
+            }, [basesDeDatos, controlTableFilters.attendances, controlAttendanceFilters, controlTableSort]);
+            const controlEvidencesVisible = useMemo(() => {
+                const search = controlTableFilters.evidences.trim().toLowerCase();
+                const rows = basesDeDatos.flatMap(db => (db.controlEvidencias || []).map(row => ({ ...row, db }))).filter(row => {
+                    const group = row.db.grupos.find(item => item.id === row.grupoId);
+                    const matchesSearch = !search || [row.db.info.siglas, row.db.info.idEstado, row.db.info.anio, group?.nombre, group?.asesor].some(value => String(value || '').toLowerCase().includes(search));
+                    const matchesYear = !controlEvidenceFilters.year || String(row.db.info.anio) === controlEvidenceFilters.year;
+                    const matchesEstado = !controlEvidenceFilters.estado || String(row.db.info.idEstado || row.db.info.estado) === controlEvidenceFilters.estado;
+                    const matchesCurso = !controlEvidenceFilters.curso || String(row.db.info.siglas) === controlEvidenceFilters.curso;
+                    const matchesGrupo = !controlEvidenceFilters.grupo || String(group?.id) === controlEvidenceFilters.grupo;
+                    return matchesSearch && matchesYear && matchesEstado && matchesCurso && matchesGrupo;
+                });
+                return ordenarControl(rows, 'evidences', (row, key) => key === 'curso' ? row.db.info.siglas : key === 'grupo' ? row.db.grupos.find(item => item.id === row.grupoId)?.nombre : row[key]);
+            }, [basesDeDatos, controlTableFilters.evidences, controlEvidenceFilters, controlTableSort]);
+            const controlSessionYearOptions = useMemo(() => {
+                return [...new Set(basesDeDatos.map(db => db.info.anio).filter(Boolean))].sort((a,b) => String(a).localeCompare(String(b), 'es', { numeric: true }));
+            }, [basesDeDatos]);
+            const controlSessionEstadoOptions = useMemo(() => {
+                const eligibleDbs = basesDeDatos.filter(db => !controlSessionFilters.year || String(db.info.anio) === controlSessionFilters.year);
+                return [...new Set(eligibleDbs.map(db => db.info.idEstado || db.info.estado).filter(Boolean))].sort((a,b) => String(a).localeCompare(String(b), 'es', { numeric: true }));
+            }, [basesDeDatos, controlSessionFilters.year]);
+            const controlSessionCursoOptions = useMemo(() => {
+                const eligibleDbs = basesDeDatos.filter(db => {
+                    const matchesYear = !controlSessionFilters.year || String(db.info.anio) === controlSessionFilters.year;
+                    const matchesEstado = !controlSessionFilters.estado || String(db.info.idEstado || db.info.estado) === controlSessionFilters.estado;
+                    return matchesYear && matchesEstado;
+                });
+                return [...new Set(eligibleDbs.map(db => db.info.siglas).filter(Boolean))].sort((a,b) => String(a).localeCompare(String(b), 'es', { numeric: true }));
+            }, [basesDeDatos, controlSessionFilters.year, controlSessionFilters.estado]);
+            const controlSessionGroupOptions = useMemo(() => {
+                const eligibleDbs = basesDeDatos.filter(db => {
+                    const matchesYear = !controlSessionFilters.year || String(db.info.anio) === controlSessionFilters.year;
+                    const matchesEstado = !controlSessionFilters.estado || String(db.info.idEstado || db.info.estado) === controlSessionFilters.estado;
+                    const matchesCurso = !controlSessionFilters.curso || String(db.info.siglas) === controlSessionFilters.curso;
+                    return matchesYear && matchesEstado && matchesCurso;
+                });
+                return [...new Map(eligibleDbs.flatMap(db => db.grupos).map(group => [group.id, group])).values()]
+                    .sort((a, b) => String(a.nombre).localeCompare(String(b.nombre), 'es', { sensitivity: 'base' }));
+            }, [basesDeDatos, controlSessionFilters]);
+            const controlAttendanceYearOptions = useMemo(() => {
+                return [...new Set(basesDeDatos.map(db => db.info.anio).filter(Boolean))].sort((a,b) => String(a).localeCompare(String(b), 'es', { numeric: true }));
+            }, [basesDeDatos]);
+            const controlAttendanceEstadoOptions = useMemo(() => {
+                const eligibleDbs = basesDeDatos.filter(db => !controlAttendanceFilters.year || String(db.info.anio) === controlAttendanceFilters.year);
+                return [...new Set(eligibleDbs.map(db => db.info.idEstado || db.info.estado).filter(Boolean))].sort((a,b) => String(a).localeCompare(String(b), 'es', { numeric: true }));
+            }, [basesDeDatos, controlAttendanceFilters.year]);
+            const controlAttendanceCursoOptions = useMemo(() => {
+                const eligibleDbs = basesDeDatos.filter(db => {
+                    const matchesYear = !controlAttendanceFilters.year || String(db.info.anio) === controlAttendanceFilters.year;
+                    const matchesEstado = !controlAttendanceFilters.estado || String(db.info.idEstado || db.info.estado) === controlAttendanceFilters.estado;
+                    return matchesYear && matchesEstado;
+                });
+                return [...new Set(eligibleDbs.map(db => db.info.siglas).filter(Boolean))].sort((a,b) => String(a).localeCompare(String(b), 'es', { numeric: true }));
+            }, [basesDeDatos, controlAttendanceFilters.year, controlAttendanceFilters.estado]);
+            const controlEvidenceYearOptions = useMemo(() => {
+                return [...new Set(basesDeDatos.map(db => db.info.anio).filter(Boolean))].sort((a,b) => String(a).localeCompare(String(b), 'es', { numeric: true }));
+            }, [basesDeDatos]);
+            const controlEvidenceEstadoOptions = useMemo(() => {
+                const eligibleDbs = basesDeDatos.filter(db => !controlEvidenceFilters.year || String(db.info.anio) === controlEvidenceFilters.year);
+                return [...new Set(eligibleDbs.map(db => db.info.idEstado || db.info.estado).filter(Boolean))].sort((a,b) => String(a).localeCompare(String(b), 'es', { numeric: true }));
+            }, [basesDeDatos, controlEvidenceFilters.year]);
+            const controlEvidenceCursoOptions = useMemo(() => {
+                const eligibleDbs = basesDeDatos.filter(db => {
+                    const matchesYear = !controlEvidenceFilters.year || String(db.info.anio) === controlEvidenceFilters.year;
+                    const matchesEstado = !controlEvidenceFilters.estado || String(db.info.idEstado || db.info.estado) === controlEvidenceFilters.estado;
+                    return matchesYear && matchesEstado;
+                });
+                return [...new Set(eligibleDbs.map(db => db.info.siglas).filter(Boolean))].sort((a,b) => String(a).localeCompare(String(b), 'es', { numeric: true }));
+            }, [basesDeDatos, controlEvidenceFilters.year, controlEvidenceFilters.estado]);
+            const controlEvidenceGroupOptions = useMemo(() => {
+                const eligibleDbs = basesDeDatos.filter(db => {
+                    const matchesYear = !controlEvidenceFilters.year || String(db.info.anio) === controlEvidenceFilters.year;
+                    const matchesEstado = !controlEvidenceFilters.estado || String(db.info.idEstado || db.info.estado) === controlEvidenceFilters.estado;
+                    const matchesCurso = !controlEvidenceFilters.curso || String(db.info.siglas) === controlEvidenceFilters.curso;
+                    return matchesYear && matchesEstado && matchesCurso;
+                });
+                return [...new Map(eligibleDbs.flatMap(db => db.grupos).map(group => [group.id, group])).values()]
+                    .sort((a, b) => String(a.nombre).localeCompare(String(b.nombre), 'es', { sensitivity: 'base' }));
+            }, [basesDeDatos, controlEvidenceFilters]);
+            const cambiarOrdenControl = (table, key) => setControlTableSort(current => ({ table, key, direction: current.table === table && current.key === key && current.direction === 'asc' ? 'desc' : 'asc' }));
+            const indicadorOrdenControl = (table, key) => controlTableSort.table === table && controlTableSort.key === key ? (controlTableSort.direction === 'asc' ? ' ↑' : ' ↓') : '';
+            const getSessionDb = () => basesDeDatos.find(db => db.id === newSessionDbId);
+            const getSessionGroups = () => getSessionDb()?.grupos || [];
+
+            const agregarSesionControl = () => {
+                const db = getSessionDb();
+                const grupo = getSessionGroups().find(item => item.id === newSessionGroupId);
+                if (!db || !grupo || !newSessionDay.trim() || !newSessionTime.trim() || !newSessionZoomId) return alert('Selecciona proyecto, grupo, cuenta Zoom, día y horario.');
+                const numero = parseInt(newSessionNumber, 10);
+                if (!numero || numero < 1) return alert('Indica un número de sesión válido.');
+                const sesion = {
+                    id: `SES-${Date.now()}`,
+                    grupoId: grupo.id,
+                    numero,
+                    dia: newSessionDay.trim().toUpperCase(),
+                    horario: newSessionTime.trim().toUpperCase(),
+                    zoomAccountId: newSessionZoomId,
+                    invitacion: newSessionInvite.trim()
+                };
+                setBasesDeDatos(prev => prev.map(item => item.id === db.id ? { ...item, controlSesiones: [...(item.controlSesiones || []), sesion] } : item));
+                setNewSessionInvite('');
+                setNewSessionDay('');
+                setNewSessionTime('');
+            };
+
+            const generarSesionesControl = () => {
+                const db = getSessionDb();
+                const grupo = getSessionGroups().find(item => item.id === newSessionGroupId);
+                const total = parseInt(newSessionTotal || db?.info?.numSesiones, 10);
+                if (!db || !grupo || !newSessionDay.trim() || !newSessionTime.trim() || !newSessionZoomId) return alert('Selecciona proyecto, grupo, cuenta Zoom, día y horario.');
+                if (!total || total < 1) return alert('Indica un total de sesiones válido.');
+                const sesionesExistentes = (db.controlSesiones || []).filter(session => session.grupoId === grupo.id);
+                const numerosExistentes = new Set(sesionesExistentes.map(session => session.numero));
+                const sesionesNuevas = Array.from({ length: total }, (_, index) => index + 1)
+                    .filter(numero => !numerosExistentes.has(numero))
+                    .map((numero, index) => ({
+                        id: `SES-${Date.now()}-${index}`,
+                        grupoId: grupo.id,
+                        numero,
+                        dia: newSessionDay.trim().toUpperCase(),
+                        horario: newSessionTime.trim().toUpperCase(),
+                        zoomAccountId: newSessionZoomId,
+                        invitacion: newSessionInvite.trim()
+                    }));
+                if (!sesionesNuevas.length) return alert('Todas las sesiones de este grupo ya están registradas.');
+                setBasesDeDatos(prev => prev.map(item => item.id === db.id ? { ...item, controlSesiones: [...(item.controlSesiones || []), ...sesionesNuevas] } : item));
+                setNewSessionInvite('');
+                setNewSessionDay('');
+                setNewSessionTime('');
+                alert(`Se generaron ${sesionesNuevas.length} sesiones. Puedes ajustar cualquier sesión con el lápiz.`);
+            };
+
+            const eliminarSesionControl = (dbId, sessionId) => {
+                if (confirm('¿Eliminar esta sesión del control?')) setBasesDeDatos(prev => prev.map(db => db.id === dbId ? { ...db, controlSesiones: (db.controlSesiones || []).filter(session => session.id !== sessionId) } : db));
+            };
+
+            const abrirEdicionSesion = (dbId, session) => setEditSessionModal({ show: true, dbId, id: session.id, numero: session.numero, dia: session.dia, horario: session.horario, zoomAccountId: session.zoomAccountId, invitacion: session.invitacion || '' });
+
+            const guardarEdicionSesion = () => {
+                const numero = parseInt(editSessionModal.numero, 10);
+                if (!numero || !editSessionModal.dia.trim() || !editSessionModal.horario.trim() || !editSessionModal.zoomAccountId) return alert('Completa número, día, horario y cuenta Zoom.');
+                setBasesDeDatos(prev => prev.map(db => db.id === editSessionModal.dbId ? { ...db, controlSesiones: (db.controlSesiones || []).map(session => session.id === editSessionModal.id ? { ...session, numero, dia: editSessionModal.dia.trim().toUpperCase(), horario: editSessionModal.horario.trim().toUpperCase(), zoomAccountId: editSessionModal.zoomAccountId, invitacion: editSessionModal.invitacion.trim(), editadaManualmente: (session.zoomAccountId !== editSessionModal.zoomAccountId) || session.editadaManualmente } : session) } : db));
+                setEditSessionModal({ show: false, dbId: null, id: null, numero: 1, dia: '', horario: '', zoomAccountId: '', invitacion: '' });
+            };
+
+            const agregarAsistenciaControl = () => {
+                const db = basesDeDatos.find(item => item.id === newAttendanceDbId);
+                const numero = parseInt(newAttendanceNumber, 10);
+                if (!db || !numero || !newAttendanceFormUrl.trim() || !newAttendanceResponsesUrl.trim()) return alert('Selecciona un curso e indica sesión, formulario y respuestas.');
+                const asistencia = { id: `ASI-${Date.now()}`, numeroSesion: numero, formularioUrl: newAttendanceFormUrl.trim(), respuestasUrl: newAttendanceResponsesUrl.trim() };
+                setBasesDeDatos(prev => prev.map(item => item.id === db.id ? { ...item, controlAsistencias: [...(item.controlAsistencias || []).filter(row => row.numeroSesion !== numero), asistencia] } : item));
+                setNewAttendanceFormUrl('');
+                setNewAttendanceResponsesUrl('');
+            };
+
+            const generarAsistenciasControl = () => {
+                const db = basesDeDatos.find(item => item.id === newAttendanceDbId);
+                const total = parseInt(newAttendanceTotal || db?.info?.numSesiones, 10);
+                if (!db || !total || total < 1) return alert('Selecciona un curso e indica un total de sesiones válido.');
+                const asistenciasExistentes = db.controlAsistencias || [];
+                const numerosExistentes = new Set(asistenciasExistentes.map(row => row.numeroSesion));
+                const asistenciasNuevas = Array.from({ length: total }, (_, index) => index + 1)
+                    .filter(numeroSesion => !numerosExistentes.has(numeroSesion))
+                    .map((numeroSesion, index) => ({ id: `ASI-${Date.now()}-${index}`, numeroSesion, formularioUrl: '', respuestasUrl: '' }));
+                if (!asistenciasNuevas.length) return alert('Todas las asistencias de este curso ya están registradas.');
+                setBasesDeDatos(prev => prev.map(item => item.id === db.id ? { ...item, controlAsistencias: [...(item.controlAsistencias || []), ...asistenciasNuevas] } : item));
+                alert(`Se generaron ${asistenciasNuevas.length} asistencias. Usa el lápiz para capturar los enlaces de cada sesión.`);
+            };
+
+            const agregarEvidenciaControl = () => {
+                const db = basesDeDatos.find(item => item.id === newEvidenceDbId);
+                const grupo = db?.grupos?.find(item => item.id === newEvidenceGroupId);
+                if (!db || !grupo || !newEvidenceFolderUrl.trim()) return alert('Selecciona un curso, grupo e indica la carpeta de Drive.');
+                const evidencia = { id: `EVI-${Date.now()}`, grupoId: grupo.id, carpetaUrl: newEvidenceFolderUrl.trim() };
+                setBasesDeDatos(prev => prev.map(item => item.id === db.id ? { ...item, controlEvidencias: [...(item.controlEvidencias || []).filter(row => row.grupoId !== grupo.id), evidencia] } : item));
+                setNewEvidenceFolderUrl('');
+            };
+
+            const abrirEdicionAsistencia = (dbId, row) => setEditAttendanceModal({ show: true, dbId, id: row.id, numeroSesion: row.numeroSesion, formularioUrl: row.formularioUrl, respuestasUrl: row.respuestasUrl });
+
+            const guardarEdicionAsistencia = () => {
+                const numeroSesion = parseInt(editAttendanceModal.numeroSesion, 10);
+                if (!numeroSesion || !editAttendanceModal.formularioUrl.trim() || !editAttendanceModal.respuestasUrl.trim()) return alert('Completa sesión, formulario y respuestas.');
+                const db = basesDeDatos.find(item => item.id === editAttendanceModal.dbId);
+                if (db?.controlAsistencias?.some(row => row.id !== editAttendanceModal.id && row.numeroSesion === numeroSesion)) return alert('Ya existe una asistencia para esa sesión en este curso.');
+                setBasesDeDatos(prev => prev.map(db => db.id === editAttendanceModal.dbId ? { ...db, controlAsistencias: (db.controlAsistencias || []).map(row => row.id === editAttendanceModal.id ? { ...row, numeroSesion, formularioUrl: editAttendanceModal.formularioUrl.trim(), respuestasUrl: editAttendanceModal.respuestasUrl.trim() } : row) } : db));
+                setEditAttendanceModal({ show: false, dbId: null, id: null, numeroSesion: 1, formularioUrl: '', respuestasUrl: '' });
+            };
+
+            const abrirEdicionEvidencia = (dbId, row) => setEditEvidenceModal({ show: true, dbId, id: row.id, carpetaUrl: row.carpetaUrl });
+
+            const guardarEdicionEvidencia = () => {
+                if (!editEvidenceModal.carpetaUrl.trim()) return alert('Indica la carpeta de Drive.');
+                setBasesDeDatos(prev => prev.map(db => db.id === editEvidenceModal.dbId ? { ...db, controlEvidencias: (db.controlEvidencias || []).map(row => row.id === editEvidenceModal.id ? { ...row, carpetaUrl: editEvidenceModal.carpetaUrl.trim() } : row) } : db));
+                setEditEvidenceModal({ show: false, dbId: null, id: null, carpetaUrl: '' });
+            };
+
+            const eliminarControlRegistro = (dbId, key, recordId) => {
+                if (confirm('¿Eliminar este registro del control?')) setBasesDeDatos(prev => prev.map(db => db.id === dbId ? { ...db, [key]: (db[key] || []).filter(record => record.id !== recordId) } : db));
             };
 
             const intentarLoginPersonal = () => {
@@ -722,56 +1065,64 @@
                             <h1 className="text-3xl md:text-4xl font-semibold mb-3 tracking-tight leading-tight max-w-2xl mx-auto">
                                 Sistema Integral de Gestión y Seguimiento de Ofertas Educativas<br />
                                 <span className="block text-cyan-400 font-light text-2xl md:text-3xl mt-3">SIGSE</span>
-                                <span className="text-xs md:text-sm text-white font-normal block mt-2">V3.7</span>
+                                <span className="text-xs md:text-sm text-white font-normal block mt-2">v5.1</span>
                             </h1>
-                            <div className={`inline-flex items-center justify-center gap-2 mt-6 px-4 py-2 rounded-full text-sm font-semibold ${firebaseStatus === 'connected' ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : firebaseStatus === 'failed' ? 'bg-red-100 text-red-700 border border-red-200' : 'bg-slate-100 text-slate-700 border border-slate-200'}`}>
-                                <i className={`fa-solid ${firebaseStatus === 'connected' ? 'fa-check-circle' : firebaseStatus === 'failed' ? 'fa-triangle-exclamation' : 'fa-spinner fa-spin'}`}></i>
-                                {firebaseStatusMessage}
-                            </div>
+                            
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full max-w-4xl z-10">
-                            <button onClick={() => setShowLoginPersonal(true)} className="group bg-white rounded-2xl p-8 shadow-2xl hover:shadow-cyan-500/20 transition-all duration-300 transform hover:-translate-y-2 text-left flex flex-col items-center text-center">
-                                <div className="bg-blue-100 p-6 rounded-full mb-6 group-hover:bg-blue-600 transition-colors duration-300">
-                                    <i className="fa-solid fa-users-viewfinder text-4xl text-blue-600 group-hover:text-white transition-colors duration-300"></i>
+                        <div className="grid grid-cols-1 gap-8 w-full max-w-xl z-10">
+                            <button onClick={() => { setShowLoginPersonal(true); setShowLoginAdmin(false); }} aria-label="Ingreso al Portal" className={`group bg-gradient-to-r from-cyan-500 to-blue-600 text-white rounded-2xl p-5 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 flex flex-col items-center text-center focus:outline-none focus:ring-4 focus:ring-cyan-300/40 ${showLoginPersonal ? 'ring-4 ring-cyan-300/50' : ''}`}>
+                                <div className="bg-white/20 p-4 rounded-full mb-4 group-hover:bg-white transition-colors duration-300">
+                                    <i className="fa-solid fa-users-viewfinder text-3xl text-white"></i>
                                 </div>
-                                <h2 className="text-2xl font-bold text-gray-800 mb-3">Portal de Personal</h2>
+                                <h2 className="text-lg font-extrabold mb-1">Ingreso al Portal</h2>
+                                <span className="text-xs opacity-90">Acceso personal</span>
                             </button>
 
-                            <button onClick={loginAdministrador} className="group bg-white rounded-2xl p-8 shadow-2xl hover:shadow-blue-500/20 transition-all duration-300 transform hover:-translate-y-2 text-left flex flex-col items-center text-center">
-                                <div className="bg-gray-100 p-6 rounded-full mb-6 group-hover:bg-gray-800 transition-colors duration-300">
-                                    <i className="fa-solid fa-laptop-code text-4xl text-gray-700 group-hover:text-white transition-colors duration-300"></i>
-                                </div>
-                                <h2 className="text-2xl font-bold text-gray-800 mb-3">Administrador</h2>
-                            </button>
                         </div>
 
-                        <div className="mt-16 text-blue-200/50 text-sm z-10 font-mono tracking-widest flex flex-col items-center gap-2">
-                            <span>CHRISTIAN DELGADO V3.7</span>
+                        <div className="w-full flex justify-center">
+                            <div style={{color: 'rgba(255,255,255,0.75)'}} className="mt-4 text-sm text-center no-print">{firebaseStatusMessage}</div>
                         </div>
 
-                        {showLoginPersonal && (
-                            <div className="fixed inset-0 bg-blue-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                                <div className="bg-white rounded-2xl shadow-2xl w-96 p-8 transform transition-all">
-                                    <div className="text-center mb-6">
-                                        <div className="bg-blue-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                                            <i className="fa-solid fa-user-lock text-2xl text-blue-600"></i>
+                        <div className="mt-10 text-blue-200/50 z-10 flex flex-col items-center gap-1">
+                            <button onClick={() => { setShowLoginAdmin(true); setShowLoginPersonal(false); }} className="text-[10px] uppercase tracking-[0.22em] text-blue-200/40 transition-colors hover:text-blue-100/70" aria-label="Abrir acceso de Administrador"><span className="style-from-christian">Administrador</span></button>
+                            <span className="style-from-admin">CHRISTIAN DELGADO v5.1</span>
+                        </div>
+
+                        {(showLoginPersonal || showLoginAdmin) && (
+                            <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-50 flex items-center justify-center p-5" onClick={() => { setShowLoginPersonal(false); setShowLoginAdmin(false); }}>
+                                <div className="relative w-full max-w-md overflow-hidden rounded-[28px] bg-white shadow-2xl shadow-slate-950/40" onClick={e => e.stopPropagation()}>
+                                    <div className={`h-2 ${showLoginAdmin ? 'bg-slate-800' : 'bg-cyan-500'}`}></div>
+                                    <button onClick={() => { setShowLoginPersonal(false); setShowLoginAdmin(false); }} className="absolute right-5 top-5 flex h-9 w-9 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700" aria-label="Cerrar acceso">
+                                        <i className="fa-solid fa-xmark text-lg"></i>
+                                    </button>
+                                    <div className="p-8 sm:p-10">
+                                        <div className="mb-8 flex items-center gap-4">
+                                            <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl ${showLoginAdmin ? 'bg-slate-100' : 'bg-cyan-50'}`}>
+                                                <i className={`fa-solid ${showLoginAdmin ? 'fa-laptop-code text-slate-700' : 'fa-user-lock text-cyan-600'} text-2xl`}></i>
+                                            </div>
+                                            <div>
+                                                <p className="mb-1 text-xs font-bold uppercase tracking-[0.18em] text-slate-400">SIGSE · acceso seguro</p>
+                                                <h2 className="text-2xl font-bold tracking-tight text-slate-900">{showLoginAdmin ? 'Administrador' : 'Portal de Personal'}</h2>
+                                            </div>
                                         </div>
-                                        <h2 className="text-2xl font-bold text-gray-800">Acceso de Personal</h2>
-                                        <p className="text-sm text-gray-500 mt-2">Ingresa tu contraseña única</p>
-                                    </div>
-                                    <input 
-                                        type="password" 
-                                        className="w-full border-2 border-gray-200 p-4 rounded-xl mb-6 text-center text-xl focus:border-blue-500 focus:ring-0 outline-none transition-colors text-gray-800 font-bold tracking-widest" 
-                                        placeholder="••••••••"
-                                        value={loginPass}
-                                        onChange={e=>setLoginPass(e.target.value)}
-                                        onKeyPress={e => e.key === 'Enter' && intentarLoginPersonal()}
-                                        autoFocus
-                                    />
-                                    <div className="flex gap-3">
-                                        <button onClick={()=>setShowLoginPersonal(false)} className="w-1/3 bg-gray-100 text-gray-600 font-semibold rounded-xl py-3 hover:bg-gray-200 transition-colors">Cancelar</button>
-                                        <button onClick={intentarLoginPersonal} className="w-2/3 bg-blue-600 text-white font-bold rounded-xl py-3 hover:bg-blue-700 shadow-lg shadow-blue-500/30 transition-all active:scale-95">Ingresar</button>
+                                        <p className="mb-5 text-sm leading-6 text-slate-500">Ingresa tu contraseña para continuar con tu espacio de trabajo.</p>
+                                        <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-slate-500" htmlFor="login-password">Contraseña</label>
+                                        <input
+                                            id="login-password"
+                                            type="password"
+                                            className="mb-6 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-lg font-bold tracking-[0.3em] text-slate-900 outline-none transition-all placeholder:tracking-normal placeholder:text-slate-400 focus:border-cyan-500 focus:bg-white focus:ring-4 focus:ring-cyan-500/10"
+                                            placeholder="Escribe tu contraseña"
+                                            value={showLoginAdmin ? loginAdminPass : loginPass}
+                                            onChange={e => showLoginAdmin ? setLoginAdminPass(e.target.value) : setLoginPass(e.target.value)}
+                                            onKeyPress={e => e.key === 'Enter' && (showLoginAdmin ? loginAdministrador() : intentarLoginPersonal())}
+                                            autoFocus
+                                        />
+                                        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                                            <button onClick={() => { setShowLoginPersonal(false); setShowLoginAdmin(false); setLoginPass(''); setLoginAdminPass(''); }} className="rounded-xl px-5 py-3 font-semibold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800">Cancelar</button>
+                                            <button onClick={showLoginAdmin ? loginAdministrador : intentarLoginPersonal} className="rounded-xl bg-slate-900 px-6 py-3 font-bold text-white shadow-lg shadow-slate-900/20 transition-all hover:bg-cyan-700 active:scale-[0.98]">Ingresar <i className="fa-solid fa-arrow-right ml-2 text-xs"></i></button>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -786,7 +1137,7 @@
                         <header className="bg-gray-900 text-white p-4 shadow-md flex justify-between items-center no-print sticky top-0 z-40">
                             <div className="flex items-center gap-3">
                                 <i className="fa-solid fa-laptop-code text-2xl text-cyan-400"></i>
-                                <h1 className="text-xl font-bold">Portal Administrador <span className="text-gray-400 text-sm font-normal ml-2">ESCUELA DE POSGRADOS - SIGSE V3.7</span></h1>
+                                <h1 className="text-xl font-bold">Portal Administrador <span className="text-gray-400 text-sm font-normal ml-2">ESCUELA DE POSGRADOS - SIGSE v5.1</span></h1>
                             </div>
                             <div className="flex items-center gap-4">
                                 <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-semibold ${firebaseStatus === 'connected' ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : firebaseStatus === 'failed' ? 'bg-red-100 text-red-700 border border-red-200' : 'bg-slate-100 text-slate-700 border border-slate-200'}`}>
@@ -820,7 +1171,7 @@
                                         <i className="fa-solid fa-sliders text-2xl"></i>
                                     </div>
                                     <h3 className="text-lg font-bold text-gray-800 mb-2">Configuración Control</h3>
-                                    <p className="text-sm text-gray-500">Área en construcción para futuros controles administrativos.</p>
+                                    <p className="text-sm text-gray-500">Cuentas Zoom y controles operativos de las sesiones.</p>
                                 </button>
                             </div>
 
@@ -828,124 +1179,152 @@
                                 <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 text-center">
                                     <h2 className="text-2xl font-bold text-gray-900 mb-2">Bienvenido al Portal de Administración</h2>
                                     <p className="text-gray-600 mb-4">Selecciona uno de los tres apartados para continuar: administrador, cursos o control.</p>
-                                    <div className="text-sm text-gray-500">El apartado de cursos te mostrará la gestión actual. El control está todavía en construcción.</div>
+                                    <div className="text-sm text-gray-500">El apartado de control ya incluye el catálogo de cuentas Zoom y crecerá con sesiones, asistencias y evidencias.</div>
                                 </div>
                             )}
 
                             {adminSection === 'courses' && (
                                 <>
-                                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                                        <div className="lg:col-span-5 space-y-6">
-                                            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
-                                                <h2 className="text-lg font-bold mb-4 text-blue-900 flex items-center gap-2"><i className="fa-solid fa-square-plus text-blue-600"></i> 1. Nueva Base de Datos</h2>
-                                                <div className="grid grid-cols-2 gap-4">
-                                                    <div>
-                                                        <label className="block text-xs font-bold text-gray-600 mb-1">Sector Formativo</label>
-                                                        <select className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:border-blue-500" value={sectorFormativoTipo} onChange={e => setSectorFormativoTipo(e.target.value)}>
-                                                            {SECTORES_FORMATIVOS.map(op => <option key={op} value={op}>{op}</option>)}
-                                                        </select>
-                                                    </div>
-                                                    {sectorFormativoTipo === 'Otros' && (
-                                                        <div className="col-span-2">
-                                                            <label className="block text-xs font-bold text-gray-600 mb-1">Especificar otro sector</label>
-                                                            <input type="text" className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:border-blue-500" value={sectorFormativoOtro} onChange={e => setSectorFormativoOtro(e.target.value)} placeholder="Describe el sector" />
-                                                        </div>
-                                                    )}
-                                                    <div className="col-span-2">
-                                                        <label className="block text-xs font-bold text-gray-600 mb-1">Tipo de Formación</label>
-                                                        <select className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:border-blue-500" value={tipoFormacion} onChange={e=>setTipoFormacion(e.target.value)}>{TIPOS_FORMACION.map(t=><option key={t} value={t}>{t}</option>)}</select>
-                                                    </div>
-                                                    <div><label className="block text-xs font-bold text-gray-600 mb-1">Año</label><input type="text" className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:border-blue-500" value={anio} onChange={e=>setAnio(e.target.value)}/></div>
-                                                    <div>
-                                                        <label className="block text-xs font-bold text-gray-600 mb-1">Estado</label>
-                                                        <select className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:border-blue-500" value={estadoSeleccionado} onChange={e=>setEstadoSeleccionado(e.target.value)}>
-                                                            <option value="">- Seleccionar -</option>{ESTADOS.map(e=><option key={e.id} value={e.nombre}>{e.nombre}</option>)}
-                                                        </select>
-                                                    </div>
-                                                    <div><label className="block text-xs font-bold text-gray-600 mb-1">Siglas</label><input type="text" className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm uppercase outline-none focus:border-blue-500" value={siglas} onChange={e=>setSiglas(e.target.value)}/></div>
-                                                    <div><label className="block text-xs font-bold text-gray-600 mb-1">ID Curso</label><input type="text" className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm uppercase outline-none focus:border-blue-500" value={idCurso} onChange={e=>setIdCurso(e.target.value)}/></div>
-                                                    <div><label className="block text-xs font-bold text-gray-600 mb-1">Horas</label><input type="number" className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:border-blue-500" value={horas} onChange={e=>setHoras(e.target.value)}/></div>
-                                                    <div>
-                                                        <label className="block text-xs font-bold text-gray-600 mb-1">Modalidad</label>
-                                                        <select className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:border-blue-500" value={modalidad} onChange={e=>setModalidad(e.target.value)}>
-                                                            <option value="A distancia">A distancia</option>
-                                                            <option value="Mixta">Mixta</option>
-                                                            <option value="Presencial">Presencial</option>
-                                                        </select>
-                                                    </div>
-                                                    <div className="col-span-2"><label className="block text-xs font-bold text-gray-600 mb-1">Nombre Completo del Curso</label><textarea className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:border-blue-500" rows="2" value={nombreCurso} onChange={e=>setNombreCurso(e.target.value)}></textarea></div>
-                                                    <div className="col-span-2">
-                                                        <label className="block text-xs font-bold text-purple-600 mb-1">Coordinadores del Proyecto (Opcional)</label>
-                                                        <div className="border border-purple-200 rounded-lg p-2 max-h-32 overflow-y-auto bg-purple-50/30 text-sm">
-                                                            {personalGlobal.map(p => (
-                                                                <label key={p.id} className="flex items-center gap-2 mb-1 p-1 hover:bg-white rounded cursor-pointer">
-                                                                    <input type="checkbox" className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
-                                                                        checked={coordinadorIds.includes(p.id)}
-                                                                        onChange={(e) => {
-                                                                            if (e.target.checked) setCoordinadorIds([...coordinadorIds, p.id]);
-                                                                            else setCoordinadorIds(coordinadorIds.filter(id => id !== p.id));
-                                                                        }}
-                                                                    />
-                                                                    <span className="text-gray-700 font-semibold">{p.nombre}</span>
-                                                                </label>
-                                                            ))}
-                                                            {personalGlobal.length === 0 && <span className="text-gray-400 italic">No hay personal registrado</span>}
-                                                        </div>
-                                                    </div>
-                                                    <div className="col-span-2 border-t border-gray-100 pt-3 mt-1"><label className="block text-xs font-black text-blue-800 mb-2 uppercase tracking-wide">Estructura Seguimiento Semanal</label></div>
-                                                    <div><label className="block text-xs font-bold text-gray-600 mb-1">Sesiones</label><input type="number" className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none" value={numSesiones} onChange={e=>setNumSesiones(e.target.value)}/></div>
-                                                    <div><label className="block text-xs font-bold text-gray-600 mb-1">Productos (PA)</label><input type="number" className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none" value={numPA} onChange={e=>setNumPA(e.target.value)}/></div>
-                                                    <div><label className="block text-xs font-bold text-gray-600 mb-1">Actividades (ACT)</label><input type="number" className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none" value={numAct} onChange={e=>setNumAct(e.target.value)}/></div>
-                                                    <div>
-                                                        <label className="block text-xs font-bold text-gray-600 mb-1">Cálculo de CALIF. FINAL</label>
-                                                        <select className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none" value={calculoFinalTipo} onChange={e=>setCalculoFinalTipo(e.target.value)}>
-                                                            <option value="sumatoria">Calificaciones sumatorias</option>
-                                                            <option value="promedio">Calificaciones promedio</option>
-                                                        </select>
-                                                    </div>
-                                                    <div><label className="block text-xs font-bold text-gray-600 mb-1">Acreditación</label><input type="number" className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none" value={acreditacion} onChange={e=>setAcreditacion(e.target.value)}/></div>
-                                                    <div><label className="block text-xs font-bold text-gray-600 mb-1">Pass Moodle</label><input type="text" className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none" value={moodlePass} onChange={e=>setMoodlePass(e.target.value)}/></div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div className="lg:col-span-7 h-full">
-                                            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col h-full">
-                                                <div className="flex justify-between items-center mb-2">
-                                                    <h2 className="text-lg font-bold text-blue-900 flex items-center gap-2"><i className="fa-solid fa-file-excel text-green-600"></i> 2. Pegado de Excel Original</h2>
-                                                    <button onClick={descargarPlantillaBase} className="bg-green-100 text-green-700 hover:bg-green-600 hover:text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 shadow-sm border border-green-200">
-                                                        <i className="fa-solid fa-download"></i> Descargar Plantilla Oficial
-                                                    </button>
-                                                </div>
-                                                <p className="text-sm text-gray-500 mb-4">Copia la tabla de tu Excel (o de la plantilla) con todo y los encabezados y pégala en el siguiente cuadro. El sistema extraerá CURP, Nombre, Correos, etc. automáticamente.</p>
-                                                <textarea className="flex-1 w-full p-4 border-dashed border-2 border-gray-300 rounded-xl bg-gray-50 text-xs font-mono outline-none focus:border-blue-500 focus:bg-white transition-colors" placeholder="Pegar aquí..." value={textoPegado} onChange={e=>procesarTextoPegado(e.target.value)}></textarea>
-                                                <div className="flex items-center justify-between mt-4">
-                                                    <div className="text-sm px-4 py-2 bg-blue-50 text-blue-800 font-bold rounded-lg border border-blue-100">
-                                                        Registros detectados: {participantesProcesados.length}
-                                                    </div>
-                                                    <button onClick={guardarBaseDeDatos} disabled={participantesProcesados.length===0} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:shadow-none text-white font-bold rounded-xl shadow-lg shadow-blue-500/30 transition-all flex items-center gap-2">
-                                                        <i className="fa-solid fa-rocket"></i> Generar Proyecto
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        </div>
+                                    <div className="grid grid-cols-1 gap-4 mb-6 sm:grid-cols-3">
+                                        <button onClick={() => setCoursesSection('new')} className={`rounded-2xl border px-5 py-4 text-left transition ${coursesSection === 'new' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50/50'}`}>
+                                            <div className="flex items-center gap-3 mb-2 text-blue-700"><i className="fa-solid fa-folder-plus text-lg"></i><span className="font-bold">Nueva oferta</span></div>
+                                            <p className="text-sm text-slate-500">Registra un proyecto con todos los datos y el pegado de Excel.</p>
+                                        </button>
+                                        <button onClick={() => setCoursesSection('offers')} className={`rounded-2xl border px-5 py-4 text-left transition ${coursesSection === 'offers' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50/50'}`}>
+                                            <div className="flex items-center gap-3 mb-2 text-blue-700"><i className="fa-solid fa-folder-open text-lg"></i><span className="font-bold">Ofertas activas</span></div>
+                                            <p className="text-sm text-slate-500">Explora y administra tus proyectos creados.</p>
+                                        </button>
+                                        <button onClick={() => setCoursesSection('personal')} className={`rounded-2xl border px-5 py-4 text-left transition ${coursesSection === 'personal' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50/50'}`}>
+                                            <div className="flex items-center gap-3 mb-2 text-blue-700"><i className="fa-solid fa-address-book text-lg"></i><span className="font-bold">Directorio global</span></div>
+                                            <p className="text-sm text-slate-500">Gestiona el personal y sus accesos desde un solo espacio.</p>
+                                        </button>
                                     </div>
-                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                                        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
-                                            <div className="p-5 border-b border-gray-100 bg-gray-50 flex items-center gap-3">
-                                                <i className="fa-solid fa-folder-open text-xl text-yellow-500"></i>
-                                                <h2 className="text-lg font-bold text-gray-800">Ofertas Activas</h2>
+
+                                    {coursesSection === 'new' && (
+                                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                                            <div className="lg:col-span-5 space-y-6">
+                                                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
+                                                    <h2 className="text-lg font-bold mb-4 text-blue-900 flex items-center gap-2"><i className="fa-solid fa-square-plus text-blue-600"></i> 1. Nueva Base de Datos</h2>
+                                                    <div className="grid grid-cols-2 gap-4">
+                                                        <div>
+                                                            <label className="block text-xs font-bold text-gray-600 mb-1">Sector Formativo</label>
+                                                            <select className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:border-blue-500" value={sectorFormativoTipo} onChange={e => setSectorFormativoTipo(e.target.value)}>
+                                                                {SECTORES_FORMATIVOS.map(op => <option key={op} value={op}>{op}</option>)}
+                                                            </select>
+                                                        </div>
+                                                        {sectorFormativoTipo === 'Otros' && (
+                                                            <div className="col-span-2">
+                                                                <label className="block text-xs font-bold text-gray-600 mb-1">Especificar otro sector</label>
+                                                                <input type="text" className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:border-blue-500" value={sectorFormativoOtro} onChange={e => setSectorFormativoOtro(e.target.value)} placeholder="Describe el sector" />
+                                                            </div>
+                                                        )}
+                                                        <div className="col-span-2">
+                                                            <label className="block text-xs font-bold text-gray-600 mb-1">Tipo de Formación</label>
+                                                            <select className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:border-blue-500" value={tipoFormacion} onChange={e=>setTipoFormacion(e.target.value)}>{TIPOS_FORMACION.map(t=><option key={t} value={t}>{t}</option>)}</select>
+                                                        </div>
+                                                        <div><label className="block text-xs font-bold text-gray-600 mb-1">Año</label><input type="text" className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:border-blue-500" value={anio} onChange={e=>setAnio(e.target.value)}/></div>
+                                                        <div>
+                                                            <label className="block text-xs font-bold text-gray-600 mb-1">Estado</label>
+                                                            <select className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:border-blue-500" value={estadoSeleccionado} onChange={e=>setEstadoSeleccionado(e.target.value)}>
+                                                                <option value="">- Seleccionar -</option>{ESTADOS.map(e=><option key={e.id} value={e.nombre}>{e.nombre}</option>)}
+                                                            </select>
+                                                        </div>
+                                                        <div><label className="block text-xs font-bold text-gray-600 mb-1">Siglas</label><input type="text" className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm uppercase outline-none focus:border-blue-500" value={siglas} onChange={e=>setSiglas(e.target.value)}/></div>
+                                                        <div><label className="block text-xs font-bold text-gray-600 mb-1">ID Curso</label><input type="text" className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm uppercase outline-none focus:border-blue-500" value={idCurso} onChange={e=>setIdCurso(e.target.value)}/></div>
+                                                        <div><label className="block text-xs font-bold text-gray-600 mb-1">Horas</label><input type="number" className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:border-blue-500" value={horas} onChange={e=>setHoras(e.target.value)}/></div>
+                                                        <div>
+                                                            <label className="block text-xs font-bold text-gray-600 mb-1">Modalidad</label>
+                                                            <select className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:border-blue-500" value={modalidad} onChange={e=>setModalidad(e.target.value)}>
+                                                                <option value="A distancia">A distancia</option>
+                                                                <option value="Mixta">Mixta</option>
+                                                                <option value="Presencial">Presencial</option>
+                                                            </select>
+                                                        </div>
+                                                        <div className="col-span-2"><label className="block text-xs font-bold text-gray-600 mb-1">Nombre Completo del Curso</label><textarea className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:border-blue-500" rows="2" value={nombreCurso} onChange={e=>setNombreCurso(e.target.value)}></textarea></div>
+                                                        <div className="col-span-2">
+                                                            <label className="block text-xs font-bold text-purple-600 mb-1">Coordinadores del Proyecto (Opcional)</label>
+                                                            <div className="border border-purple-200 rounded-lg p-2 max-h-32 overflow-y-auto bg-purple-50/30 text-sm">
+                                                                {personalGlobal.map(p => (
+                                                                    <label key={p.id} className="flex items-center gap-2 mb-1 p-1 hover:bg-white rounded cursor-pointer">
+                                                                        <input type="checkbox" className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
+                                                                            checked={coordinadorIds.includes(p.id)}
+                                                                            onChange={(e) => {
+                                                                                if (e.target.checked) setCoordinadorIds([...coordinadorIds, p.id]);
+                                                                                else setCoordinadorIds(coordinadorIds.filter(id => id !== p.id));
+                                                                            }}
+                                                                        />
+                                                                        <span className="text-gray-700 font-semibold">{p.nombre}</span>
+                                                                    </label>
+                                                                ))}
+                                                                {personalGlobal.length === 0 && <span className="text-gray-400 italic">No hay personal registrado</span>}
+                                                            </div>
+                                                        </div>
+                                                        <div className="col-span-2 border-t border-gray-100 pt-3 mt-1"><label className="block text-xs font-black text-blue-800 mb-2 uppercase tracking-wide">Estructura Seguimiento Semanal</label></div>
+                                                        <div><label className="block text-xs font-bold text-gray-600 mb-1">Sesiones</label><input type="number" className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none" value={numSesiones} onChange={e=>setNumSesiones(e.target.value)}/></div>
+                                                        <div><label className="block text-xs font-bold text-gray-600 mb-1">Productos (PA)</label><input type="number" className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none" value={numPA} onChange={e=>setNumPA(e.target.value)}/></div>
+                                                        <div><label className="block text-xs font-bold text-gray-600 mb-1">Actividades (ACT)</label><input type="number" className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none" value={numAct} onChange={e=>setNumAct(e.target.value)}/></div>
+                                                        <div>
+                                                            <label className="block text-xs font-bold text-gray-600 mb-1">Cálculo de CALIF. FINAL</label>
+                                                            <select className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none" value={calculoFinalTipo} onChange={e=>setCalculoFinalTipo(e.target.value)}>
+                                                                <option value="sumatoria">Calificaciones sumatorias</option>
+                                                                <option value="promedio">Calificaciones promedio</option>
+                                                            </select>
+                                                        </div>
+                                                        <div><label className="block text-xs font-bold text-gray-600 mb-1">Acreditación</label><input type="number" className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none" value={acreditacion} onChange={e=>setAcreditacion(e.target.value)}/></div>
+                                                        <div><label className="block text-xs font-bold text-gray-600 mb-1">Pass Moodle</label><input type="text" className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none" value={moodlePass} onChange={e=>setMoodlePass(e.target.value)}/></div>
+                                                    </div>
+                                                </div>
                                             </div>
-                                            <div className="p-0 flex-1 overflow-auto max-h-[400px]">
+                                            <div className="lg:col-span-7 h-full">
+                                                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col h-full">
+                                                    <div className="flex justify-between items-center mb-2">
+                                                        <h2 className="text-lg font-bold text-blue-900 flex items-center gap-2"><i className="fa-solid fa-file-excel text-green-600"></i> 2. Pegado de Excel Original</h2>
+                                                        <button onClick={descargarPlantillaBase} className="bg-green-100 text-green-700 hover:bg-green-600 hover:text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 shadow-sm border border-green-200">
+                                                            <i className="fa-solid fa-download"></i> Descargar Plantilla Oficial
+                                                        </button>
+                                                    </div>
+                                                    <p className="text-sm text-gray-500 mb-4">Copia la tabla de tu Excel (o de la plantilla) con todo y los encabezados y pégala en el siguiente cuadro. El sistema extraerá CURP, Nombre, Correos, etc. automáticamente.</p>
+                                                    <textarea className="flex-1 w-full p-4 border-dashed border-2 border-gray-300 rounded-xl bg-gray-50 text-xs font-mono outline-none focus:border-blue-500 focus:bg-white transition-colors" placeholder="Pegar aquí..." value={textoPegado} onChange={e=>procesarTextoPegado(e.target.value)}></textarea>
+                                                    <div className="flex items-center justify-between mt-4">
+                                                        <div className="text-sm px-4 py-2 bg-blue-50 text-blue-800 font-bold rounded-lg border border-blue-100">
+                                                            Registros detectados: {participantesProcesados.length}
+                                                        </div>
+                                                        <button onClick={guardarBaseDeDatos} disabled={participantesProcesados.length===0} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:shadow-none text-white font-bold rounded-xl shadow-lg shadow-blue-500/30 transition-all flex items-center gap-2">
+                                                            <i className="fa-solid fa-rocket"></i> Generar Proyecto
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {coursesSection === 'offers' && (
+                                        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
+                                            <div className="p-5 border-b border-gray-100 bg-gray-50 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                                                <div className="flex items-center gap-3">
+                                                    <i className="fa-solid fa-folder-open text-xl text-yellow-500"></i>
+                                                    <h2 className="text-lg font-bold text-gray-800">Ofertas Activas</h2>
+                                                </div>
+                                                <input
+                                                    type="search"
+                                                    className="w-full sm:w-80 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                                                    placeholder="Buscar ofertas..."
+                                                    value={coursesOffersFilter}
+                                                    onChange={e => setCoursesOffersFilter(e.target.value)}
+                                                />
+                                            </div>
+                                            <div className="p-0 flex-1 overflow-auto max-h-[600px]">
                                                 <table className="w-full text-left text-sm whitespace-nowrap">
                                                     <thead className="bg-white sticky top-0 shadow-sm z-10">
                                                         <tr><th className="p-4 text-gray-500 font-semibold">Código</th><th className="p-4 text-gray-500 font-semibold">Curso</th><th className="p-4 text-gray-500 font-semibold text-center">Acción</th></tr>
                                                     </thead>
                                                     <tbody>
-                                                        {Object.keys(ofertasAgrupadas).sort((a,b) => b.localeCompare(a)).map(year => (
+                                                        {Object.keys(ofertasFiltradas).sort((a,b) => b.localeCompare(a)).map(year => (
                                                             <React.Fragment key={year}>
-                                                                {Object.keys(ofertasAgrupadas[year]).sort().map(sector => {
+                                                                {Object.keys(ofertasFiltradas[year]).sort().map(sector => {
                                                                     const groupKey = `${year}-${sector}`;
                                                                     const isExpanded = expandedOfertas[groupKey] ?? true;
+                                                                    const sectorItems = ofertasFiltradas[year][sector];
                                                                     return (
                                                                         <React.Fragment key={groupKey}>
                                                                             <tr onClick={() => setExpandedOfertas(prev => ({ ...prev, [groupKey]: !prev[groupKey] }))} className="bg-blue-50 cursor-pointer hover:bg-blue-100 transition-colors">
@@ -953,13 +1332,13 @@
                                                                                     <div className="flex items-center justify-between gap-4">
                                                                                         <div>{year} / {sector}</div>
                                                                                         <div className="flex items-center gap-3 text-xs text-blue-700 font-semibold">
-                                                                                            <span>{ofertasAgrupadas[year][sector].length} proyecto{ofertasAgrupadas[year][sector].length === 1 ? '' : 's'}</span>
+                                                                                            <span>{sectorItems.length} proyecto{sectorItems.length === 1 ? '' : 's'}</span>
                                                                                             <i className={`fa-solid ${isExpanded ? 'fa-chevron-up' : 'fa-chevron-down'}`}></i>
                                                                                         </div>
                                                                                     </div>
                                                                                 </td>
                                                                             </tr>
-                                                                            {isExpanded && ofertasAgrupadas[year][sector].map(db => (
+                                                                            {isExpanded && sectorItems.map(db => (
                                                                                 <tr key={db.id} className="border-b border-gray-50 hover:bg-blue-50/50 transition-colors group">
                                                                                     <td className="p-4">
                                                                                         <div className="font-bold text-blue-700">{db.info.siglas}-{db.info.idEstado}</div>
@@ -987,23 +1366,35 @@
                                                 </table>
                                             </div>
                                         </div>
+                                    )}
+
+                                    {coursesSection === 'personal' && (
                                         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
-                                            <div className="p-5 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+                                            <div className="p-5 border-b border-gray-100 bg-gray-50 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                                                 <div className="flex items-center gap-3">
                                                     <i className="fa-solid fa-address-book text-xl text-indigo-500"></i>
                                                     <h2 className="text-lg font-bold text-gray-800">Directorio Global de Personal</h2>
                                                 </div>
-                                                <button onClick={handleCrearPersonalAdmin} className="bg-indigo-100 text-indigo-700 hover:bg-indigo-600 hover:text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 shadow-sm">
-                                                    <i className="fa-solid fa-plus"></i> Nuevo Registro
-                                                </button>
+                                                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                                                    <input
+                                                        type="search"
+                                                        className="w-full sm:w-80 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                                                        placeholder="Buscar personal..."
+                                                        value={coursesPersonalFilter}
+                                                        onChange={e => setCoursesPersonalFilter(e.target.value)}
+                                                    />
+                                                    <button onClick={handleCrearPersonalAdmin} className="rounded-lg bg-indigo-100 px-3 py-1.5 text-xs font-bold text-indigo-700 transition-colors hover:bg-indigo-600 hover:text-white flex items-center gap-1 shadow-sm">
+                                                        <i className="fa-solid fa-plus"></i> Nuevo Registro
+                                                    </button>
+                                                </div>
                                             </div>
-                                            <div className="p-0 flex-1 overflow-auto max-h-[400px]">
+                                            <div className="p-0 flex-1 overflow-auto max-h-[600px]">
                                                 <table className="w-full text-left text-sm whitespace-nowrap">
                                                     <thead className="bg-white sticky top-0 shadow-sm z-10">
                                                         <tr><th className="p-4 text-gray-500 font-semibold">Nombre Completo</th><th className="p-4 text-gray-500 font-semibold">Contraseña Única</th><th className="p-4 text-gray-500 font-semibold text-center">Gestión</th></tr>
                                                     </thead>
                                                     <tbody>
-                                                        {personalGlobal.map(a => (
+                                                        {personalFiltrado.map(a => (
                                                             <tr key={a.id} className="border-b border-gray-50 hover:bg-indigo-50/50 transition-colors">
                                                                 <td className="p-4 font-semibold text-gray-800">{a.nombre}</td>
                                                                 <td className="p-4 font-mono text-xs text-gray-500 bg-gray-50/50 px-2 rounded">{a.password}</td>
@@ -1020,7 +1411,7 @@
                                                 </table>
                                             </div>
                                         </div>
-                                    </div>
+                                    )}
                                 </>
                             )}
 
@@ -1078,21 +1469,262 @@
 
                             {adminSection === 'control' && (
                                 <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
-                                    <div className="flex items-center gap-4 mb-5">
-                                        <i className="fa-solid fa-hammer-wrench text-3xl text-yellow-600"></i>
-                                        <div>
-                                            <h2 className="text-xl font-bold text-gray-900">Configuración Control</h2>
-                                            <p className="text-gray-600">Esta sección está en construcción. Pronto aquí se integrarán controles y paneles adicionales.</p>
+                                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+                                        <div className="flex items-center gap-4">
+                                            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-50 text-cyan-700"><i className="fa-solid fa-sliders text-xl"></i></div>
+                                            <div>
+                                                <h2 className="text-xl font-bold text-gray-900">Configuración Control</h2>
+                                                <p className="text-gray-600">Administra los recursos que utilizarán las sesiones de cada grupo.</p>
+                                            </div>
+                                        </div>
+                                        <button onClick={() => setAdminSection('menu')} className="self-start md:self-auto bg-gray-100 text-gray-700 px-4 py-2 rounded-xl hover:bg-gray-200 transition-colors">Volver al menú</button>
+                                    </div>
+                                    <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-4">
+                                        <button onClick={() => setControlSection('zoom')} className={`rounded-2xl border px-5 py-4 text-left transition ${controlSection === 'zoom' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50/50'}`}>
+                                            <div className="flex items-center gap-3 mb-2 text-blue-700"><i className="fa-solid fa-video text-lg"></i><span className="font-bold">Cuentas Zoom</span></div>
+                                            <p className="text-sm text-slate-500">Nueva cuenta y catálogo.</p>
+                                        </button>
+                                        <button onClick={() => setControlSection('sessions')} className={`rounded-2xl border px-5 py-4 text-left transition ${controlSection === 'sessions' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50/50'}`}>
+                                            <div className="flex items-center gap-3 mb-2 text-blue-700"><i className="fa-solid fa-calendar-days text-lg"></i><span className="font-bold">Control de Sesiones</span></div>
+                                            <p className="text-sm text-slate-500">Gestiona horarios y enlaces.</p>
+                                        </button>
+                                        <button onClick={() => setControlSection('attendances')} className={`rounded-2xl border px-5 py-4 text-left transition ${controlSection === 'attendances' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50/50'}`}>
+                                            <div className="flex items-center gap-3 mb-2 text-blue-700"><i className="fa-solid fa-clipboard-check text-lg"></i><span className="font-bold">Control de Asistencias</span></div>
+                                            <p className="text-sm text-slate-500">Formularios y respuestas.</p>
+                                        </button>
+                                        <button onClick={() => setControlSection('evidences')} className={`rounded-2xl border px-5 py-4 text-left transition ${controlSection === 'evidences' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50/50'}`}>
+                                            <div className="flex items-center gap-3 mb-2 text-blue-700"><i className="fa-solid fa-folder-open text-lg"></i><span className="font-bold">Control de Evidencias</span></div>
+                                            <p className="text-sm text-slate-500">Carpetas por grupo.</p>
+                                        </button>
+                                    </div>
+
+                                    {controlSection === 'zoom' && (
+                                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                            <div className="rounded-2xl border border-cyan-100 bg-cyan-50/60 p-5">
+                                                <h3 className="mb-1 font-bold text-cyan-950">Nueva cuenta Zoom</h3>
+                                                <p className="mb-5 text-sm text-cyan-800/70">Registra el usuario que aparecerá después en los selectores de sesiones.</p>
+                                                <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-gray-600">Usuario Zoom</label>
+                                                <input type="text" className="mb-4 w-full rounded-xl border border-cyan-200 bg-white p-3 text-sm outline-none focus:border-cyan-500" value={newZoomUser} onChange={e => setNewZoomUser(e.target.value)} placeholder="usuario01@escueladeposgrados.mx" />
+                                                <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-gray-600">Contraseña Zoom</label>
+                                                <input type="text" className="mb-4 w-full rounded-xl border border-cyan-200 bg-white p-3 text-sm outline-none focus:border-cyan-500" value={newZoomPassword} onChange={e => setNewZoomPassword(e.target.value)} placeholder="usuario01Escuela01" />
+                                                <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-gray-600">Notas <span className="font-normal normal-case">(opcional)</span></label>
+                                                <textarea rows="2" className="mb-4 w-full rounded-xl border border-cyan-200 bg-white p-3 text-sm outline-none focus:border-cyan-500" value={newZoomNotes} onChange={e => setNewZoomNotes(e.target.value)} placeholder="Información adicional"></textarea>
+                                                <button onClick={agregarCuentaZoom} className="w-full rounded-xl bg-cyan-700 py-3 font-bold text-white shadow-lg shadow-cyan-700/20 transition-colors hover:bg-cyan-800"><i className="fa-solid fa-plus mr-2"></i>Agregar cuenta</button>
+                                            </div>
+                                            <div className="lg:col-span-2 overflow-hidden rounded-2xl border border-gray-200">
+                                                <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-5 py-4">
+                                                    <div><h3 className="font-bold text-gray-800">Catálogo de cuentas</h3><p className="text-xs text-gray-500">{zoomAccountsVisible.length} de {zoomAccounts.length} cuenta{zoomAccounts.length === 1 ? '' : 's'}</p></div>
+                                                    <input type="search" className="w-48 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs outline-none focus:border-cyan-500" value={controlTableFilters.zoom} onChange={e => setControlTableFilters(prev => ({ ...prev, zoom: e.target.value }))} placeholder="Buscar cuenta..." aria-label="Buscar cuenta Zoom" />
+                                                    <i className="fa-solid fa-key text-gray-400"></i>
+                                                </div>
+                                                <div className="overflow-x-auto">
+                                                    <table className="w-full text-left text-sm">
+                                                        <thead className="bg-white text-xs uppercase tracking-wide text-gray-500"><tr><th className="cursor-pointer p-4" onClick={() => cambiarOrdenControl('zoom', 'usuario')}>Usuario Zoom{indicadorOrdenControl('zoom', 'usuario')}</th><th className="p-4">Contraseña</th><th className="cursor-pointer p-4" onClick={() => cambiarOrdenControl('zoom', 'estado')}>Estado{indicadorOrdenControl('zoom', 'estado')}</th><th className="p-4 text-right">Acciones</th></tr></thead>
+                                                        <tbody>
+                                                            {zoomAccountsVisible.map(account => <tr key={account.id} className="border-t border-gray-100 hover:bg-cyan-50/30">
+                                                                <td className="p-4 font-semibold text-gray-800">{account.usuario}<div className="text-xs font-normal text-gray-400">{account.observaciones || 'Sin notas'}</div></td>
+                                                                <td className="p-4"><input type="text" className="w-40 rounded-lg border border-gray-200 px-2 py-1.5 font-mono text-xs outline-none focus:border-cyan-500" value={account.password} onChange={e => actualizarCuentaZoom(account.id, { password: e.target.value })} /></td>
+                                                                <td className="p-4"><select className="rounded-lg border border-gray-200 px-2 py-1.5 text-xs outline-none focus:border-cyan-500" value={account.estado} onChange={e => actualizarCuentaZoom(account.id, { estado: e.target.value })}><option value="disponible">Disponible</option><option value="asignada">Asignada</option><option value="inactiva">Inactiva</option></select></td>
+                                                                <td className="p-4 text-right"><button onClick={() => eliminarCuentaZoom(account.id)} className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-red-100 hover:text-red-600 ml-auto" title="Eliminar cuenta"><i className="fa-solid fa-trash"></i></button></td>
+                                                            </tr>)}
+                                                            {zoomAccountsVisible.length === 0 && <tr><td colSpan="4" className="p-10 text-center text-gray-400"><i className="fa-solid fa-video-slash mb-3 block text-2xl"></i>{zoomAccounts.length === 0 ? 'Aún no hay cuentas Zoom registradas.' : 'No hay cuentas que coincidan con la búsqueda.'}</td></tr>}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {controlSection === 'sessions' && (
+                                        <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-5">
+                                            <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                                                <div><h3 className="font-bold text-slate-900"><i className="fa-solid fa-calendar-days mr-2 text-cyan-600"></i>Control de Sesiones</h3><p className="text-sm text-slate-500">Cada grupo conserva sus propios enlaces y horarios de Zoom.</p></div>
+                                                <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-500 shadow-sm">{getControlSessions().length} {getControlSessions().length === 1 ? 'sesión' : 'sesiones'}</span>
+                                            </div>
+                                            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+                                                <select className="rounded-xl border border-slate-200 bg-white p-3 text-sm outline-none focus:border-cyan-500" value={newSessionDbId} onChange={e => { const db = basesDeDatos.find(item => item.id === e.target.value); setNewSessionDbId(e.target.value); setNewSessionGroupId(''); setNewSessionTotal(db?.info?.numSesiones || ''); }}><option value="">Seleccionar curso</option>{basesDeDatos.map(db => <option key={db.id} value={db.id}>{db.info.siglas}-{db.info.idEstado}-{db.info.anio}</option>)}</select>
+                                                <select className="rounded-xl border border-slate-200 bg-white p-3 text-sm outline-none focus:border-cyan-500" value={newSessionGroupId} onChange={e => setNewSessionGroupId(e.target.value)}><option value="">Seleccionar grupo</option>{getSessionGroups().map(group => <option key={group.id} value={group.id}>{group.nombre} · {group.asesor}</option>)}</select>
+                                                <select className="rounded-xl border border-slate-200 bg-white p-3 text-sm outline-none focus:border-cyan-500" value={newSessionZoomId} onChange={e => setNewSessionZoomId(e.target.value)}><option value="">Cuenta Zoom</option>{zoomAccounts.filter(account => account.estado !== 'inactiva').map(account => <option key={account.id} value={account.id}>{account.usuario}</option>)}</select>
+                                                <input type="number" min="1" className="rounded-xl border border-slate-200 bg-white p-3 text-sm outline-none focus:border-cyan-500" value={newSessionNumber} onChange={e => setNewSessionNumber(e.target.value)} placeholder="Número de sesión" />
+                                                <input type="number" min="1" className="rounded-xl border border-cyan-200 bg-cyan-50 p-3 text-sm font-semibold outline-none focus:border-cyan-500" value={newSessionTotal} onChange={e => setNewSessionTotal(e.target.value)} placeholder="Total de sesiones" aria-label="Total de sesiones a generar" />
+                                                <input type="text" className="rounded-xl border border-slate-200 bg-white p-3 text-sm uppercase outline-none focus:border-cyan-500" value={newSessionDay} onChange={e => setNewSessionDay(e.target.value)} placeholder="Día: MARTES" />
+                                                <input type="text" className="rounded-xl border border-slate-200 bg-white p-3 text-sm uppercase outline-none focus:border-cyan-500" value={newSessionTime} onChange={e => setNewSessionTime(e.target.value)} placeholder="Horario: 05:00 PM" />
+                                                <input type="text" className="rounded-xl border border-slate-200 bg-white p-3 text-sm outline-none focus:border-cyan-500 md:col-span-2" value={newSessionInvite} onChange={e => setNewSessionInvite(e.target.value)} placeholder="Pega aquí la invitación completa de Zoom (opcional)" />
+                                            </div>
+                                            <div className="mt-4 flex flex-wrap gap-3"><button onClick={agregarSesionControl} className="rounded-xl bg-slate-900 px-5 py-3 font-bold text-white transition-colors hover:bg-cyan-700"><i className="fa-solid fa-plus mr-2"></i>Registrar sesión</button><button onClick={generarSesionesControl} className="rounded-xl bg-cyan-700 px-5 py-3 font-bold text-white transition-colors hover:bg-cyan-800"><i className="fa-solid fa-wand-magic-sparkles mr-2"></i>Generar sesiones faltantes</button></div>
+                                            <div className="grid gap-3 md:grid-cols-4">
+                                                <select className="rounded-xl border border-slate-200 bg-white p-3 text-sm outline-none focus:border-cyan-500" value={controlSessionFilters.year} onChange={e => setControlSessionFilters(prev => ({ ...prev, year: e.target.value }))}>
+                                                    <option value="">Todos los años</option>
+                                                    {controlSessionYearOptions.map(year => <option key={year} value={year}>{year}</option>)}
+                                                </select>
+                                                <select className="rounded-xl border border-slate-200 bg-white p-3 text-sm outline-none focus:border-cyan-500" value={controlSessionFilters.estado} onChange={e => setControlSessionFilters(prev => ({ ...prev, estado: e.target.value }))}>
+                                                    <option value="">Todos los estados</option>
+                                                    {controlSessionEstadoOptions.map(estado => <option key={estado} value={estado}>{estado}</option>)}
+                                                </select>
+                                                <select className="rounded-xl border border-slate-200 bg-white p-3 text-sm outline-none focus:border-cyan-500" value={controlSessionFilters.curso} onChange={e => setControlSessionFilters(prev => ({ ...prev, curso: e.target.value }))}>
+                                                    <option value="">Todos los cursos</option>
+                                                    {controlSessionCursoOptions.map(curso => <option key={curso} value={curso}>{curso}</option>)}
+                                                </select>
+                                                <select className="rounded-xl border border-slate-200 bg-white p-3 text-sm outline-none focus:border-cyan-500" value={controlSessionFilters.grupo} onChange={e => setControlSessionFilters(prev => ({ ...prev, grupo: e.target.value }))}>
+                                                    <option value="">Todos los grupos</option>
+                                                    {controlSessionGroupOptions.map(group => <option key={group.id} value={group.id}>{group.nombre}{group.asesor ? ` · ${group.asesor}` : ''}</option>)}
+                                                </select>
+                                            </div>
+                                            <input type="search" className="mt-5 w-full rounded-xl border border-slate-200 bg-white p-3 text-sm outline-none focus:border-cyan-500" value={controlTableFilters.sessions} onChange={e => setControlTableFilters(prev => ({ ...prev, sessions: e.target.value }))} placeholder="Buscar por curso, grupo, asesor, día u horario..." aria-label="Buscar sesiones" />
+                                            <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+                                                <table className="w-full min-w-[850px] text-left text-sm"><thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="cursor-pointer p-4" onClick={() => cambiarOrdenControl('sessions', 'curso')}>Curso / grupo{indicadorOrdenControl('sessions', 'curso')}</th><th className="cursor-pointer p-4" onClick={() => cambiarOrdenControl('sessions', 'grupo')}>Asesor{indicadorOrdenControl('sessions', 'grupo')}</th><th className="cursor-pointer p-4" onClick={() => cambiarOrdenControl('sessions', 'numero')}>Sesión{indicadorOrdenControl('sessions', 'numero')}</th><th className="cursor-pointer p-4" onClick={() => cambiarOrdenControl('sessions', 'dia')}>Día / horario{indicadorOrdenControl('sessions', 'dia')}</th><th className="p-4">Usuario Zoom</th><th className="p-4"></th></tr></thead><tbody>
+                                                {controlSessionsVisible.length > 0 ? controlSessionsVisible.map(({ db, ...session }) => {
+                                                    const grupo = db.grupos.find(item => item.id === session.grupoId);
+                                                    const account = zoomAccounts.find(item => item.id === session.zoomAccountId);
+                                                    const isExpanded = expandedSessionIds.includes(session.id);
+                                                    return <>
+                                                        <tr key={session.id} className="border-t border-slate-100 hover:bg-cyan-50/30">
+                                                            <td className="p-4 font-semibold text-slate-800">
+                                                                {db.info.siglas}-{db.info.idEstado}-{db.info.anio}
+                                                                <div className="text-xs font-normal text-slate-400">{grupo?.nombre || 'Grupo no disponible'}</div>
+                                                            </td>
+                                                            <td className="p-4 text-slate-600">{grupo?.asesor || '-'}</td>
+                                                            <td className="p-4 font-bold text-cyan-700">Sesión {session.numero} · {session.dia} {session.horario}</td>
+                                                            <td className="p-4 text-slate-600">&nbsp;</td>
+                                                            <td className="p-4 font-mono text-xs text-slate-600">{account?.usuario || 'Cuenta eliminada'}</td>
+                                                            <td className="p-4 text-right">
+                                                                <div className="flex justify-end gap-2 items-center">
+                                                                    <button onClick={(e) => { e.stopPropagation(); abrirEdicionSesion(db.id, session); }} className="flex h-8 w-8 items-center justify-center rounded-lg text-cyan-600 transition-colors hover:bg-cyan-100" title="Editar sesión"><i className="fa-solid fa-pen"></i></button>
+                                                                    <button onClick={(e) => { e.stopPropagation(); eliminarSesionControl(db.id, session.id); }} className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-red-100 hover:text-red-600" title="Eliminar sesión"><i className="fa-solid fa-trash"></i></button>
+                                                                    <button onClick={(e) => { e.stopPropagation(); setExpandedSessionIds(prev => prev.includes(session.id) ? prev.filter(x => x !== session.id) : [...prev, session.id]); }} className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100" title="Mostrar detalles">{isExpanded ? <i className="fa-solid fa-chevron-up"></i> : <i className="fa-solid fa-chevron-down"></i>}</button>
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                        <tr className={`${isExpanded ? '' : 'hidden'}`}>
+                                                            <td colSpan="6" className="p-4 bg-slate-50 text-sm text-slate-700 border-t">
+                                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                                                    <div>
+                                                                        <div className="font-semibold">Invitación</div>
+                                                                        <div className="text-xs font-mono text-slate-600 break-words">{session.invitacion || <span className="text-amber-600">Sin invitación registrada</span>}</div>
+                                                                    </div>
+                                                                    <div>
+                                                                        <div className="font-semibold">Horario</div>
+                                                                        <div className="text-sm">{session.dia} · {session.horario}</div>
+                                                                    </div>
+                                                                    <div className="text-right">
+                                                                        <div className="font-semibold">Cuenta Zoom</div>
+                                                                        <div className="text-sm">{account?.usuario || 'Cuenta eliminada'}</div>
+                                                                        <div className="mt-2 flex justify-end gap-2">
+                                                                            <button onClick={() => abrirEdicionSesion(db.id, session)} className="rounded-xl bg-cyan-700 px-3 py-1 text-white text-sm">Editar</button>
+                                                                            <button onClick={() => eliminarSesionControl(db.id, session.id)} className="rounded-xl bg-red-100 px-3 py-1 text-red-600 text-sm">Eliminar</button>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    </>;
+                                                }) : (
+                                                    <tr>
+                                                        <td colSpan="6" className="p-10 text-center text-slate-400">
+                                                            <i className="fa-solid fa-calendar-xmark mb-3 block text-2xl"></i>
+                                                            {getControlSessions().length === 0 ? 'Aún no hay sesiones registradas.' : 'No hay sesiones que coincidan con la búsqueda.'}
+                                                        </td>
+                                                    </tr>
+                                                )}
+                                            </tbody></table>
                                         </div>
                                     </div>
-                                    <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center text-gray-500">
-                                        <p className="text-lg font-semibold mb-2">Próximamente</p>
-                                        <p>Estamos preparando esta área para funcionalidades de control avanzadas.</p>
-                                        <button onClick={() => setAdminSection('menu')} className="mt-6 px-5 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors">Regresar al menú</button>
-                                    </div>
+                                    )}
+
+                                    {controlSection === 'attendances' && (
+                                        <div className="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-5">
+                                            <div className="mb-5"><h3 className="font-bold text-emerald-950"><i className="fa-solid fa-clipboard-check mr-2 text-emerald-600"></i>Control de Asistencias</h3><p className="text-sm text-emerald-800/70">Un formulario y una hoja de respuestas por curso y sesión.</p></div>
+                                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                                <select className="rounded-xl border border-emerald-200 bg-white p-3 text-sm outline-none focus:border-emerald-500 sm:col-span-2" value={newAttendanceDbId} onChange={e => { const db = basesDeDatos.find(item => item.id === e.target.value); setNewAttendanceDbId(e.target.value); setNewAttendanceTotal(db?.info?.numSesiones || ''); }}><option value="">Seleccionar curso</option>{basesDeDatos.map(db => <option key={db.id} value={db.id}>{db.info.siglas}-{db.info.idEstado}-{db.info.anio}</option>)}</select>
+                                                <input type="number" min="1" className="rounded-xl border border-emerald-200 bg-white p-3 text-sm outline-none focus:border-emerald-500" value={newAttendanceNumber} onChange={e => setNewAttendanceNumber(e.target.value)} placeholder="Sesión" />
+                                                <input type="number" min="1" className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold outline-none focus:border-emerald-500" value={newAttendanceTotal} onChange={e => setNewAttendanceTotal(e.target.value)} placeholder="Total de sesiones" aria-label="Total de sesiones de asistencia" />
+                                                <input type="url" className="rounded-xl border border-emerald-200 bg-white p-3 text-sm outline-none focus:border-emerald-500" value={newAttendanceFormUrl} onChange={e => setNewAttendanceFormUrl(e.target.value)} placeholder="Enlace del formulario" />
+                                                <input type="url" className="rounded-xl border border-emerald-200 bg-white p-3 text-sm outline-none focus:border-emerald-500 sm:col-span-2" value={newAttendanceResponsesUrl} onChange={e => setNewAttendanceResponsesUrl(e.target.value)} placeholder="Enlace de respuestas" />
+                                            </div>
+                                            <div className="mt-4 flex flex-wrap gap-3"><button onClick={agregarAsistenciaControl} className="rounded-xl bg-emerald-700 px-5 py-3 font-bold text-white transition-colors hover:bg-emerald-800"><i className="fa-solid fa-plus mr-2"></i>Guardar asistencia</button><button onClick={generarAsistenciasControl} className="rounded-xl bg-teal-700 px-5 py-3 font-bold text-white transition-colors hover:bg-teal-800"><i className="fa-solid fa-wand-magic-sparkles mr-2"></i>Generar asistencias faltantes</button></div>
+                                            <div className="grid gap-3 md:grid-cols-3 mt-5">
+                                                <select className="rounded-xl border border-emerald-200 bg-white p-3 text-sm outline-none focus:border-emerald-500" value={controlAttendanceFilters.year} onChange={e => setControlAttendanceFilters(prev => ({ ...prev, year: e.target.value }))}>
+                                                    <option value="">Todos los años</option>
+                                                    {controlAttendanceYearOptions.map(year => <option key={year} value={year}>{year}</option>)}
+                                                </select>
+                                                <select className="rounded-xl border border-emerald-200 bg-white p-3 text-sm outline-none focus:border-emerald-500" value={controlAttendanceFilters.estado} onChange={e => setControlAttendanceFilters(prev => ({ ...prev, estado: e.target.value }))}>
+                                                    <option value="">Todos los estados</option>
+                                                    {controlAttendanceEstadoOptions.map(estado => <option key={estado} value={estado}>{estado}</option>)}
+                                                </select>
+                                                <select className="rounded-xl border border-emerald-200 bg-white p-3 text-sm outline-none focus:border-emerald-500" value={controlAttendanceFilters.curso} onChange={e => setControlAttendanceFilters(prev => ({ ...prev, curso: e.target.value }))}>
+                                                    <option value="">Todos los cursos</option>
+                                                    {controlAttendanceCursoOptions.map(curso => <option key={curso} value={curso}>{curso}</option>)}
+                                                </select>
+                                            </div>
+                                            <input type="search" className="mt-5 w-full rounded-xl border border-emerald-200 bg-white p-3 text-sm outline-none focus:border-emerald-500" value={controlTableFilters.attendances} onChange={e => setControlTableFilters(prev => ({ ...prev, attendances: e.target.value }))} placeholder="Buscar por curso o sesión..." aria-label="Buscar asistencias" />
+                                            <div className="mt-5 overflow-x-auto rounded-2xl border border-emerald-100 bg-white"><table className="w-full min-w-[560px] text-left text-sm"><thead className="bg-emerald-50 text-xs uppercase tracking-wide text-emerald-800"><tr><th className="cursor-pointer p-3" onClick={() => cambiarOrdenControl('attendances', 'curso')}>Curso{indicadorOrdenControl('attendances', 'curso')}</th><th className="cursor-pointer p-3" onClick={() => cambiarOrdenControl('attendances', 'numeroSesion')}>Sesión{indicadorOrdenControl('attendances', 'numeroSesion')}</th><th className="p-3">Enlaces</th><th className="p-3"></th></tr></thead><tbody>{controlAttendancesVisible.map(row => <tr key={row.id} className="border-t border-emerald-50"><td className="p-3 font-semibold">{row.db.info.siglas}-{row.db.info.idEstado}</td><td className="p-3">Sesión {row.numeroSesion}</td><td className="p-3">{row.formularioUrl ? <a href={row.formularioUrl} target="_blank" rel="noreferrer" className="mr-3 font-bold text-emerald-700 hover:underline">Formulario</a> : <span className="mr-3 text-xs text-amber-600">Formulario pendiente</span>}{row.respuestasUrl ? <a href={row.respuestasUrl} target="_blank" rel="noreferrer" className="font-bold text-emerald-700 hover:underline">Respuestas</a> : <span className="text-xs text-amber-600">Respuestas pendientes</span>}</td><td className="p-3 text-right"><div className="flex justify-end gap-3"><button onClick={() => abrirEdicionAsistencia(row.db.id, row)} className="text-emerald-600 hover:text-emerald-800" title="Editar asistencia"><i className="fa-solid fa-pen"></i></button><button onClick={() => eliminarControlRegistro(row.db.id, 'controlAsistencias', row.id)} className="text-gray-400 hover:text-red-600" title="Eliminar asistencia"><i className="fa-solid fa-trash"></i></button></div></td></tr>)}{controlAttendancesVisible.length === 0 && <tr><td colSpan="4" className="p-7 text-center text-gray-400">{basesDeDatos.every(db => !(db.controlAsistencias || []).length) ? 'Aún no hay asistencias registradas.' : 'No hay asistencias que coincidan con la búsqueda.'}</td></tr>}</tbody></table></div>
+                                        </div>
+                                    )}
+
+                                    {controlSection === 'evidences' && (
+                                        <div className="rounded-2xl border border-amber-100 bg-amber-50/50 p-5">
+                                            <div className="mb-5"><h3 className="font-bold text-amber-950"><i className="fa-solid fa-folder-open mr-2 text-amber-600"></i>Control de Evidencias</h3><p className="text-sm text-amber-800/70">Una carpeta de Drive para cada grupo.</p></div>
+                                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                                <select className="rounded-xl border border-amber-200 bg-white p-3 text-sm outline-none focus:border-amber-500 sm:col-span-2" value={newEvidenceDbId} onChange={e => { setNewEvidenceDbId(e.target.value); setNewEvidenceGroupId(''); }}><option value="">Seleccionar curso</option>{basesDeDatos.map(db => <option key={db.id} value={db.id}>{db.info.siglas}-{db.info.idEstado}-{db.info.anio}</option>)}</select>
+                                                <select className="rounded-xl border border-amber-200 bg-white p-3 text-sm outline-none focus:border-amber-500 sm:col-span-2" value={newEvidenceGroupId} onChange={e => setNewEvidenceGroupId(e.target.value)}><option value="">Seleccionar grupo</option>{(basesDeDatos.find(db => db.id === newEvidenceDbId)?.grupos || []).map(group => <option key={group.id} value={group.id}>{group.nombre} · {group.asesor}</option>)}</select>
+                                                <input type="url" className="rounded-xl border border-amber-200 bg-white p-3 text-sm outline-none focus:border-amber-500 sm:col-span-2" value={newEvidenceFolderUrl} onChange={e => setNewEvidenceFolderUrl(e.target.value)} placeholder="Enlace de carpeta de Drive" />
+                                            </div>
+                                            <button onClick={agregarEvidenciaControl} className="mt-4 rounded-xl bg-amber-600 px-5 py-3 font-bold text-white transition-colors hover:bg-amber-700"><i className="fa-solid fa-plus mr-2"></i>Guardar evidencia</button>
+                                            <div className="grid gap-3 md:grid-cols-4 mt-5">
+                                                <select className="rounded-xl border border-amber-200 bg-white p-3 text-sm outline-none focus:border-amber-500" value={controlEvidenceFilters.year} onChange={e => setControlEvidenceFilters(prev => ({ ...prev, year: e.target.value }))}>
+                                                    <option value="">Todos los años</option>
+                                                    {controlEvidenceYearOptions.map(year => <option key={year} value={year}>{year}</option>)}
+                                                </select>
+                                                <select className="rounded-xl border border-amber-200 bg-white p-3 text-sm outline-none focus:border-amber-500" value={controlEvidenceFilters.estado} onChange={e => setControlEvidenceFilters(prev => ({ ...prev, estado: e.target.value }))}>
+                                                    <option value="">Todos los estados</option>
+                                                    {controlEvidenceEstadoOptions.map(estado => <option key={estado} value={estado}>{estado}</option>)}
+                                                </select>
+                                                <select className="rounded-xl border border-amber-200 bg-white p-3 text-sm outline-none focus:border-amber-500" value={controlEvidenceFilters.curso} onChange={e => setControlEvidenceFilters(prev => ({ ...prev, curso: e.target.value }))}>
+                                                    <option value="">Todos los cursos</option>
+                                                    {controlEvidenceCursoOptions.map(curso => <option key={curso} value={curso}>{curso}</option>)}
+                                                </select>
+                                                <select className="rounded-xl border border-amber-200 bg-white p-3 text-sm outline-none focus:border-amber-500" value={controlEvidenceFilters.grupo} onChange={e => setControlEvidenceFilters(prev => ({ ...prev, grupo: e.target.value }))}>
+                                                    <option value="">Todos los grupos</option>
+                                                    {controlEvidenceGroupOptions.map(group => <option key={group.id} value={group.id}>{group.nombre}{group.asesor ? ` · ${group.asesor}` : ''}</option>)}
+                                                </select>
+                                            </div>
+                                            <input type="search" className="mt-5 w-full rounded-xl border border-amber-200 bg-white p-3 text-sm outline-none focus:border-amber-500" value={controlTableFilters.evidences} onChange={e => setControlTableFilters(prev => ({ ...prev, evidences: e.target.value }))} placeholder="Buscar por curso, grupo o asesor..." aria-label="Buscar evidencias" />
+                                            <div className="mt-5 overflow-x-auto rounded-2xl border border-amber-100 bg-white"><table className="w-full min-w-[560px] text-left text-sm"><thead className="bg-amber-50 text-xs uppercase tracking-wide text-amber-800"><tr><th className="cursor-pointer p-3" onClick={() => cambiarOrdenControl('evidences', 'curso')}>Curso{indicadorOrdenControl('evidences', 'curso')}</th><th className="cursor-pointer p-3" onClick={() => cambiarOrdenControl('evidences', 'grupo')}>Grupo / asesor{indicadorOrdenControl('evidences', 'grupo')}</th><th className="p-3">Carpeta</th><th className="p-3"></th></tr></thead><tbody>{controlEvidencesVisible.map(row => { const group = row.db.grupos.find(item => item.id === row.grupoId); return <tr key={row.id} className="border-t border-amber-50"><td className="p-3 font-semibold">{row.db.info.siglas}-{row.db.info.idEstado}</td><td className="p-3">{group?.nombre || '-'}<div className="text-xs text-gray-400">{group?.asesor || '-'}</div></td><td className="p-3"><a href={row.carpetaUrl} target="_blank" rel="noreferrer" className="font-bold text-amber-700 hover:underline">Abrir carpeta</a></td><td className="p-3 text-right"><div className="flex justify-end gap-3"><button onClick={() => abrirEdicionEvidencia(row.db.id, row)} className="text-amber-600 hover:text-amber-800" title="Editar evidencia"><i className="fa-solid fa-pen"></i></button><button onClick={() => eliminarControlRegistro(row.db.id, 'controlEvidencias', row.id)} className="text-gray-400 hover:text-red-600" title="Eliminar evidencia"><i className="fa-solid fa-trash"></i></button></div></td></tr> })}{controlEvidencesVisible.length === 0 && <tr><td colSpan="4" className="p-7 text-center text-gray-400">{basesDeDatos.every(db => !(db.controlEvidencias || []).length) ? 'Aún no hay evidencias registradas.' : 'No hay evidencias que coincidan con la búsqueda.'}</td></tr>}</tbody></table></div>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </main>
+
+                        {editSessionModal.show && (
+                            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-5 backdrop-blur-md" onClick={() => setEditSessionModal(prev => ({ ...prev, show: false }))}>
+                                <div className="w-full max-w-lg overflow-hidden rounded-3xl bg-white shadow-2xl" onClick={e => e.stopPropagation()}>
+                                    <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5"><div><p className="text-xs font-bold uppercase tracking-wider text-cyan-600">Configuración Control</p><h3 className="text-xl font-bold text-slate-900">Editar sesión</h3></div><button onClick={() => setEditSessionModal(prev => ({ ...prev, show: false }))} className="flex h-9 w-9 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="Cerrar edición"><i className="fa-solid fa-xmark"></i></button></div>
+                                    <div className="grid grid-cols-1 gap-4 p-6 sm:grid-cols-2"><div><label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Sesión</label><input type="number" min="1" className="w-full rounded-xl border border-slate-200 p-3 outline-none focus:border-cyan-500" value={editSessionModal.numero} onChange={e => setEditSessionModal(prev => ({ ...prev, numero: e.target.value }))} /></div><div><label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Cuenta Zoom</label><select className="w-full rounded-xl border border-slate-200 bg-white p-3 outline-none focus:border-cyan-500" value={editSessionModal.zoomAccountId} onChange={e => setEditSessionModal(prev => ({ ...prev, zoomAccountId: e.target.value }))}><option value="">Seleccionar cuenta</option>{zoomAccounts.filter(account => account.estado !== 'inactiva').map(account => <option key={account.id} value={account.id}>{account.usuario}</option>)}</select></div><div><label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Día</label><input type="text" className="w-full rounded-xl border border-slate-200 p-3 uppercase outline-none focus:border-cyan-500" value={editSessionModal.dia} onChange={e => setEditSessionModal(prev => ({ ...prev, dia: e.target.value }))} /></div><div><label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Horario</label><input type="text" className="w-full rounded-xl border border-slate-200 p-3 uppercase outline-none focus:border-cyan-500" value={editSessionModal.horario} onChange={e => setEditSessionModal(prev => ({ ...prev, horario: e.target.value }))} /></div><div className="sm:col-span-2"><label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Invitación completa</label><textarea rows="7" className="w-full rounded-xl border border-slate-200 p-3 font-mono text-xs outline-none focus:border-cyan-500" value={editSessionModal.invitacion} onChange={e => setEditSessionModal(prev => ({ ...prev, invitacion: e.target.value }))}></textarea></div></div>
+                                    <div className="flex justify-end gap-3 border-t border-slate-100 bg-slate-50 px-6 py-4"><button onClick={() => setEditSessionModal(prev => ({ ...prev, show: false }))} className="rounded-xl px-5 py-3 font-semibold text-slate-500 hover:bg-slate-200">Cancelar</button><button onClick={guardarEdicionSesion} className="rounded-xl bg-slate-900 px-6 py-3 font-bold text-white hover:bg-cyan-700">Guardar cambios</button></div>
+                                </div>
+                            </div>
+                        )}
+
+                        {editAttendanceModal.show && (
+                            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-5 backdrop-blur-md" onClick={() => setEditAttendanceModal(prev => ({ ...prev, show: false }))}>
+                                <div className="w-full max-w-lg overflow-hidden rounded-3xl bg-white shadow-2xl" onClick={e => e.stopPropagation()}>
+                                    <div className="flex items-center justify-between border-b border-emerald-100 px-6 py-5"><div><p className="text-xs font-bold uppercase tracking-wider text-emerald-600">Configuración Control</p><h3 className="text-xl font-bold text-slate-900">Editar asistencia</h3></div><button onClick={() => setEditAttendanceModal(prev => ({ ...prev, show: false }))} className="flex h-9 w-9 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="Cerrar edición"><i className="fa-solid fa-xmark"></i></button></div>
+                                    <div className="grid grid-cols-1 gap-4 p-6"><div><label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Sesión</label><input type="number" min="1" className="w-full rounded-xl border border-slate-200 p-3 outline-none focus:border-emerald-500" value={editAttendanceModal.numeroSesion} onChange={e => setEditAttendanceModal(prev => ({ ...prev, numeroSesion: e.target.value }))} /></div><div><label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Enlace del formulario</label><input type="url" className="w-full rounded-xl border border-slate-200 p-3 outline-none focus:border-emerald-500" value={editAttendanceModal.formularioUrl} onChange={e => setEditAttendanceModal(prev => ({ ...prev, formularioUrl: e.target.value }))} /></div><div><label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Enlace de respuestas</label><input type="url" className="w-full rounded-xl border border-slate-200 p-3 outline-none focus:border-emerald-500" value={editAttendanceModal.respuestasUrl} onChange={e => setEditAttendanceModal(prev => ({ ...prev, respuestasUrl: e.target.value }))} /></div></div>
+                                    <div className="flex justify-end gap-3 border-t border-slate-100 bg-slate-50 px-6 py-4"><button onClick={() => setEditAttendanceModal(prev => ({ ...prev, show: false }))} className="rounded-xl px-5 py-3 font-semibold text-slate-500 hover:bg-slate-200">Cancelar</button><button onClick={guardarEdicionAsistencia} className="rounded-xl bg-emerald-700 px-6 py-3 font-bold text-white hover:bg-emerald-800">Guardar cambios</button></div>
+                                </div>
+                            </div>
+                        )}
+
+                        {editEvidenceModal.show && (
+                            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-5 backdrop-blur-md" onClick={() => setEditEvidenceModal(prev => ({ ...prev, show: false }))}>
+                                <div className="w-full max-w-lg overflow-hidden rounded-3xl bg-white shadow-2xl" onClick={e => e.stopPropagation()}>
+                                    <div className="flex items-center justify-between border-b border-amber-100 px-6 py-5"><div><p className="text-xs font-bold uppercase tracking-wider text-amber-600">Configuración Control</p><h3 className="text-xl font-bold text-slate-900">Editar evidencia</h3></div><button onClick={() => setEditEvidenceModal(prev => ({ ...prev, show: false }))} className="flex h-9 w-9 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="Cerrar edición"><i className="fa-solid fa-xmark"></i></button></div>
+                                    <div className="p-6"><label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Enlace de carpeta de Drive</label><input type="url" className="w-full rounded-xl border border-slate-200 p-3 outline-none focus:border-amber-500" value={editEvidenceModal.carpetaUrl} onChange={e => setEditEvidenceModal(prev => ({ ...prev, carpetaUrl: e.target.value }))} /></div>
+                                    <div className="flex justify-end gap-3 border-t border-slate-100 bg-slate-50 px-6 py-4"><button onClick={() => setEditEvidenceModal(prev => ({ ...prev, show: false }))} className="rounded-xl px-5 py-3 font-semibold text-slate-500 hover:bg-slate-200">Cancelar</button><button onClick={guardarEdicionEvidencia} className="rounded-xl bg-amber-600 px-6 py-3 font-bold text-white hover:bg-amber-700">Guardar cambios</button></div>
+                                </div>
+                            </div>
+                        )}
 
                         {createPersonalModal.show && (
                             <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -1308,16 +1940,16 @@ María López	Z9y8x7" />
             }
 
             if (appView === 'workspace') {
-                return <Workspace db={dbActiva} appView={appView} setAppView={setAppView} asesoresGlobales={personalGlobal} setAsesoresGlobales={setPersonalGlobal} onUpdate={updateActiveDb} modoPersonal={modoPersonal} />;
+                return <Workspace db={dbActiva} appView={appView} setAppView={setAppView} asesoresGlobales={personalGlobal} setAsesoresGlobales={setPersonalGlobal} zoomAccounts={zoomAccounts} onUpdate={updateActiveDb} modoPersonal={modoPersonal} />;
             }
             
             return null;
         }
 
         // ==========================================
-        // COMPONENTE WORKSPACE (V3.7 LÓGICA DE PERMISOS)
+        // COMPONENTE WORKSPACE (4.0 LÓGICA DE PERMISOS)
         // ==========================================
-        function Workspace({ db, appView, setAppView, asesoresGlobales, setAsesoresGlobales, onUpdate, modoPersonal }) {
+        function Workspace({ db, appView, setAppView, asesoresGlobales, setAsesoresGlobales, zoomAccounts, onUpdate, modoPersonal }) {
             const isPersonal = modoPersonal.activo;
             const isAsesor = isPersonal && modoPersonal.roleInProject === 'asesor';
             const isCoordinador = isPersonal && modoPersonal.roleInProject === 'coordinador';
@@ -1349,6 +1981,7 @@ María López	Z9y8x7" />
                             {isAdmin && <button onClick={()=>setTab('datos')} className={`px-4 py-1.5 rounded-lg transition-colors whitespace-nowrap ${tab==='datos'?'bg-white text-blue-900 shadow':'hover:bg-blue-700 text-blue-100'}`}><i className="fa-solid fa-table"></i> Asignar</button>}
                             
                             <button onClick={()=>setTab('seguimiento')} className={`px-4 py-1.5 rounded-lg transition-colors whitespace-nowrap ${tab==='seguimiento'?'bg-yellow-400 text-blue-900 font-bold shadow':'hover:bg-blue-700 text-blue-100'}`}><i className="fa-solid fa-list-check"></i> Seguimiento</button>
+                            {isPersonal && <button onClick={()=>setTab('control')} className={`px-4 py-1.5 rounded-lg transition-colors whitespace-nowrap ${tab==='control'?'bg-white text-blue-900 shadow':'hover:bg-blue-700 text-blue-100'}`}><i className="fa-solid fa-calendar-days"></i> Control</button>}
                             
                             {(isAdmin || isCoordinador) && <button onClick={()=>setTab('exportar')} className={`px-4 py-1.5 rounded-lg transition-colors whitespace-nowrap ${tab==='exportar'?'bg-white text-blue-900 shadow':'hover:bg-blue-700 text-blue-100'}`}><i className="fa-solid fa-download"></i> Exportar</button>}
                         </div>
@@ -1361,6 +1994,72 @@ María López	Z9y8x7" />
                         {tab === 'datos' && isAdmin && <TabDatos db={db} onUpdate={onUpdate} />}
                         {tab === 'exportar' && (isAdmin || isCoordinador) && <TabExportar db={db} onUpdate={onUpdate} isAdmin={isAdmin} isCoordinador={isCoordinador} />}
                         {tab === 'seguimiento' && <TabSeguimiento db={db} onUpdate={onUpdate} isAsesor={isAsesor} isCoordinador={isCoordinador} isAdmin={isAdmin} asesorGrupoId={modoPersonal.grupoId} />}
+                        {tab === 'control' && isPersonal && <ControlConsulta db={db} zoomAccounts={zoomAccounts} isAsesor={isAsesor} grupoId={modoPersonal.grupoId} />}
+                    </div>
+                </div>
+            );
+        }
+
+        function ControlConsulta({ db, zoomAccounts, isAsesor, grupoId }) {
+            const gruposVisibles = isAsesor ? db.grupos.filter(group => group.id === grupoId) : db.grupos;
+            const [grupoSeleccionadoId, setGrupoSeleccionadoId] = useState('');
+            useEffect(() => { setGrupoSeleccionadoId(''); }, [db.id]);
+            const [expandedIds, setExpandedIds] = useState([]);
+            const sesiones = (db.controlSesiones || []).filter(session => (!isAsesor || session.grupoId === grupoId) && (isAsesor || !grupoSeleccionadoId || session.grupoId === grupoSeleccionadoId));
+            const evidencias = (db.controlEvidencias || []).filter(record => !isAsesor || record.grupoId === grupoId);
+            const cuentaZoom = id => zoomAccounts.find(account => account.id === id);
+            const grupo = id => db.grupos.find(item => item.id === id);
+
+            return (
+                <div className="mx-auto w-full max-w-7xl space-y-6 pb-8">
+                    <div className="rounded-2xl border border-blue-100 bg-white p-6 shadow-sm">
+                        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                            <div><p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-500">Consulta de control</p><h2 className="mt-1 text-2xl font-black text-gray-900">{db.info.siglas} · {db.info.estado} · {db.info.anio}</h2><p className="mt-1 text-sm text-gray-500">Información operativa de sesiones, asistencias y evidencias.</p></div>
+                            <span className="rounded-full bg-gray-100 px-4 py-2 text-xs font-bold text-gray-500"><i className="fa-solid fa-eye mr-2"></i>Solo lectura</span>
+                        </div>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                        <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-end md:justify-between"><div className="w-full"><h3 className="text-lg font-bold text-slate-900"><i className="fa-solid fa-video mr-2 text-cyan-600"></i>Sesiones Zoom</h3><p className="text-sm text-slate-500">{isAsesor ? 'Sesiones de tu grupo.' : 'Sesiones de todos los grupos del curso.'}</p>{!isAsesor && <label className="mt-3 block max-w-md"><span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Ver sesiones del grupo</span><select value={grupoSeleccionadoId} onChange={e => setGrupoSeleccionadoId(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white p-3 text-sm outline-none focus:border-cyan-500"><option value="">Todos los grupos</option>{gruposVisibles.map(group => <option key={group.id} value={group.id}>{group.nombre} · {group.asesor}</option>)}</select></label>}</div><span className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-bold text-cyan-700">{sesiones.length} {sesiones.length === 1 ? 'sesión' : 'sesiones'}</span></div>
+                        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                            {sesiones.map(session => {
+                                const group = grupo(session.grupoId);
+                                const account = cuentaZoom(session.zoomAccountId);
+                                const isOpen = expandedIds.includes(session.id);
+                                return (
+                                    <article key={session.id} className={`rounded-2xl border p-5 ${session.editadaManualmente ? 'border-amber-300 bg-amber-50/70' : 'border-slate-100 bg-slate-50'}`}>
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div>
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    <p className="text-xs font-bold uppercase tracking-wider text-cyan-600">Sesión {session.numero}</p>
+                                                    {session.editadaManualmente && <span className="rounded-full bg-amber-200 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-amber-900"><i className="fa-solid fa-triangle-exclamation mr-1"></i>Cambio de cuenta Zoom</span>}
+                                                </div>
+                                                <h4 className="mt-1 font-bold text-slate-900">{group?.nombre || 'Grupo'}</h4>
+                                                <p className="text-sm text-slate-500">{group?.asesor || 'Asesor no disponible'}</p>
+                                            </div>
+                                            <div className="flex items-center gap-3">
+                                                <span className="rounded-lg bg-white px-3 py-2 text-xs font-bold text-slate-600">{session.dia} · {session.horario}</span>
+                                                <button onClick={() => setExpandedIds(prev => prev.includes(session.id) ? prev.filter(x => x !== session.id) : [...prev, session.id])} className="rounded-full p-2 text-slate-600 hover:bg-slate-100">
+                                                    {isOpen ? <i className="fa-solid fa-chevron-up"></i> : <i className="fa-solid fa-chevron-down"></i>}
+                                                </button>
+                                            </div>
+                                        </div>
+                                        {session.editadaManualmente && <p className="mt-3 rounded-lg border border-amber-200 bg-amber-100 px-3 py-2 text-xs font-semibold text-amber-900"><i className="fa-solid fa-circle-info mr-1"></i>Esta sesión tiene un cambio de cuenta Zoom y puede usar un enlace diferente al registro general del grupo.</p>}
+                                        {isOpen && (
+                                            <div className="mt-4 rounded-xl border border-white bg-white p-3 text-xs text-slate-600">
+                                                <p><strong>Usuario Zoom:</strong> {account?.usuario || 'No disponible'}</p>
+                                                {account?.password && <p><strong>Contraseña:</strong> {account.password}</p>}
+                                                {session.invitacion && <pre className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-900 p-3 text-xs leading-5 text-slate-200">{session.invitacion}</pre>}
+                                            </div>
+                                        )}
+                                    </article>
+                                );
+                            })}
+                            {sesiones.length === 0 && <div className="rounded-xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-400 lg:col-span-2">Aún no hay sesiones configuradas para esta vista.</div>}
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+                        <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm"><h3 className="mb-1 text-lg font-bold text-emerald-900"><i className="fa-solid fa-clipboard-check mr-2 text-emerald-600"></i>Asistencias</h3><p className="mb-4 text-sm text-gray-500">Enlaces comunes para este curso.</p><div className="space-y-3">{(db.controlAsistencias || []).map(record => { const cursoCorto = `${db.info.siglas}-${db.info.idEstado}${String(db.info.anio || '').slice(-2)}`; const mensajeWhatsApp = `${cursoCorto} / *Sesión ${record.numeroSesion}*\n${record.formularioUrl || ''}`; return <div key={record.id} className="flex items-center justify-between gap-3 rounded-xl bg-emerald-50 p-4"><span className="font-bold text-emerald-900">Sesión {record.numeroSesion}</span><span className="flex flex-wrap justify-end gap-3 text-xs font-bold">{record.formularioUrl ? <a href={record.formularioUrl} target="_blank" rel="noreferrer" className="text-emerald-700 hover:underline">Formulario <i className="fa-solid fa-arrow-up-right-from-square ml-1"></i></a> : <span className="text-amber-600">Formulario pendiente</span>}{record.formularioUrl && <button type="button" onClick={() => copyToClipboard(mensajeWhatsApp)} className="text-emerald-700 hover:text-emerald-900" title="Copiar mensaje para WhatsApp" aria-label={`Copiar mensaje de WhatsApp de la sesión ${record.numeroSesion}`}><i className="fa-solid fa-copy"></i></button>}{record.respuestasUrl ? <a href={record.respuestasUrl} target="_blank" rel="noreferrer" className="text-emerald-700 hover:underline">Respuestas <i className="fa-solid fa-arrow-up-right-from-square ml-1"></i></a> : <span className="text-amber-600">Respuestas pendientes</span>}</span></div>; })}{!(db.controlAsistencias || []).length && <p className="rounded-xl border border-dashed border-emerald-100 p-6 text-center text-sm text-gray-400">Aún no hay enlaces de asistencia.</p>}</div></div>
+                        <div className="rounded-2xl border border-amber-100 bg-white p-5 shadow-sm"><h3 className="mb-1 text-lg font-bold text-amber-900"><i className="fa-solid fa-folder-open mr-2 text-amber-600"></i>Evidencias</h3><p className="mb-4 text-sm text-gray-500">{isAsesor ? 'Carpeta de tu grupo.' : 'Carpetas de los grupos del curso.'}</p><div className="space-y-3">{evidencias.map(record => { const group = grupo(record.grupoId); return <div key={record.id} className="flex items-center justify-between gap-3 rounded-xl bg-amber-50 p-4"><span><strong className="block text-amber-900">{group?.nombre || 'Grupo'}</strong><small className="text-gray-500">{group?.asesor || ''}</small></span><a href={record.carpetaUrl} target="_blank" rel="noreferrer" className="text-xs font-bold text-amber-700 hover:underline">Abrir carpeta <i className="fa-solid fa-arrow-up-right-from-square ml-1"></i></a></div> })}{!evidencias.length && <p className="rounded-xl border border-dashed border-amber-100 p-6 text-center text-sm text-gray-400">Aún no hay carpetas de evidencias.</p>}</div></div>
                     </div>
                 </div>
             );
@@ -1453,6 +2152,7 @@ María López	Z9y8x7" />
                         )}
                         <div className="col-span-2"><label className="block text-xs font-bold text-gray-600 mb-1">Tipo de Formación</label><select className="w-full p-3 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-blue-500" value={info.tipoFormacion} onChange={e=>setInfo({...info, tipoFormacion:e.target.value})}>{TIPOS_FORMACION.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
                         <div className="col-span-2"><label className="block text-xs font-bold text-gray-600 mb-1">Nombre Completo del Curso</label><textarea className="w-full p-3 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-blue-500" rows="2" value={info.nombreCurso} onChange={e=>setInfo({...info, nombreCurso:e.target.value})}></textarea></div>
+                        <div><label className="block text-xs font-bold text-gray-600 mb-1">Estado</label><select className="w-full p-3 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-blue-500" value={info.estado || ''} onChange={e=>{ const estado = ESTADOS.find(item => item.nombre === e.target.value); setInfo({...info, estado: e.target.value, idEstado: estado?.id || ''}); }}><option value="">- Seleccionar -</option>{ESTADOS.map(estado => <option key={estado.id} value={estado.nombre}>{estado.nombre}</option>)}</select></div>
                         <div><label className="block text-xs font-bold text-gray-600 mb-1">Año</label><input type="text" className="w-full p-3 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-blue-500" value={info.anio} onChange={e=>setInfo({...info, anio:e.target.value})} /></div>
                         <div><label className="block text-xs font-bold text-gray-600 mb-1">Siglas</label><input type="text" className="w-full p-3 bg-gray-50 border border-gray-200 rounded-lg uppercase outline-none focus:border-blue-500" value={info.siglas} onChange={e=>setInfo({...info, siglas:e.target.value})} /></div>
                         <div><label className="block text-xs font-bold text-gray-600 mb-1">Contraseña Moodle Predeterminada</label><input type="text" className="w-full p-3 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-blue-500" value={info.moodlePass} onChange={e=>setInfo({...info, moodlePass:e.target.value})} /></div>
@@ -2059,7 +2759,7 @@ María López	Z9y8x7" />
                             <button onClick={()=>setSubTab('asistencia')} className={`w-full text-left px-4 py-3.5 rounded-xl text-sm flex items-center gap-3 transition-colors ${subTab==='asistencia'?'bg-blue-600 text-white font-bold shadow-md':'text-gray-600 hover:bg-white hover:shadow-sm'}`}><i className="fa-solid fa-list-check w-5 text-center"></i> Relación Alumnos PDF</button>
                             {!isCoordinador && (
                                 <>
-                                    <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest pt-4 pb-2 border-b border-gray-200">Constancias (V3.7)</h3>
+                                    <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest pt-4 pb-2 border-b border-gray-200">Constancias (4.0)</h3>
                                     <button onClick={()=>setSubTab('constancias_alumnos')} className={`w-full text-left px-4 py-3.5 rounded-xl text-sm flex items-center gap-3 transition-colors ${subTab==='constancias_alumnos'?'bg-blue-600 text-white font-bold shadow-md':'text-gray-600 hover:bg-white hover:shadow-sm'}`}><i className="fa-solid fa-certificate w-5 text-center"></i> Constancias Alumnos</button>
                                     <button onClick={()=>setSubTab('constancias_servidor')} className={`w-full text-left px-4 py-3.5 rounded-xl text-sm flex items-center gap-3 transition-colors ${subTab==='constancias_servidor'?'bg-blue-600 text-white font-bold shadow-md':'text-gray-600 hover:bg-white hover:shadow-sm'}`}><i className="fa-solid fa-server w-5 text-center"></i> Constancias Servidor</button>
                                 </>
@@ -2878,7 +3578,7 @@ María López	Z9y8x7" />
                         </div>
                     )}
 
-                    {(isAdmin || isCoordinador) && subView === 'matriz' && (
+                    {(isAdmin || isCoordinador || isAsesor) && subView === 'matriz' && (
                         <div className="flex flex-col no-print border-b border-gray-200">
                             <div className="bg-white p-3 flex gap-4 text-xs items-center justify-between shadow-sm z-20 relative">
                                 <div className="flex gap-6 items-center">
