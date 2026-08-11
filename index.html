@@ -396,6 +396,83 @@
             );
         }
 
+        function Modal({ show, onClose, width = 'max-w-4xl', children, ariaLabel }) {
+            const dialogRef = useRef(null);
+            const previousFocusRef = useRef(null);
+            const onCloseRef = useRef(onClose);
+
+            useEffect(() => {
+                onCloseRef.current = onClose;
+            }, [onClose]);
+
+            useEffect(() => {
+                if (!show) return;
+
+                previousFocusRef.current = document.activeElement;
+                const dialog = dialogRef.current;
+                const focusableSelectors = 'input, select, textarea, button, [href], [tabindex]:not([tabindex="-1"])';
+                const focusableElements = dialog ? Array.from(dialog.querySelectorAll(focusableSelectors)).filter(el => !el.hasAttribute('disabled')) : [];
+                const firstElement = focusableElements[0];
+                const lastElement = focusableElements[focusableElements.length - 1];
+
+                if (firstElement) {
+                    firstElement.focus();
+                } else if (dialog) {
+                    dialog.focus();
+                }
+
+                const handleKeyDown = (event) => {
+                    if (event.key === 'Escape') {
+                        event.preventDefault();
+                        onCloseRef.current?.();
+                    }
+
+                    if (event.key === 'Tab' && dialog) {
+                        if (focusableElements.length === 0) {
+                            event.preventDefault();
+                            return;
+                        }
+
+                        if (event.shiftKey) {
+                            if (document.activeElement === firstElement) {
+                                event.preventDefault();
+                                lastElement?.focus();
+                            }
+                        } else {
+                            if (document.activeElement === lastElement) {
+                                event.preventDefault();
+                                firstElement?.focus();
+                            }
+                        }
+                    }
+                };
+
+                document.addEventListener('keydown', handleKeyDown);
+
+                return () => {
+                    document.removeEventListener('keydown', handleKeyDown);
+                    previousFocusRef.current?.focus();
+                };
+            }, [show]);
+
+            if (!show) return null;
+            return (
+                <div className="fixed inset-0 z-50 flex items-start md:items-center justify-center bg-slate-950/70 p-5 backdrop-blur-md" onClick={onClose} role="presentation">
+                    <div
+                        className={`w-full ${width} max-h-[calc(100vh-2rem)] overflow-auto rounded-3xl bg-white shadow-2xl focus:outline-none`}
+                        onClick={e => e.stopPropagation()}
+                        ref={dialogRef}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label={ariaLabel}
+                        tabIndex={-1}
+                    >
+                        {children}
+                    </div>
+                </div>
+            );
+        }
+
         // ==========================================
         // COMPONENTE PRINCIPAL
         // ==========================================
@@ -415,6 +492,9 @@
             const [newZoomUser, setNewZoomUser] = useState('');
             const [newZoomPassword, setNewZoomPassword] = useState('');
             const [newZoomNotes, setNewZoomNotes] = useState('');
+            const [editingZoomAccountId, setEditingZoomAccountId] = useState(null);
+            const [editZoomUser, setEditZoomUser] = useState('');
+            const [editZoomNotes, setEditZoomNotes] = useState('');
             const [newSessionDbId, setNewSessionDbId] = useState('');
             const [newSessionGroupId, setNewSessionGroupId] = useState('');
             const [newSessionNumber, setNewSessionNumber] = useState('1');
@@ -449,6 +529,32 @@
             const [showLoginAdmin, setShowLoginAdmin] = useState(false);
             const [loginPass, setLoginPass] = useState('');
             const [loginAdminPass, setLoginAdminPass] = useState('');
+            const [toast, setToast] = useState({ show: false, message: '', variant: 'success' });
+            const toastTimeoutRef = useRef(null);
+
+            const showToast = (message, variant = 'success') => {
+                setToast({ show: true, message, variant });
+                if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+                toastTimeoutRef.current = setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3200);
+            };
+
+            useEffect(() => {
+                return () => { if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current); };
+            }, []);
+
+            const renderToast = () => toast.show ? (
+                <div className={`fixed bottom-6 right-6 z-50 max-w-sm rounded-2xl border px-4 py-3 shadow-2xl shadow-slate-900/20 transition-all duration-300 ${toast.variant === 'success' ? 'bg-emerald-600 border-emerald-500 text-white' : toast.variant === 'error' ? 'bg-red-600 border-red-500 text-white' : 'bg-slate-800 border-slate-700 text-white'}`}>
+                    <div className="flex items-start gap-3">
+                        <div className="mt-0.5">
+                            <i className={`fa-solid ${toast.variant === 'success' ? 'fa-check-circle' : toast.variant === 'error' ? 'fa-triangle-exclamation' : 'fa-circle-info'} text-lg`}></i>
+                        </div>
+                        <div className="flex-1 text-sm leading-5">{toast.message}</div>
+                        <button onClick={() => setToast(prev => ({ ...prev, show: false }))} className="text-white/80 hover:text-white">
+                            <i className="fa-solid fa-xmark"></i>
+                        </button>
+                    </div>
+                </div>
+            ) : null;
 
             // Campos de Creación Nueva BD
             const [anio, setAnio] = useState(new Date().getFullYear().toString());
@@ -503,7 +609,7 @@
 
             // Plantilla Base
             const descargarPlantillaBase = () => {
-                if (typeof XLSX === 'undefined') return alert("Cargando librerías de Excel... intenta en un segundo.");
+                if (typeof XLSX === 'undefined') { showToast("Cargando librerías de Excel... intenta en un segundo.", 'error'); return; }
                 const headers = [
                     'NO. CONSECUTIVO', 'CORREO ELECTRONICO', 'RFC', 'CURP', 'EDAD', 'SEXO', 
                     'NOMBRE', 'APELLIDO PATERNO', 'APELLIDO MATERNO', 'TELEFONO', 
@@ -606,7 +712,7 @@
             }, [personalGlobal, coursesPersonalFilter]);
 
             const guardarBaseDeDatos = () => {
-                if (!estadoSeleccionado || !siglas || participantesProcesados.length === 0) return alert("Faltan datos o información válida.");
+                if (!estadoSeleccionado || !siglas || participantesProcesados.length === 0) { showToast("Faltan datos o información válida.", 'error'); return; }
                 const sectorFormativoFinal = sectorFormativoTipo === 'Otros' ? (sectorFormativoOtro.trim() || 'Otros') : sectorFormativoTipo;
                 const nuevaBD = {
                     id: Date.now().toString(),
@@ -651,13 +757,13 @@
                             if(confirm("¿Estás seguro de restaurar este respaldo? Reemplazará los datos actuales en esta pantalla.")) {
                                 setBasesDeDatos(data.basesDeDatos);
                                 setPersonalGlobal(data.personalGlobal || data.asesoresGlobales);
-                                alert("¡Sistema restaurado con éxito! Tus cursos y gráficas han vuelto.");
+                                showToast("¡Sistema restaurado con éxito! Tus cursos y gráficas han vuelto.", 'success');
                             }
                         } else {
-                            alert("El archivo no es un respaldo válido de SIGSE.");
+                            showToast("El archivo no es un respaldo válido de SIGSE.", 'error');
                         }
                     } catch (err) {
-                        alert("Error al leer el archivo de respaldo.");
+                        showToast("Error al leer el archivo de respaldo.", 'error');
                     }
                 };
                 reader.readAsText(file);
@@ -671,8 +777,9 @@
                     setShowLoginAdmin(false);
                     setLoginAdminPass('');
                     setAppView('admin_dashboard');
+                    showToast('Bienvenido, administrador.', 'success');
                 } else {
-                    alert("Contraseña de administrador incorrecta.");
+                    showToast("Contraseña de administrador incorrecta.", 'error');
                 }
             };
 
@@ -681,12 +788,12 @@
             };
 
             const agregarAdminUsuario = () => {
-                if (!newAdminName.trim() || !newAdminPass.trim()) return alert('Nombre y contraseña son obligatorios.');
-                if (adminUsers.some(admin => admin.nombre.toLowerCase() === newAdminName.trim().toLowerCase())) return alert('Ya existe un administrador con ese nombre.');
+                if (!newAdminName.trim() || !newAdminPass.trim()) { showToast('Nombre y contraseña son obligatorios.', 'error'); return; }
+                if (adminUsers.some(admin => admin.nombre.toLowerCase() === newAdminName.trim().toLowerCase())) { showToast('Ya existe un administrador con ese nombre.', 'error'); return; }
                 setAdminUsers(prev => [...prev, { id: `ADMIN-${Date.now()}`, nombre: newAdminName.trim(), password: newAdminPass.trim() }]);
                 setNewAdminName('');
                 setNewAdminPass('');
-                alert('Administrador agregado correctamente.');
+                showToast('Administrador agregado correctamente.', 'success');
             };
 
             const eliminarAdminUsuario = (id) => {
@@ -699,12 +806,13 @@
             const agregarCuentaZoom = () => {
                 const usuario = newZoomUser.trim();
                 const password = newZoomPassword.trim();
-                if (!usuario || !password) return alert('El usuario y la contraseña de Zoom son obligatorios.');
-                if (zoomAccounts.some(account => account.usuario.toLowerCase() === usuario.toLowerCase())) return alert('Ese usuario de Zoom ya está registrado.');
+                if (!usuario || !password) { showToast('El usuario y la contraseña de Zoom son obligatorios.', 'error'); return; }
+                if (zoomAccounts.some(account => account.usuario.toLowerCase() === usuario.toLowerCase())) { showToast('Ese usuario de Zoom ya está registrado.', 'error'); return; }
                 setZoomAccounts(prev => [...prev, { id: `ZOOM-${Date.now()}`, usuario, password, estado: 'disponible', observaciones: newZoomNotes.trim() }]);
                 setNewZoomUser('');
                 setNewZoomPassword('');
                 setNewZoomNotes('');
+                showToast('Cuenta Zoom agregada correctamente.', 'success');
             };
 
             const actualizarCuentaZoom = (id, changes) => {
@@ -717,7 +825,37 @@
                 }
             };
 
+            const iniciarEdicionCuentaZoom = (account) => {
+                setEditingZoomAccountId(account.id);
+                setEditZoomUser(account.usuario);
+                setEditZoomNotes(account.observaciones || '');
+            };
+
+            const guardarEdicionCuentaZoom = () => {
+                const usuario = editZoomUser.trim();
+                if (!usuario) {
+                    showToast('El usuario Zoom no puede quedar vacío.', 'error');
+                    return;
+                }
+                if (zoomAccounts.some(account => account.id !== editingZoomAccountId && account.usuario.toLowerCase() === usuario.toLowerCase())) {
+                    showToast('Ya existe otra cuenta con ese usuario.', 'error');
+                    return;
+                }
+                setZoomAccounts(prev => prev.map(account => account.id === editingZoomAccountId ? { ...account, usuario, observaciones: editZoomNotes.trim() } : account));
+                setEditingZoomAccountId(null);
+                setEditZoomUser('');
+                setEditZoomNotes('');
+                showToast('Cuenta Zoom actualizada correctamente.', 'success');
+            };
+
+            const cancelarEdicionCuentaZoom = () => {
+                setEditingZoomAccountId(null);
+                setEditZoomUser('');
+                setEditZoomNotes('');
+            };
+
             const getControlSessions = () => basesDeDatos.flatMap(db => (db.controlSesiones || []).map(session => ({ ...session, db })));
+
             const ordenarControl = (rows, table, getValue) => {
                 const { key, direction } = controlTableSort;
                 if (controlTableSort.table !== table) return rows;
@@ -1025,7 +1163,7 @@
 
             const guardarEdicionPersonal = () => {
                 const { id, nombre, password } = editPersonalModal;
-                if(!nombre || !password) return alert("El nombre y la contraseña son obligatorios.");
+                if(!nombre || !password) { showToast("El nombre y la contraseña son obligatorios.", 'error'); return; }
                 
                 const nuevosPersonal = personalGlobal.map(a => a.id === id ? { ...a, nombre, password } : a);
                 setPersonalGlobal(nuevosPersonal);
@@ -1054,6 +1192,7 @@
             // ==========================================
             if (appView === 'landing') {
                 return (
+                    <>
                     <div className="min-h-screen bg-gradient-to-br from-blue-900 to-blue-700 flex flex-col items-center justify-center p-6 text-white font-sans relative overflow-hidden">
                         <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-blue-500 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob"></div>
                         <div className="absolute bottom-[-10%] right-[-10%] w-96 h-96 bg-cyan-500 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob animation-delay-2000"></div>
@@ -1065,34 +1204,51 @@
                             <h1 className="text-3xl md:text-4xl font-semibold mb-3 tracking-tight leading-tight max-w-2xl mx-auto">
                                 Sistema Integral de Gestión y Seguimiento de Ofertas Educativas<br />
                                 <span className="block text-cyan-400 font-light text-2xl md:text-3xl mt-3">SIGSE</span>
-                                <span className="text-xs md:text-sm text-white font-normal block mt-2">v5.2</span>
+                                <span className="text-xs md:text-sm text-white font-normal block mt-2">v6.0</span>
                             </h1>
                             
                         </div>
 
                         <div className="grid grid-cols-1 gap-8 w-full max-w-xl z-10">
-                            <button onClick={() => { setShowLoginPersonal(true); setShowLoginAdmin(false); }} aria-label="Ingreso al Portal" className={`group bg-gradient-to-r from-cyan-500 to-blue-600 text-white rounded-2xl p-5 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 flex flex-col items-center text-center focus:outline-none focus:ring-4 focus:ring-cyan-300/40 ${showLoginPersonal ? 'ring-4 ring-cyan-300/50' : ''}`}>
-                                <div className="bg-white/20 p-4 rounded-full mb-4 group-hover:bg-white transition-colors duration-300">
-                                    <i className="fa-solid fa-users-viewfinder text-3xl text-white"></i>
+                            <button onClick={() => { setLoginPass(''); setLoginAdminPass(''); setShowLoginPersonal(true); setShowLoginAdmin(false); }} aria-label="Ingreso al Portal" className={`group bg-white text-blue-700 rounded-2xl p-5 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 flex flex-col items-center text-center focus:outline-none focus:ring-4 focus:ring-blue-200/60 ${showLoginPersonal ? 'ring-4 ring-blue-200/70' : ''}`}>
+                                <div className="bg-blue-100 p-4 rounded-full mb-4 group-hover:bg-blue-200 transition-colors duration-300">
+                                    <i className="fa-solid fa-users-viewfinder text-3xl text-blue-700"></i>
                                 </div>
-                                <h2 className="text-lg font-extrabold mb-1">Ingreso al Portal</h2>
-                                <span className="text-xs opacity-90">Acceso personal</span>
+                                <h2 className="text-lg font-extrabold mb-1 text-blue-700">Ingreso al Portal</h2>
+                                <span className="text-xs opacity-90 text-blue-700">Acceso personal</span>
                             </button>
 
                         </div>
 
                         <div className="w-full flex justify-center">
-                            <div style={{color: 'rgba(255,255,255,0.75)'}} className="mt-4 text-sm text-center no-print">{firebaseStatusMessage}</div>
-                        </div>
-
-                        <div className="mt-10 text-blue-200/50 z-10 flex flex-col items-center gap-1">
-                            <button onClick={() => { setShowLoginAdmin(true); setShowLoginPersonal(false); }} className="text-[10px] uppercase tracking-[0.22em] text-blue-200/40 transition-colors hover:text-blue-100/70" aria-label="Abrir acceso de Administrador"><span className="style-from-christian">Administrador</span></button>
-                            <span className="style-from-admin">CHRISTIAN DELGADO v5.2</span>
+                            <div className="px-6 py-5 max-w-xs text-center" style={{ fontFamily: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif', fontSize: '0.875rem', lineHeight: '1.25rem' }}>
+                                <div className="inline-flex items-center justify-center gap-2 text-white/80 font-semibold mb-2">
+                                    <i className="fa-solid fa-gear text-base text-white/80"></i>
+                                    <a href="#" onClick={e => { e.preventDefault(); setLoginPass(''); setLoginAdminPass(''); setShowLoginAdmin(true); setShowLoginPersonal(false); }} className="text-white/80 hover:text-white transition-colors duration-150">Administrador del Sistema</a>
+                                </div>
+                                {firebaseStatus === 'connected' ? (
+                                    <>
+                                        <div className="inline-flex items-center justify-center gap-2 text-white/90 font-semibold mb-1">
+                                            <i className="fa-solid fa-cloud-check text-base text-emerald-300"></i>
+                                            <span>Conectado a Firebase</span>
+                                        </div>
+                                        <div className="text-xs text-slate-200">v6.0</div>
+                                    </>
+                                ) : (
+                                    <div className="inline-flex flex-col items-center gap-2 text-white/90">
+                                        <div className="inline-flex items-center justify-center gap-2 font-semibold mb-1">
+                                            <i className="fa-solid fa-cloud text-base text-white/60"></i>
+                                            <span>{firebaseStatusMessage}</span>
+                                        </div>
+                                        <div className="text-xs text-slate-200">v6.0</div>
+                                    </div>
+                                )}
+                            </div>
                         </div>
 
                         {(showLoginPersonal || showLoginAdmin) && (
-                            <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-50 flex items-center justify-center p-5" onClick={() => { setShowLoginPersonal(false); setShowLoginAdmin(false); }}>
-                                <div className="relative w-full max-w-md overflow-hidden rounded-[28px] bg-white shadow-2xl shadow-slate-950/40" onClick={e => e.stopPropagation()}>
+                            <Modal show={showLoginPersonal || showLoginAdmin} onClose={() => { setShowLoginPersonal(false); setShowLoginAdmin(false); }} width="max-w-md" ariaLabel={showLoginAdmin ? 'Acceso administrador' : 'Acceso personal'}>
+                                <div className="relative overflow-hidden rounded-[28px] bg-white shadow-2xl shadow-slate-950/40">
                                     <div className={`h-2 ${showLoginAdmin ? 'bg-slate-800' : 'bg-cyan-500'}`}></div>
                                     <button onClick={() => { setShowLoginPersonal(false); setShowLoginAdmin(false); }} className="absolute right-5 top-5 flex h-9 w-9 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700" aria-label="Cerrar acceso">
                                         <i className="fa-solid fa-xmark text-lg"></i>
@@ -1125,25 +1281,24 @@
                                         </div>
                                     </div>
                                 </div>
-                            </div>
+                            </Modal>
                         )}
                     </div>
+                    {renderToast()}
+                    </>
                 );
             }
 
             if (appView === 'admin_dashboard') {
                 return (
+                    <>
                     <div className="min-h-screen bg-gray-50 text-gray-800 pb-10 font-sans">
                         <header className="bg-gray-900 text-white p-4 shadow-md flex justify-between items-center no-print sticky top-0 z-40">
                             <div className="flex items-center gap-3">
                                 <i className="fa-solid fa-laptop-code text-2xl text-cyan-400"></i>
-                                <h1 className="text-xl font-bold">Portal Administrador <span className="text-gray-400 text-sm font-normal ml-2">ESCUELA DE POSGRADOS - SIGSE v5.2</span></h1>
+                                <h1 className="text-xl font-bold">Portal Administrador <span className="text-gray-400 text-sm font-normal ml-2">ESCUELA DE POSGRADOS - SIGSE v6.0</span></h1>
                             </div>
                             <div className="flex items-center gap-4">
-                                <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-semibold ${firebaseStatus === 'connected' ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : firebaseStatus === 'failed' ? 'bg-red-100 text-red-700 border border-red-200' : 'bg-slate-100 text-slate-700 border border-slate-200'}`}>
-                                    <i className={`fa-solid ${firebaseStatus === 'connected' ? 'fa-check-circle' : firebaseStatus === 'failed' ? 'fa-triangle-exclamation' : 'fa-spinner fa-spin'}`}></i>
-                                    {firebaseStatusMessage}
-                                </div>
                                 <button onClick={cerrarSesion} className="bg-red-500/20 text-red-300 border border-red-500/50 px-4 py-1.5 rounded-lg font-bold text-sm hover:bg-red-500 hover:text-white transition-colors flex items-center gap-2">
                                     <i className="fa-solid fa-power-off"></i> Cerrar Sesión
                                 </button>
@@ -1499,40 +1654,69 @@
                                     </div>
 
                                     {controlSection === 'zoom' && (
-                                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                                            <div className="rounded-2xl border border-cyan-100 bg-cyan-50/60 p-5">
-                                                <h3 className="mb-1 font-bold text-cyan-950">Nueva cuenta Zoom</h3>
-                                                <p className="mb-5 text-sm text-cyan-800/70">Registra el usuario que aparecerá después en los selectores de sesiones.</p>
-                                                <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-gray-600">Usuario Zoom</label>
-                                                <input type="text" className="mb-4 w-full rounded-xl border border-cyan-200 bg-white p-3 text-sm outline-none focus:border-cyan-500" value={newZoomUser} onChange={e => setNewZoomUser(e.target.value)} placeholder="usuario01@escueladeposgrados.mx" />
-                                                <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-gray-600">Contraseña Zoom</label>
-                                                <input type="text" className="mb-4 w-full rounded-xl border border-cyan-200 bg-white p-3 text-sm outline-none focus:border-cyan-500" value={newZoomPassword} onChange={e => setNewZoomPassword(e.target.value)} placeholder="usuario01Escuela01" />
-                                                <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-gray-600">Notas <span className="font-normal normal-case">(opcional)</span></label>
-                                                <textarea rows="2" className="mb-4 w-full rounded-xl border border-cyan-200 bg-white p-3 text-sm outline-none focus:border-cyan-500" value={newZoomNotes} onChange={e => setNewZoomNotes(e.target.value)} placeholder="Información adicional"></textarea>
-                                                <button onClick={agregarCuentaZoom} className="w-full rounded-xl bg-cyan-700 py-3 font-bold text-white shadow-lg shadow-cyan-700/20 transition-colors hover:bg-cyan-800"><i className="fa-solid fa-plus mr-2"></i>Agregar cuenta</button>
-                                            </div>
-                                            <div className="lg:col-span-2 overflow-hidden rounded-2xl border border-gray-200">
-                                                <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-5 py-4">
-                                                    <div><h3 className="font-bold text-gray-800">Catálogo de cuentas</h3><p className="text-xs text-gray-500">{zoomAccountsVisible.length} de {zoomAccounts.length} cuenta{zoomAccounts.length === 1 ? '' : 's'}</p></div>
-                                                    <input type="search" className="w-48 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs outline-none focus:border-cyan-500" value={controlTableFilters.zoom} onChange={e => setControlTableFilters(prev => ({ ...prev, zoom: e.target.value }))} placeholder="Buscar cuenta..." aria-label="Buscar cuenta Zoom" />
-                                                    <i className="fa-solid fa-key text-gray-400"></i>
+                                        <>
+                                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                                <div className="rounded-2xl border border-cyan-100 bg-cyan-50/60 p-5">
+                                                    <h3 className="mb-1 font-bold text-cyan-950">Nueva cuenta Zoom</h3>
+                                                    <p className="mb-5 text-sm text-cyan-800/70">Registra el usuario que aparecerá después en los selectores de sesiones.</p>
+                                                    <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-gray-600">Usuario Zoom</label>
+                                                    <input type="text" className="mb-4 w-full rounded-xl border border-cyan-200 bg-white p-3 text-sm outline-none focus:border-cyan-500" value={newZoomUser} onChange={e => setNewZoomUser(e.target.value)} placeholder="usuario01@escueladeposgrados.mx" />
+                                                    <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-gray-600">Contraseña Zoom</label>
+                                                    <input type="text" className="mb-4 w-full rounded-xl border border-cyan-200 bg-white p-3 text-sm outline-none focus:border-cyan-500" value={newZoomPassword} onChange={e => setNewZoomPassword(e.target.value)} placeholder="usuario01Escuela01" />
+                                                    <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-gray-600">Notas <span className="font-normal normal-case">(opcional)</span></label>
+                                                    <textarea rows="2" className="mb-4 w-full rounded-xl border border-cyan-200 bg-white p-3 text-sm outline-none focus:border-cyan-500" value={newZoomNotes} onChange={e => setNewZoomNotes(e.target.value)} placeholder="Información adicional"></textarea>
+                                                    <button onClick={agregarCuentaZoom} className="w-full rounded-xl bg-cyan-700 py-3 font-bold text-white shadow-lg shadow-cyan-700/20 transition-colors hover:bg-cyan-800"><i className="fa-solid fa-plus mr-2"></i>Agregar cuenta</button>
                                                 </div>
-                                                <div className="overflow-x-auto">
-                                                    <table className="w-full text-left text-sm">
-                                                        <thead className="bg-white text-xs uppercase tracking-wide text-gray-500"><tr><th className="cursor-pointer p-4" onClick={() => cambiarOrdenControl('zoom', 'usuario')}>Usuario Zoom{indicadorOrdenControl('zoom', 'usuario')}</th><th className="p-4">Contraseña</th><th className="cursor-pointer p-4" onClick={() => cambiarOrdenControl('zoom', 'estado')}>Estado{indicadorOrdenControl('zoom', 'estado')}</th><th className="p-4 text-right">Acciones</th></tr></thead>
-                                                        <tbody>
-                                                            {zoomAccountsVisible.map(account => <tr key={account.id} className="border-t border-gray-100 hover:bg-cyan-50/30">
-                                                                <td className="p-4 font-semibold text-gray-800">{account.usuario}<div className="text-xs font-normal text-gray-400">{account.observaciones || 'Sin notas'}</div></td>
-                                                                <td className="p-4"><input type="text" className="w-40 rounded-lg border border-gray-200 px-2 py-1.5 font-mono text-xs outline-none focus:border-cyan-500" value={account.password} onChange={e => actualizarCuentaZoom(account.id, { password: e.target.value })} /></td>
-                                                                <td className="p-4"><select className="rounded-lg border border-gray-200 px-2 py-1.5 text-xs outline-none focus:border-cyan-500" value={account.estado} onChange={e => actualizarCuentaZoom(account.id, { estado: e.target.value })}><option value="disponible">Disponible</option><option value="asignada">Asignada</option><option value="inactiva">Inactiva</option></select></td>
-                                                                <td className="p-4 text-right"><button onClick={() => eliminarCuentaZoom(account.id)} className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-red-100 hover:text-red-600 ml-auto" title="Eliminar cuenta"><i className="fa-solid fa-trash"></i></button></td>
-                                                            </tr>)}
-                                                            {zoomAccountsVisible.length === 0 && <tr><td colSpan="4" className="p-10 text-center text-gray-400"><i className="fa-solid fa-video-slash mb-3 block text-2xl"></i>{zoomAccounts.length === 0 ? 'Aún no hay cuentas Zoom registradas.' : 'No hay cuentas que coincidan con la búsqueda.'}</td></tr>}
-                                                        </tbody>
-                                                    </table>
+                                                <div className="lg:col-span-2 overflow-hidden rounded-2xl border border-gray-200">
+                                                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-gray-100 bg-gray-50 px-5 py-4">
+                                                        <div><h3 className="font-bold text-gray-800">Catálogo de cuentas</h3><p className="text-xs text-gray-500">{zoomAccountsVisible.length} de {zoomAccounts.length} cuenta{zoomAccounts.length === 1 ? '' : 's'}</p></div>
+                                                        <div className="flex w-full max-w-md items-center gap-2">
+                                                            <input type="search" className="w-full sm:w-48 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs outline-none focus:border-cyan-500" value={controlTableFilters.zoom} onChange={e => setControlTableFilters(prev => ({ ...prev, zoom: e.target.value }))} placeholder="Buscar cuenta..." aria-label="Buscar cuenta Zoom" />
+                                                            <i className="fa-solid fa-key text-gray-400"></i>
+                                                        </div>
+                                                    </div>
+                                                    <div className="overflow-x-auto">
+                                                        <table className="w-full text-left text-sm">
+                                                            <thead className="bg-white text-xs uppercase tracking-wide text-gray-500"><tr><th className="cursor-pointer p-4" onClick={() => cambiarOrdenControl('zoom', 'usuario')}>Usuario Zoom{indicadorOrdenControl('zoom', 'usuario')}</th><th className="p-4">Contraseña</th><th className="cursor-pointer p-4" onClick={() => cambiarOrdenControl('zoom', 'estado')}>Estado{indicadorOrdenControl('zoom', 'estado')}</th><th className="p-4 text-right">Acciones</th></tr></thead>
+                                                            <tbody>
+                                                                {zoomAccountsVisible.map(account => <tr key={account.id} className="border-t border-gray-100 hover:bg-cyan-50/30">
+                                                                    <td className="p-4 font-semibold text-gray-800">{account.usuario}<div className="text-xs font-normal text-gray-400">{account.observaciones || 'Sin notas'}</div></td>
+                                                                    <td className="p-4"><input type="text" className="w-full max-w-[150px] rounded-lg border border-gray-200 px-2 py-1.5 font-mono text-xs outline-none focus:border-cyan-500" value={account.password} onChange={e => actualizarCuentaZoom(account.id, { password: e.target.value })} /></td>
+                                                                    <td className="p-4"><select className="w-full max-w-[140px] rounded-lg border border-gray-200 px-2 py-1.5 text-xs outline-none focus:border-cyan-500" value={account.estado} onChange={e => actualizarCuentaZoom(account.id, { estado: e.target.value })}><option value="disponible">Disponible</option><option value="asignada">Asignada</option><option value="inactiva">Inactiva</option></select></td>
+                                                                    <td className="p-4 text-right flex justify-end gap-2">
+                                                                        <button onClick={() => iniciarEdicionCuentaZoom(account)} className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-slate-100 hover:text-cyan-600" title="Editar cuenta"><i className="fa-solid fa-pen"></i></button>
+                                                                        <button onClick={() => eliminarCuentaZoom(account.id)} className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-red-100 hover:text-red-600" title="Eliminar cuenta"><i className="fa-solid fa-trash"></i></button>
+                                                                    </td>
+                                                                </tr>)}
+                                                                {zoomAccountsVisible.length === 0 && <tr><td colSpan="4" className="p-10 text-center text-gray-400"><i className="fa-solid fa-video-slash mb-3 block text-2xl"></i>{zoomAccounts.length === 0 ? 'Aún no hay cuentas Zoom registradas.' : 'No hay cuentas que coincidan con la búsqueda.'}</td></tr>}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
                                                 </div>
                                             </div>
-                                        </div>
+
+                                            {editingZoomAccountId && (
+                                                <Modal show={Boolean(editingZoomAccountId)} onClose={cancelarEdicionCuentaZoom} width="max-w-md" ariaLabel="Editar cuenta Zoom">
+                                                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+                                                        <div className="flex items-center justify-between mb-4">
+                                                            <div>
+                                                                <h3 className="text-lg font-bold text-gray-900">Editar cuenta Zoom</h3>
+                                                                <p className="text-sm text-gray-500">Corrige el usuario o las notas sin borrar nada.</p>
+                                                            </div>
+                                                            <button onClick={cancelarEdicionCuentaZoom} className="text-gray-400 hover:text-gray-900"><i className="fa-solid fa-xmark"></i></button>
+                                                        </div>
+                                                        <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 mb-1">Usuario Zoom</label>
+                                                        <input type="text" className="mb-4 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-cyan-500" value={editZoomUser} onChange={e => setEditZoomUser(e.target.value)} />
+                                                        <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 mb-1">Notas <span className="font-normal normal-case">(opcional)</span></label>
+                                                        <textarea rows="3" className="mb-4 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-cyan-500" value={editZoomNotes} onChange={e => setEditZoomNotes(e.target.value)} />
+                                                        <div className="flex justify-end gap-3">
+                                                            <button onClick={cancelarEdicionCuentaZoom} className="px-4 py-2 rounded-xl bg-gray-100 text-gray-700 hover:bg-gray-200">Cancelar</button>
+                                                            <button onClick={guardarEdicionCuentaZoom} className="px-4 py-2 rounded-xl bg-cyan-700 text-white hover:bg-cyan-800">Guardar cambios</button>
+                                                        </div>
+                                                    </div>
+                                                </Modal>
+                                            )}
+                                        </>
                                     )}
 
                                     {controlSection === 'sessions' && (
@@ -1572,7 +1756,7 @@
                                             </div>
                                             <input type="search" className="mt-5 w-full rounded-xl border border-slate-200 bg-white p-3 text-sm outline-none focus:border-cyan-500" value={controlTableFilters.sessions} onChange={e => setControlTableFilters(prev => ({ ...prev, sessions: e.target.value }))} placeholder="Buscar por curso, grupo, asesor, día u horario..." aria-label="Buscar sesiones" />
                                             <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200 bg-white">
-                                                <table className="w-full min-w-[850px] text-left text-sm"><thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="cursor-pointer p-4" onClick={() => cambiarOrdenControl('sessions', 'curso')}>Curso / grupo{indicadorOrdenControl('sessions', 'curso')}</th><th className="cursor-pointer p-4" onClick={() => cambiarOrdenControl('sessions', 'grupo')}>Asesor{indicadorOrdenControl('sessions', 'grupo')}</th><th className="cursor-pointer p-4" onClick={() => cambiarOrdenControl('sessions', 'numero')}>Sesión{indicadorOrdenControl('sessions', 'numero')}</th><th className="cursor-pointer p-4" onClick={() => cambiarOrdenControl('sessions', 'dia')}>Día / horario{indicadorOrdenControl('sessions', 'dia')}</th><th className="p-4">Usuario Zoom</th><th className="p-4"></th></tr></thead><tbody>
+                                                <table className="w-full min-w-full text-left text-sm"><thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="cursor-pointer p-4" onClick={() => cambiarOrdenControl('sessions', 'curso')}>Curso / grupo{indicadorOrdenControl('sessions', 'curso')}</th><th className="cursor-pointer p-4" onClick={() => cambiarOrdenControl('sessions', 'grupo')}>Asesor{indicadorOrdenControl('sessions', 'grupo')}</th><th className="cursor-pointer p-4" onClick={() => cambiarOrdenControl('sessions', 'numero')}>Sesión{indicadorOrdenControl('sessions', 'numero')}</th><th className="cursor-pointer p-4" onClick={() => cambiarOrdenControl('sessions', 'dia')}>Día / horario{indicadorOrdenControl('sessions', 'dia')}</th><th className="p-4">Usuario Zoom</th><th className="p-4"></th></tr></thead><tbody>
                                                 {controlSessionsVisible.length > 0 ? controlSessionsVisible.map(({ db, ...session }) => {
                                                     const grupo = db.grupos.find(item => item.id === session.grupoId);
                                                     const account = zoomAccounts.find(item => item.id === session.zoomAccountId);
@@ -1657,7 +1841,7 @@
                                                 </select>
                                             </div>
                                             <input type="search" className="mt-5 w-full rounded-xl border border-emerald-200 bg-white p-3 text-sm outline-none focus:border-emerald-500" value={controlTableFilters.attendances} onChange={e => setControlTableFilters(prev => ({ ...prev, attendances: e.target.value }))} placeholder="Buscar por curso o sesión..." aria-label="Buscar asistencias" />
-                                            <div className="mt-5 overflow-x-auto rounded-2xl border border-emerald-100 bg-white"><table className="w-full min-w-[560px] text-left text-sm"><thead className="bg-emerald-50 text-xs uppercase tracking-wide text-emerald-800"><tr><th className="cursor-pointer p-3" onClick={() => cambiarOrdenControl('attendances', 'curso')}>Curso{indicadorOrdenControl('attendances', 'curso')}</th><th className="cursor-pointer p-3" onClick={() => cambiarOrdenControl('attendances', 'numeroSesion')}>Sesión{indicadorOrdenControl('attendances', 'numeroSesion')}</th><th className="p-3">Enlaces</th><th className="p-3"></th></tr></thead><tbody>{controlAttendancesVisible.map(row => <tr key={row.id} className="border-t border-emerald-50"><td className="p-3 font-semibold">{row.db.info.siglas}-{row.db.info.idEstado}</td><td className="p-3">Sesión {row.numeroSesion}</td><td className="p-3">{row.formularioUrl ? <a href={row.formularioUrl} target="_blank" rel="noreferrer" className="mr-3 font-bold text-emerald-700 hover:underline">Formulario</a> : <span className="mr-3 text-xs text-amber-600">Formulario pendiente</span>}{row.respuestasUrl ? <a href={row.respuestasUrl} target="_blank" rel="noreferrer" className="font-bold text-emerald-700 hover:underline">Respuestas</a> : <span className="text-xs text-amber-600">Respuestas pendientes</span>}</td><td className="p-3 text-right"><div className="flex justify-end gap-3"><button onClick={() => abrirEdicionAsistencia(row.db.id, row)} className="text-emerald-600 hover:text-emerald-800" title="Editar asistencia"><i className="fa-solid fa-pen"></i></button><button onClick={() => eliminarControlRegistro(row.db.id, 'controlAsistencias', row.id)} className="text-gray-400 hover:text-red-600" title="Eliminar asistencia"><i className="fa-solid fa-trash"></i></button></div></td></tr>)}{controlAttendancesVisible.length === 0 && <tr><td colSpan="4" className="p-7 text-center text-gray-400">{basesDeDatos.every(db => !(db.controlAsistencias || []).length) ? 'Aún no hay asistencias registradas.' : 'No hay asistencias que coincidan con la búsqueda.'}</td></tr>}</tbody></table></div>
+                                            <div className="mt-5 overflow-x-auto rounded-2xl border border-emerald-100 bg-white"><table className="w-full min-w-full text-left text-sm"><thead className="bg-emerald-50 text-xs uppercase tracking-wide text-emerald-800"><tr><th className="cursor-pointer p-3" onClick={() => cambiarOrdenControl('attendances', 'curso')}>Curso{indicadorOrdenControl('attendances', 'curso')}</th><th className="cursor-pointer p-3" onClick={() => cambiarOrdenControl('attendances', 'numeroSesion')}>Sesión{indicadorOrdenControl('attendances', 'numeroSesion')}</th><th className="p-3">Enlaces</th><th className="p-3"></th></tr></thead><tbody>{controlAttendancesVisible.map(row => <tr key={row.id} className="border-t border-emerald-50"><td className="p-3 font-semibold">{row.db.info.siglas}-{row.db.info.idEstado}</td><td className="p-3">Sesión {row.numeroSesion}</td><td className="p-3">{row.formularioUrl ? <><a href={row.formularioUrl} target="_blank" rel="noreferrer" className="mr-2 font-bold text-emerald-700 hover:underline">Formulario</a><button type="button" onClick={() => row.formularioUrl && copyToClipboard(row.formularioUrl)} className="text-emerald-700 hover:text-emerald-900" title="Copiar enlace del formulario" aria-label={`Copiar enlace del formulario de la sesión ${row.numeroSesion}`}><i className="fa-solid fa-copy"></i></button></> : <span className="mr-3 text-xs text-amber-600">Formulario pendiente</span>}{row.respuestasUrl ? <a href={row.respuestasUrl} target="_blank" rel="noreferrer" className="ml-3 font-bold text-emerald-700 hover:underline">Respuestas</a> : <span className="ml-3 text-xs text-amber-600">Respuestas pendientes</span>}</td><td className="p-3 text-right"><div className="flex justify-end gap-3"><button onClick={() => abrirEdicionAsistencia(row.db.id, row)} className="text-emerald-600 hover:text-emerald-800" title="Editar asistencia"><i className="fa-solid fa-pen"></i></button><button onClick={() => eliminarControlRegistro(row.db.id, 'controlAsistencias', row.id)} className="text-gray-400 hover:text-red-600" title="Eliminar asistencia"><i className="fa-solid fa-trash"></i></button></div></td></tr>)}{controlAttendancesVisible.length === 0 && <tr><td colSpan="4" className="p-7 text-center text-gray-400">{basesDeDatos.every(db => !(db.controlAsistencias || []).length) ? 'Aún no hay asistencias registradas.' : 'No hay asistencias que coincidan con la búsqueda.'}</td></tr>}</tbody></table></div>
                                         </div>
                                     )}
 
@@ -1689,7 +1873,7 @@
                                                 </select>
                                             </div>
                                             <input type="search" className="mt-5 w-full rounded-xl border border-amber-200 bg-white p-3 text-sm outline-none focus:border-amber-500" value={controlTableFilters.evidences} onChange={e => setControlTableFilters(prev => ({ ...prev, evidences: e.target.value }))} placeholder="Buscar por curso, grupo o asesor..." aria-label="Buscar evidencias" />
-                                            <div className="mt-5 overflow-x-auto rounded-2xl border border-amber-100 bg-white"><table className="w-full min-w-[560px] text-left text-sm"><thead className="bg-amber-50 text-xs uppercase tracking-wide text-amber-800"><tr><th className="cursor-pointer p-3" onClick={() => cambiarOrdenControl('evidences', 'curso')}>Curso{indicadorOrdenControl('evidences', 'curso')}</th><th className="cursor-pointer p-3" onClick={() => cambiarOrdenControl('evidences', 'grupo')}>Grupo / asesor{indicadorOrdenControl('evidences', 'grupo')}</th><th className="p-3">Carpeta</th><th className="p-3"></th></tr></thead><tbody>{controlEvidencesVisible.map(row => { const group = row.db.grupos.find(item => item.id === row.grupoId); return <tr key={row.id} className="border-t border-amber-50"><td className="p-3 font-semibold">{row.db.info.siglas}-{row.db.info.idEstado}</td><td className="p-3">{group?.nombre || '-'}<div className="text-xs text-gray-400">{group?.asesor || '-'}</div></td><td className="p-3"><a href={row.carpetaUrl} target="_blank" rel="noreferrer" className="font-bold text-amber-700 hover:underline">Abrir carpeta</a></td><td className="p-3 text-right"><div className="flex justify-end gap-3"><button onClick={() => abrirEdicionEvidencia(row.db.id, row)} className="text-amber-600 hover:text-amber-800" title="Editar evidencia"><i className="fa-solid fa-pen"></i></button><button onClick={() => eliminarControlRegistro(row.db.id, 'controlEvidencias', row.id)} className="text-gray-400 hover:text-red-600" title="Eliminar evidencia"><i className="fa-solid fa-trash"></i></button></div></td></tr> })}{controlEvidencesVisible.length === 0 && <tr><td colSpan="4" className="p-7 text-center text-gray-400">{basesDeDatos.every(db => !(db.controlEvidencias || []).length) ? 'Aún no hay evidencias registradas.' : 'No hay evidencias que coincidan con la búsqueda.'}</td></tr>}</tbody></table></div>
+                                            <div className="mt-5 overflow-x-auto rounded-2xl border border-amber-100 bg-white"><table className="w-full min-w-full text-left text-sm"><thead className="bg-amber-50 text-xs uppercase tracking-wide text-amber-800"><tr><th className="cursor-pointer p-3" onClick={() => cambiarOrdenControl('evidences', 'curso')}>Curso{indicadorOrdenControl('evidences', 'curso')}</th><th className="cursor-pointer p-3" onClick={() => cambiarOrdenControl('evidences', 'grupo')}>Grupo / asesor{indicadorOrdenControl('evidences', 'grupo')}</th><th className="p-3">Carpeta</th><th className="p-3"></th></tr></thead><tbody>{controlEvidencesVisible.map(row => { const group = row.db.grupos.find(item => item.id === row.grupoId); return <tr key={row.id} className="border-t border-amber-50"><td className="p-3 font-semibold">{row.db.info.siglas}-{row.db.info.idEstado}</td><td className="p-3">{group?.nombre || '-'}<div className="text-xs text-gray-400">{group?.asesor || '-'}</div></td><td className="p-3"><a href={row.carpetaUrl} target="_blank" rel="noreferrer" className="font-bold text-amber-700 hover:underline">Abrir carpeta</a></td><td className="p-3 text-right"><div className="flex justify-end gap-3"><button onClick={() => abrirEdicionEvidencia(row.db.id, row)} className="text-amber-600 hover:text-amber-800" title="Editar evidencia"><i className="fa-solid fa-pen"></i></button><button onClick={() => eliminarControlRegistro(row.db.id, 'controlEvidencias', row.id)} className="text-gray-400 hover:text-red-600" title="Eliminar evidencia"><i className="fa-solid fa-trash"></i></button></div></td></tr> })}{controlEvidencesVisible.length === 0 && <tr><td colSpan="4" className="p-7 text-center text-gray-400">{basesDeDatos.every(db => !(db.controlEvidencias || []).length) ? 'Aún no hay evidencias registradas.' : 'No hay evidencias que coincidan con la búsqueda.'}</td></tr>}</tbody></table></div>
                                         </div>
                                     )}
                                 </div>
@@ -1697,38 +1881,38 @@
                         </main>
 
                         {editSessionModal.show && (
-                            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-5 backdrop-blur-md" onClick={() => setEditSessionModal(prev => ({ ...prev, show: false }))}>
+                            <Modal show={editSessionModal.show} onClose={() => setEditSessionModal(prev => ({ ...prev, show: false }))} width="max-w-lg" ariaLabel="Editar sesión">
                                 <div className="w-full max-w-lg overflow-hidden rounded-3xl bg-white shadow-2xl" onClick={e => e.stopPropagation()}>
                                     <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5"><div><p className="text-xs font-bold uppercase tracking-wider text-cyan-600">Configuración Control</p><h3 className="text-xl font-bold text-slate-900">Editar sesión</h3></div><button onClick={() => setEditSessionModal(prev => ({ ...prev, show: false }))} className="flex h-9 w-9 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="Cerrar edición"><i className="fa-solid fa-xmark"></i></button></div>
                                     <div className="grid grid-cols-1 gap-4 p-6 sm:grid-cols-2"><div><label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Sesión</label><input type="number" min="1" className="w-full rounded-xl border border-slate-200 p-3 outline-none focus:border-cyan-500" value={editSessionModal.numero} onChange={e => setEditSessionModal(prev => ({ ...prev, numero: e.target.value }))} /></div><div><label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Cuenta Zoom</label><select className="w-full rounded-xl border border-slate-200 bg-white p-3 outline-none focus:border-cyan-500" value={editSessionModal.zoomAccountId} onChange={e => setEditSessionModal(prev => ({ ...prev, zoomAccountId: e.target.value }))}><option value="">Seleccionar cuenta</option>{zoomAccounts.filter(account => account.estado !== 'inactiva').map(account => <option key={account.id} value={account.id}>{account.usuario}</option>)}</select></div><div><label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Día</label><input type="text" className="w-full rounded-xl border border-slate-200 p-3 uppercase outline-none focus:border-cyan-500" value={editSessionModal.dia} onChange={e => setEditSessionModal(prev => ({ ...prev, dia: e.target.value }))} /></div><div><label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Horario</label><input type="text" className="w-full rounded-xl border border-slate-200 p-3 uppercase outline-none focus:border-cyan-500" value={editSessionModal.horario} onChange={e => setEditSessionModal(prev => ({ ...prev, horario: e.target.value }))} /></div><div className="sm:col-span-2"><label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Invitación completa</label><textarea rows="7" className="w-full rounded-xl border border-slate-200 p-3 font-mono text-xs outline-none focus:border-cyan-500" value={editSessionModal.invitacion} onChange={e => setEditSessionModal(prev => ({ ...prev, invitacion: e.target.value }))}></textarea></div></div>
                                     <div className="flex justify-end gap-3 border-t border-slate-100 bg-slate-50 px-6 py-4"><button onClick={() => setEditSessionModal(prev => ({ ...prev, show: false }))} className="rounded-xl px-5 py-3 font-semibold text-slate-500 hover:bg-slate-200">Cancelar</button><button onClick={guardarEdicionSesion} className="rounded-xl bg-slate-900 px-6 py-3 font-bold text-white hover:bg-cyan-700">Guardar cambios</button></div>
                                 </div>
-                            </div>
+                            </Modal>
                         )}
 
                         {editAttendanceModal.show && (
-                            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-5 backdrop-blur-md" onClick={() => setEditAttendanceModal(prev => ({ ...prev, show: false }))}>
+                            <Modal show={editAttendanceModal.show} onClose={() => setEditAttendanceModal(prev => ({ ...prev, show: false }))} width="max-w-lg" ariaLabel="Editar asistencia">
                                 <div className="w-full max-w-lg overflow-hidden rounded-3xl bg-white shadow-2xl" onClick={e => e.stopPropagation()}>
                                     <div className="flex items-center justify-between border-b border-emerald-100 px-6 py-5"><div><p className="text-xs font-bold uppercase tracking-wider text-emerald-600">Configuración Control</p><h3 className="text-xl font-bold text-slate-900">Editar asistencia</h3></div><button onClick={() => setEditAttendanceModal(prev => ({ ...prev, show: false }))} className="flex h-9 w-9 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="Cerrar edición"><i className="fa-solid fa-xmark"></i></button></div>
                                     <div className="grid grid-cols-1 gap-4 p-6"><div><label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Sesión</label><input type="number" min="1" className="w-full rounded-xl border border-slate-200 p-3 outline-none focus:border-emerald-500" value={editAttendanceModal.numeroSesion} onChange={e => setEditAttendanceModal(prev => ({ ...prev, numeroSesion: e.target.value }))} /></div><div><label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Enlace del formulario</label><input type="url" className="w-full rounded-xl border border-slate-200 p-3 outline-none focus:border-emerald-500" value={editAttendanceModal.formularioUrl} onChange={e => setEditAttendanceModal(prev => ({ ...prev, formularioUrl: e.target.value }))} /></div><div><label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Enlace de respuestas</label><input type="url" className="w-full rounded-xl border border-slate-200 p-3 outline-none focus:border-emerald-500" value={editAttendanceModal.respuestasUrl} onChange={e => setEditAttendanceModal(prev => ({ ...prev, respuestasUrl: e.target.value }))} /></div></div>
                                     <div className="flex justify-end gap-3 border-t border-slate-100 bg-slate-50 px-6 py-4"><button onClick={() => setEditAttendanceModal(prev => ({ ...prev, show: false }))} className="rounded-xl px-5 py-3 font-semibold text-slate-500 hover:bg-slate-200">Cancelar</button><button onClick={guardarEdicionAsistencia} className="rounded-xl bg-emerald-700 px-6 py-3 font-bold text-white hover:bg-emerald-800">Guardar cambios</button></div>
                                 </div>
-                            </div>
+                            </Modal>
                         )}
 
                         {editEvidenceModal.show && (
-                            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-5 backdrop-blur-md" onClick={() => setEditEvidenceModal(prev => ({ ...prev, show: false }))}>
+                            <Modal show={editEvidenceModal.show} onClose={() => setEditEvidenceModal(prev => ({ ...prev, show: false }))} width="max-w-lg" ariaLabel="Editar evidencia">
                                 <div className="w-full max-w-lg overflow-hidden rounded-3xl bg-white shadow-2xl" onClick={e => e.stopPropagation()}>
                                     <div className="flex items-center justify-between border-b border-amber-100 px-6 py-5"><div><p className="text-xs font-bold uppercase tracking-wider text-amber-600">Configuración Control</p><h3 className="text-xl font-bold text-slate-900">Editar evidencia</h3></div><button onClick={() => setEditEvidenceModal(prev => ({ ...prev, show: false }))} className="flex h-9 w-9 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="Cerrar edición"><i className="fa-solid fa-xmark"></i></button></div>
                                     <div className="p-6"><label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Enlace de carpeta de Drive</label><input type="url" className="w-full rounded-xl border border-slate-200 p-3 outline-none focus:border-amber-500" value={editEvidenceModal.carpetaUrl} onChange={e => setEditEvidenceModal(prev => ({ ...prev, carpetaUrl: e.target.value }))} /></div>
                                     <div className="flex justify-end gap-3 border-t border-slate-100 bg-slate-50 px-6 py-4"><button onClick={() => setEditEvidenceModal(prev => ({ ...prev, show: false }))} className="rounded-xl px-5 py-3 font-semibold text-slate-500 hover:bg-slate-200">Cancelar</button><button onClick={guardarEdicionEvidencia} className="rounded-xl bg-amber-600 px-6 py-3 font-bold text-white hover:bg-amber-700">Guardar cambios</button></div>
                                 </div>
-                            </div>
+                            </Modal>
                         )}
 
                         {createPersonalModal.show && (
-                            <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                                <div className="bg-white rounded-2xl shadow-2xl w-[560px] max-w-[95vw] p-6 transform transition-all">
+                            <Modal show={createPersonalModal.show} onClose={resetCreatePersonalModal} width="max-w-2xl" ariaLabel={createPersonalModal.mode === 'individual' ? 'Registrar personal' : 'Carga masiva de personal'}>
+                                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[560px] p-6 transform transition-all">
                                     <h3 className="text-xl font-bold text-gray-800 mb-2 flex items-center gap-2"><i className="fa-solid fa-user-plus text-indigo-600"></i> Nuevo Registro de Personal</h3>
                                     <p className="text-xs text-gray-500 mb-4">Puedes registrar uno por uno o cargar varios Asesores/Coordinadores de forma masiva.</p>
 
@@ -1776,12 +1960,12 @@ María López	Z9y8x7" />
                                         </button>
                                     </div>
                                 </div>
-                            </div>
+                            </Modal>
                         )}
 
                         {editPersonalModal.show && (
-                            <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                                <div className="bg-white rounded-2xl shadow-2xl w-[400px] p-6 transform transition-all">
+                            <Modal show={editPersonalModal.show} onClose={() => setEditPersonalModal({ show:false, id:null, nombre:'', password:'' })} width="max-w-lg" ariaLabel="Editar personal">
+                                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[400px] p-6 transform transition-all">
                                     <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><i className="fa-solid fa-user-pen text-indigo-600"></i> Editar Personal</h3>
                                     <p className="text-xs text-gray-500 mb-4">Los cambios de nombre se verán reflejados en todos los proyectos donde coordine o asesore.</p>
                                     
@@ -1801,14 +1985,16 @@ María López	Z9y8x7" />
                                         <button onClick={guardarEdicionPersonal} className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 shadow-md transition-colors">Guardar Cambios</button>
                                     </div>
                                 </div>
-                            </div>
+                            </Modal>
                         )}
                     </div>
+                    </>
                 );
             }
 
             if (appView === 'asesor_dashboard') {
                 return (
+                    <>
                     <div className="min-h-screen bg-gray-50 text-gray-800 font-sans pb-10">
                         <header className="bg-blue-900 text-white p-4 shadow-md flex justify-between items-center no-print sticky top-0 z-40">
                             <div className="flex items-center gap-3">
@@ -1856,12 +2042,15 @@ María López	Z9y8x7" />
                                 </div>
                             )}
                         </div>
+                        {renderToast()}
                     </div>
+                    </>
                 );
             }
 
             if (appView === 'personal_dashboard') {
                 return (
+                    <>
                     <div className="min-h-screen bg-gray-50 text-gray-800 font-sans pb-10">
                         <header className="bg-blue-900 text-white p-4 shadow-md flex justify-between items-center no-print sticky top-0 z-40">
                             <div className="flex items-center gap-3">
@@ -1935,12 +2124,19 @@ María López	Z9y8x7" />
                                 </div>
                             </div>
                         </div>
+                        {renderToast()}
                     </div>
+                    </>
                 );
             }
 
             if (appView === 'workspace') {
-                return <Workspace db={dbActiva} appView={appView} setAppView={setAppView} asesoresGlobales={personalGlobal} setAsesoresGlobales={setPersonalGlobal} zoomAccounts={zoomAccounts} onUpdate={updateActiveDb} modoPersonal={modoPersonal} />;
+                return (
+                    <>
+                        <Workspace db={dbActiva} appView={appView} setAppView={setAppView} asesoresGlobales={personalGlobal} setAsesoresGlobales={setPersonalGlobal} zoomAccounts={zoomAccounts} onUpdate={updateActiveDb} modoPersonal={modoPersonal} />
+                        {renderToast()}
+                    </>
+                );
             }
             
             return null;
@@ -2282,8 +2478,8 @@ María López	Z9y8x7" />
                     </div>
 
                     {editingGroup && groupEditData && (
-                        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-                            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-3xl p-6 overflow-auto max-h-[90vh]">
+                        <Modal show={editingGroup && groupEditData} onClose={closeEditGroup} width="max-w-3xl" ariaLabel="Editar grupo de trabajo">
+                            <div className="bg-white rounded-3xl shadow-2xl w-full p-6 overflow-auto max-h-[90vh]">
                                 <div className="flex items-center justify-between mb-4">
                                     <div>
                                         <h3 className="text-xl font-bold text-gray-900">Editar Grupo de Trabajo</h3>
@@ -2324,7 +2520,7 @@ María López	Z9y8x7" />
                                     <button onClick={saveGroupChanges} className="px-5 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors">Guardar cambios</button>
                                 </div>
                             </div>
-                        </div>
+                        </Modal>
                     )}
                 </div>
             );
@@ -2424,22 +2620,22 @@ María López	Z9y8x7" />
 
             return (
                 <div className="bg-white rounded-2xl shadow-sm h-full flex flex-col overflow-hidden">
-                    <div className="p-4 border-b border-gray-100 bg-white flex gap-4 items-center flex-wrap">
-                        <div className="font-bold text-gray-800 flex items-center gap-2 mr-2"><i className="fa-solid fa-filter text-blue-500"></i> Filtros:</div>
-                        <select className="p-2 border border-gray-200 bg-gray-50 rounded-lg text-sm w-48 focus:border-blue-500 outline-none" value={filtros.grupo} onChange={e=>setFiltros({...filtros, grupo: e.target.value})}>
+                    <div className="p-4 border-b border-gray-100 bg-white flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
+                        <div className="font-bold text-gray-800 flex items-center gap-2"><i className="fa-solid fa-filter text-blue-500"></i> Filtros:</div>
+                        <select className="p-2 border border-gray-200 bg-gray-50 rounded-lg text-sm w-full md:w-48 focus:border-blue-500 outline-none" value={filtros.grupo} onChange={e=>setFiltros({...filtros, grupo: e.target.value})}>
                             <option value="ALL">Todos los Grupos</option>
                             <option value="NONE" className="font-bold text-red-500">-- SIN ASIGNAR --</option>
                             {db.grupos.map(g => <option key={g.id} value={g.id}>{g.nombre}</option>)}
                         </select>
-                        <select className="p-2 border border-gray-200 bg-gray-50 rounded-lg text-sm w-48 focus:border-blue-500 outline-none" value={filtros.municipio} onChange={e=>setFiltros({...filtros, municipio: e.target.value})}>
+                        <select className="p-2 border border-gray-200 bg-gray-50 rounded-lg text-sm w-full md:w-48 focus:border-blue-500 outline-none" value={filtros.municipio} onChange={e=>setFiltros({...filtros, municipio: e.target.value})}>
                             <option value="">Todos (Municipios)</option>
                             {municipiosUnicos.map(m => <option key={m} value={m}>{m}</option>)}
                         </select>
-                        <select className="p-2 border border-gray-200 bg-gray-50 rounded-lg text-sm w-48 focus:border-blue-500 outline-none" value={filtros.funcion} onChange={e=>setFiltros({...filtros, funcion: e.target.value})}>
+                        <select className="p-2 border border-gray-200 bg-gray-50 rounded-lg text-sm w-full md:w-48 focus:border-blue-500 outline-none" value={filtros.funcion} onChange={e=>setFiltros({...filtros, funcion: e.target.value})}>
                             <option value="">Todas (Funciones)</option>
                             {funcionesUnicas.map(f => <option key={f} value={f}>{f}</option>)}
                         </select>
-                        <select className="p-2 border border-gray-200 bg-gray-50 rounded-lg text-sm w-48 focus:border-blue-500 outline-none" value={filtros.nivel} onChange={e=>setFiltros({...filtros, nivel: e.target.value})}>
+                        <select className="p-2 border border-gray-200 bg-gray-50 rounded-lg text-sm w-full md:w-48 focus:border-blue-500 outline-none" value={filtros.nivel} onChange={e=>setFiltros({...filtros, nivel: e.target.value})}>
                             <option value="">Todos (Niveles)</option>
                             {nivelesUnicos.map(n => <option key={n} value={n}>{n}</option>)}
                         </select>
@@ -2529,8 +2725,8 @@ María López	Z9y8x7" />
                     )}
 
                     {editingParticipant && editData && (
-                        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-                            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-3xl p-6 overflow-auto max-h-[90vh]">
+                        <Modal show={editingParticipant && editData} onClose={closeEditModal} width="max-w-3xl" ariaLabel="Editar participante">
+                            <div className="bg-white rounded-3xl shadow-2xl w-full p-6 overflow-auto max-h-[90vh]">
                                 <div className="flex items-center justify-between mb-4">
                                     <div>
                                         <h3 className="text-xl font-bold text-gray-900">Editar Participante</h3>
@@ -2584,7 +2780,7 @@ María López	Z9y8x7" />
                                     <button onClick={saveParticipantEdits} className="px-5 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors">Guardar cambios</button>
                                 </div>
                             </div>
-                        </div>
+                        </Modal>
                     )}
                 </div>
             );
@@ -2612,9 +2808,128 @@ María López	Z9y8x7" />
             const activeSem = semanas[semanas.length - 1]; 
 
             const getPData = useCallback((pId) => {
-                if(!activeSem || !activeSem.data[pId]) return { conf: false, asis: {}, paEst: {}, paCal: {}, actEst: {}, actCal: {}, encEst: false, encInst: false, msgGrp: false, msgPer: false, llam: false, obs: '' };
-                return activeSem.data[pId];
-            }, [activeSem]);
+                const defaultP = { conf: false, asis: {}, paEst: {}, paCal: {}, actEst: {}, actCal: {}, encEst: false, encInst: false, msgGrp: false, msgPer: false, llam: false, obs: '' };
+                if (!activeSem) return defaultP;
+
+                // Build indexed list with robust timestamp fallback (id parse -> corteDate -> array index)
+                const indexed = (semanas || []).map((s, idx) => {
+                    let ts = 0;
+                    if (s && s.id) {
+                        const parts = (s.id || '').split('-');
+                        if (parts.length > 1) {
+                            const parsed = parseInt(parts[1]);
+                            if (!isNaN(parsed)) ts = parsed;
+                        }
+                    }
+                    if (!ts && s && s.corteDate) {
+                        const parsedDate = Date.parse(s.corteDate);
+                        if (!isNaN(parsedDate)) ts = parsedDate;
+                    }
+                    return { s, idx, ts };
+                });
+
+                // Sort chronologically but keep stable order with index as fallback
+                indexed.sort((a, b) => (a.ts - b.ts) || (a.idx - b.idx));
+
+                const activeIndex = indexed.findIndex(e => e.s && e.s.id === activeSem.id);
+                if (activeIndex === -1) return defaultP;
+
+                const toMerge = indexed.slice(0, activeIndex + 1).map(e => e.s).filter(Boolean);
+
+                // Merge progressively: earlier weeks -> later weeks (later override)
+                const res = { ...defaultP, asis: {}, paEst: {}, paCal: {}, actEst: {}, actCal: {} };
+                toMerge.forEach(sem => {
+                    if (!sem || !sem.data) return;
+                    const sd = sem.data[pId];
+                    if (!sd) return;
+
+                    ['conf','encEst','encInst','msgGrp','msgPer','llam','obs'].forEach(k => {
+                        if (sd[k] !== undefined) res[k] = sd[k];
+                    });
+
+                    ['asis','paEst','paCal','actEst','actCal'].forEach(n => {
+                        if (!res[n]) res[n] = {};
+                        const src = sd[n];
+                        if (!src) return;
+
+                        // If stored as array, map indices -> 1-based keys
+                        if (Array.isArray(src)) {
+                            src.forEach((v, idx) => {
+                                const k = idx + 1;
+                                let val = v;
+                                if (n === 'asis' || n === 'paEst' || n === 'actEst') val = (val === true || val === 'true');
+                                if (n === 'paCal' || n === 'actCal') val = parseFloatSafe(val);
+                                res[n][k] = val;
+                            });
+                        } else {
+                            Object.keys(src).forEach(key => {
+                                let normalizedKey = key;
+                                // accept 'S6', 's6', '6', etc. -> numeric 6
+                                const digits = (key || '').toString().replace(/[^0-9]/g, '');
+                                if (digits) normalizedKey = parseInt(digits, 10);
+
+                                let val = src[key];
+                                if (val === 'true') val = true;
+                                if (val === 'false') val = false;
+
+                                if (n === 'asis' || n === 'paEst' || n === 'actEst') {
+                                    val = (val === true || val === 'true');
+                                }
+                                if (n === 'paCal' || n === 'actCal') {
+                                    val = parseFloatSafe(val);
+                                }
+
+                                res[n][normalizedKey] = val;
+                            });
+                        }
+                    });
+                });
+
+                return res;
+            }, [activeSem, semanas]);
+
+            const getEffectiveAsis = useCallback((pId) => {
+                // Return merged 'asis' across semanas up to activeSem
+                if (!activeSem) return {};
+                const indexed = (semanas || []).map((s, idx) => {
+                    let ts = 0;
+                    if (s && s.id) {
+                        const parts = (s.id || '').split('-');
+                        if (parts.length > 1) {
+                            const parsed = parseInt(parts[1]);
+                            if (!isNaN(parsed)) ts = parsed;
+                        }
+                    }
+                    if (!ts && s && s.corteDate) {
+                        const parsedDate = Date.parse(s.corteDate);
+                        if (!isNaN(parsedDate)) ts = parsedDate;
+                    }
+                    return { s, idx, ts };
+                });
+                indexed.sort((a,b) => (a.ts - b.ts) || (a.idx - b.idx));
+                const activeIndex = indexed.findIndex(e => e.s && e.s.id === activeSem.id);
+                if (activeIndex === -1) return {};
+                const toMerge = indexed.slice(0, activeIndex + 1).map(e => e.s).filter(Boolean);
+                const res = {};
+                toMerge.forEach(sem => {
+                    if (!sem || !sem.data) return;
+                    const sd = sem.data[pId];
+                    if (!sd) return;
+                    const src = sd.asis;
+                    if (!src) return;
+                    if (Array.isArray(src)) {
+                        src.forEach((v, idx) => { if (v === true || v === 'true') res[idx+1] = true; });
+                    } else {
+                        Object.keys(src).forEach(key => {
+                            const digits = (key || '').toString().replace(/[^0-9]/g, '');
+                            const k = digits ? parseInt(digits,10) : parseInt(key,10);
+                            const val = src[key];
+                            if (val === true || val === 'true') res[k] = true;
+                        });
+                    }
+                });
+                return res;
+            }, [activeSem, semanas]);
 
             const calcFinal = useCallback((pId) => {
                 const d = getPData(pId);
@@ -3083,10 +3398,38 @@ María López	Z9y8x7" />
             }];
 
             const labelsAsistencias = aSes.map(i => `S${i}`);
+            // helper: merge asis across semanas up to activeSem (local to this component)
+            const getEffectiveAsisLocal = (pId) => {
+                const semanas = db.semanasSeguimiento || [];
+                const indexed = semanas.map((s, idx) => {
+                    let ts = 0;
+                    if (s && s.id) {
+                        const parts = (s.id || '').split('-');
+                        if (parts.length > 1) {
+                            const parsed = parseInt(parts[1]); if (!isNaN(parsed)) ts = parsed;
+                        }
+                    }
+                    if (!ts && s && s.corteDate) { const parsedDate = Date.parse(s.corteDate); if (!isNaN(parsedDate)) ts = parsedDate; }
+                    return { s, idx, ts };
+                });
+                indexed.sort((a,b) => (a.ts - b.ts) || (a.idx - b.idx));
+                const activeIndex = indexed.findIndex(e => e.s && e.s.id === activeSem?.id);
+                if (activeIndex === -1) return {};
+                const toMerge = indexed.slice(0, activeIndex + 1).map(e => e.s).filter(Boolean);
+                const res = {};
+                toMerge.forEach(sem => {
+                    if (!sem || !sem.data) return;
+                    const sd = sem.data[pId]; if (!sd) return; const src = sd.asis; if (!src) return;
+                    if (Array.isArray(src)) src.forEach((v, idx) => { if (v === true || v === 'true') res[idx+1] = true; });
+                    else Object.keys(src).forEach(key => { const digits = (key||'').toString().replace(/[^0-9]/g,''); const k = digits ? parseInt(digits,10) : parseInt(key,10); const val = src[key]; if (val === true || val === 'true') res[k] = true; });
+                });
+                return res;
+            };
+
             const dataAsistencias = [{
                 label: '% Asistencia',
                 data: aSes.map(i => {
-                    const asistencias = db.participantes.filter(p => !!getPData(p.id)?.asis?.[i]).length;
+                    const asistencias = db.participantes.filter(p => !!getEffectiveAsisLocal(p.id)[i]).length;
                     return total.inscritos ? parseFloatSafe((asistencias / total.inscritos * 100).toFixed(1)) : 0;
                 }),
                 backgroundColor: '#2563eb'
@@ -3241,6 +3584,43 @@ María López	Z9y8x7" />
             const [matrixFilterAvz, setMatrixFilterAvz] = useState('ALL');
             const [matrixSort, setMatrixSort] = useState({ type: 'none', dir: 'asc' });
 
+            const aPA = Array.from({length: db.info.numPA}, (_, i) => i + 1);
+            const aAct = Array.from({length: db.info.numAct}, (_, i) => i + 1);
+            const aSes = Array.from({length: db.info.numSesiones || 0}, (_, i) => i + 1);
+
+            const createColumnFilterState = useCallback(() => {
+                const base = {
+                    curp: '', nombre: '', usuario: '', correo: '', asesor: '', grupo: '', conf: 'ALL', calif: '', estatus: 'ALL', estatal: 'ALL', institucion: 'ALL', msgGrp: 'ALL', msgPer: 'ALL', llamada: 'ALL', obs: ''
+                };
+                aSes.forEach(i => base[`asis-${i}`] = 'ALL');
+                aPA.forEach(i => {
+                    base[`paEst-${i}`] = 'ALL';
+                    base[`paCal-${i}`] = '';
+                });
+                aAct.forEach(i => {
+                    base[`actEst-${i}`] = 'ALL';
+                    base[`actCal-${i}`] = '';
+                });
+                return base;
+            }, [aSes, aPA, aAct]);
+
+            const [columnFilters, setColumnFilters] = useState(createColumnFilterState);
+            const [columnSort, setColumnSort] = useState({ key: 'none', dir: 'asc' });
+
+            const toggleColumnSort = useCallback((key) => {
+                setColumnSort(current => {
+                    if (current.key === key) {
+                        if (current.dir === 'asc') return { key, dir: 'desc' };
+                        return { key: 'none', dir: 'asc' };
+                    }
+                    return { key, dir: 'asc' };
+                });
+            }, []);
+
+            const resetColumnFilters = useCallback(() => {
+                setColumnFilters(createColumnFilterState());
+            }, [createColumnFilterState]);
+
             const umbralAcreditacion = Number(db.info?.acreditacion ?? 80);
             const activeSem = semanas.find(s => s.id === activeSemId);
 
@@ -3292,10 +3672,147 @@ María López	Z9y8x7" />
                 return activeSem.data[pId];
             }, [activeSem]);
 
+            const getEffectiveAsis = useCallback((pId) => {
+                if (!activeSem) return {};
+                const indexed = (semanas || []).map((s, idx) => {
+                    let ts = 0;
+                    if (s && s.id) {
+                        const parts = (s.id || '').split('-');
+                        if (parts.length > 1) {
+                            const parsed = parseInt(parts[1]);
+                            if (!isNaN(parsed)) ts = parsed;
+                        }
+                    }
+                    if (!ts && s && s.corteDate) {
+                        const parsedDate = Date.parse(s.corteDate);
+                        if (!isNaN(parsedDate)) ts = parsedDate;
+                    }
+                    return { s, idx, ts };
+                });
+                indexed.sort((a,b) => (a.ts - b.ts) || (a.idx - b.idx));
+                const activeIndex = indexed.findIndex(e => e.s && e.s.id === activeSem.id);
+                if (activeIndex === -1) return {};
+                const toMerge = indexed.slice(0, activeIndex + 1).map(e => e.s).filter(Boolean);
+                const res = {};
+                toMerge.forEach(sem => {
+                    if (!sem || !sem.data) return;
+                    const sd = sem.data[pId];
+                    if (!sd) return;
+                    const src = sd.asis;
+                    if (!src) return;
+                    if (Array.isArray(src)) {
+                        src.forEach((v, idx) => { if (v === true || v === 'true') res[idx+1] = true; });
+                    } else {
+                        Object.keys(src).forEach(key => {
+                            const digits = (key || '').toString().replace(/[^0-9]/g, '');
+                            const k = digits ? parseInt(digits,10) : parseInt(key,10);
+                            const val = src[key];
+                            if (val === true || val === 'true') res[k] = true;
+                        });
+                    }
+                });
+                return res;
+            }, [activeSem, semanas]);
+
             const calcFinal = useCallback((pId) => {
                 const d = getPData(pId);
                 return calcularCalificacionFinal(d, db.info);
             }, [db.info, getPData]);
+
+            const getColumnValue = useCallback((p, key) => {
+                const d = getPData(p.id);
+                const g = db.grupos.find(x => x.id === p.grupoId) || {};
+                const status = calcFinal(p.id) >= umbralAcreditacion ? 'ACREDITADO' : 'NO ACREDITADO';
+                const eff = getEffectiveAsis(p.id);
+
+                if (key === 'curp') return p.curp || '';
+                if (key === 'nombre') return p.completo || '';
+                if (key === 'usuario') return getMoodleUsername(p.curp) || '';
+                if (key === 'correo') return p.correo || '';
+                if (key === 'asesor') return g.asesor || '';
+                if (key === 'grupo') return g.nombre || '';
+                if (key === 'conf') return d.conf ? 'SI' : 'NO';
+                if (key.startsWith('asis-')) {
+                    const idx = parseInt(key.split('-')[1], 10);
+                    return eff[idx] ? 'SI' : 'NO';
+                }
+                if (key.startsWith('paEst-')) {
+                    const idx = parseInt(key.split('-')[1], 10);
+                    return d.paEst[idx] ? 'FINALIZADO' : 'NO FINALIZADO';
+                }
+                if (key.startsWith('paCal-')) {
+                    const idx = parseInt(key.split('-')[1], 10);
+                    return parseFloatSafe(d.paCal[idx]) || 0;
+                }
+                if (key.startsWith('actEst-')) {
+                    const idx = parseInt(key.split('-')[1], 10);
+                    return d.actEst[idx] ? 'FINALIZADO' : 'NO FINALIZADO';
+                }
+                if (key.startsWith('actCal-')) {
+                    const idx = parseInt(key.split('-')[1], 10);
+                    return parseFloatSafe(d.actCal[idx]) || 0;
+                }
+                if (key === 'calif') return calcFinal(p.id);
+                if (key === 'estatus') return status;
+                if (key === 'estatal') return d.encEst ? 'SI' : 'NO';
+                if (key === 'institucion') return d.encInst ? 'SI' : 'NO';
+                if (key === 'msgGrp') return d.msgGrp ? 'SI' : 'NO';
+                if (key === 'msgPer') return d.msgPer ? 'SI' : 'NO';
+                if (key === 'llamada') return d.llam ? 'SI' : 'NO';
+                if (key === 'obs') return d.obs || '';
+                return '';
+            }, [db, getPData, getEffectiveAsis, calcFinal, umbralAcreditacion]);
+
+            const matchesColumnFilters = useCallback((p) => {
+                return Object.entries(columnFilters).every(([filterKey, filterValue]) => {
+                    if (filterValue === 'ALL' || filterValue === '' || filterValue == null) return true;
+                    const value = getColumnValue(p, filterKey);
+                    const normalizedValue = (value ?? '').toString().toUpperCase();
+                    const normalizedFilter = filterValue.toString().toUpperCase();
+
+                    if (filterKey === 'calif' || filterKey.startsWith('paCal-') || filterKey.startsWith('actCal-')) {
+                        const filterNumber = parseFloat(filterValue);
+                        if (!isNaN(filterNumber)) {
+                            return parseFloat(normalizedValue) === filterNumber;
+                        }
+                    }
+
+                    if (['conf','estatus','estatal','institucion','msgGrp','msgPer','llamada'].includes(filterKey) || filterKey.startsWith('asis-') || filterKey.startsWith('paEst-') || filterKey.startsWith('actEst-')) {
+                        return normalizedValue === normalizedFilter;
+                    }
+
+                    return normalizedValue.includes(normalizedFilter);
+                });
+            }, [columnFilters, getColumnValue]);
+
+            const compareColumnValues = useCallback((a, b, key) => {
+                const valueA = getColumnValue(a, key);
+                const valueB = getColumnValue(b, key);
+
+                if (key === 'calif' || key.startsWith('paCal-') || key.startsWith('actCal-')) {
+                    return parseFloat(valueA) - parseFloat(valueB);
+                }
+
+                const aStr = (valueA ?? '').toString();
+                const bStr = (valueB ?? '').toString();
+
+                const isNumeric = !Number.isNaN(parseFloat(aStr)) && !Number.isNaN(parseFloat(bStr)) && aStr.trim() !== '' && bStr.trim() !== '';
+                if (isNumeric) {
+                    return parseFloat(aStr) - parseFloat(bStr);
+                }
+                return aStr.localeCompare(bStr, 'es', { sensitivity: 'base' });
+            }, [getColumnValue]);
+
+            const renderHeaderLabel = useCallback((key, label) => {
+                const active = columnSort.key === key;
+                const icon = active ? (columnSort.dir === 'asc' ? 'sort-up' : 'sort-down') : 'sort';
+                return (
+                    <button type="button" onClick={() => toggleColumnSort(key)} className={`inline-flex items-center justify-between gap-1 w-full text-left text-[11px] uppercase tracking-wide ${active ? 'text-blue-700 font-bold' : 'text-gray-700'}`}>
+                        <span>{label}</span>
+                        <i className={`fa-solid fa-${icon} text-[10px] ${active ? 'text-blue-700' : 'text-gray-400'}`} />
+                    </button>
+                );
+            }, [columnSort, toggleColumnSort]);
 
             const listParticipantes = useMemo(() => {
                 let lista = db.participantes;
@@ -3324,14 +3841,23 @@ María López	Z9y8x7" />
                             const d = getPData(p.id);
                             if (matrixFilterAvz === 'PA_INC') return Array.from({length: db.info.numPA}, (_,i)=>i+1).some(i => !d.paEst[i]);
                             if (matrixFilterAvz === 'ACT_INC') return Array.from({length: db.info.numAct}, (_,i)=>i+1).some(i => !d.actEst[i]);
-                            if (matrixFilterAvz === 'ASIS_INC') return Array.from({length: db.info.numSesiones}, (_,i)=>i+1).some(i => !d.asis[i]);
+                            if (matrixFilterAvz === 'ASIS_INC') {
+                                const eff = getEffectiveAsis(p.id);
+                                return Array.from({length: db.info.numSesiones}, (_,i)=>i+1).some(i => !eff[i]);
+                            }
                             if (matrixFilterAvz === 'ENC_INC') return !d.encEst || !d.encInst;
                             return true;
                         });
                     }
                 }
 
+                lista = lista.filter(matchesColumnFilters);
+
                 return lista.sort((a,b) => {
+                    if (!isAsesor && columnSort.key !== 'none') {
+                        const diff = compareColumnValues(a, b, columnSort.key);
+                        return columnSort.dir === 'asc' ? diff : -diff;
+                    }
                     if (!isAsesor && matrixSort.type !== 'none') {
                         if (matrixSort.type === 'calif') {
                             const calA = calcFinal(a.id);
@@ -3348,7 +3874,7 @@ María López	Z9y8x7" />
                     const gB = (db.grupos.find(g=>g.id===b.grupoId)||{}).nombre||'';
                     return gA.localeCompare(gB) || a.completo.localeCompare(b.completo);
                 });
-            }, [db, isAsesor, asesorGrupoId, matrixFilterGrupo, matrixFilterConf, matrixFilterEstatus, matrixFilterAvz, matrixSort, getPData, calcFinal]);
+            }, [db, isAsesor, asesorGrupoId, matrixFilterGrupo, matrixFilterConf, matrixFilterEstatus, matrixFilterAvz, matrixSort, columnFilters, columnSort, getPData, calcFinal, compareColumnValues, matchesColumnFilters]);
 
             const reportParticipantes = useMemo(() => {
                 let lista = db.participantes;
@@ -3366,10 +3892,6 @@ María López	Z9y8x7" />
                     return gA.localeCompare(gB) || a.completo.localeCompare(b.completo);
                 });
             }, [db, isAsesor, asesorGrupoId, reportFilterGrupo]);
-
-            const aSes = Array.from({length: db.info.numSesiones}, (_, i) => i + 1);
-            const aPA = Array.from({length: db.info.numPA}, (_, i) => i + 1);
-            const aAct = Array.from({length: db.info.numAct}, (_, i) => i + 1);
 
             const datosGlobales = useMemo(() => {
                 const totalParticipantes = listParticipantes.length;
@@ -3525,7 +4047,10 @@ María López	Z9y8x7" />
                         idx+1, p.curp, p.completo, getMoodleUsername(p.curp), p.correo, g.asesor||'-', g.nombre||'-', d.conf?'SI':'NO'
                     ];
                     
-                    for(let i=1; i<=db.info.numSesiones; i++) row.push(d.asis[i]?'SI':'NO');
+                    for(let i=1; i<=db.info.numSesiones; i++) {
+                        const eff = getEffectiveAsis(p.id);
+                        row.push(eff[i] ? 'SI' : 'NO');
+                    }
                     for(let i=1; i<=db.info.numPA; i++) { row.push(d.paEst[i]?'Finalizado':'No Finalizado'); row.push(d.paCal[i]||0); }
                     for(let i=1; i<=db.info.numAct; i++) { row.push(d.actEst[i]?'Finalizado':'No Finalizado'); row.push(d.actCal[i]||0); }
                     
@@ -3542,7 +4067,7 @@ María López	Z9y8x7" />
 
             if (subView === 'eficiencia' && (isAdmin || isCoordinador)) {
                 return (
-                    <div className="flex flex-col h-full bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-100">
+                <div className="flex flex-col h-full bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-100">
                         <div className="bg-gray-800 text-white p-4 flex justify-between items-center no-print">
                             <div className="flex items-center gap-2">
                                 <span className="font-bold text-gray-300 uppercase tracking-wider text-xs mr-2">Ciclo Operativo:</span>
@@ -3589,67 +4114,28 @@ María López	Z9y8x7" />
 
                     {(isAdmin || isCoordinador || isAsesor) && subView === 'matriz' && (
                         <div className="flex flex-col no-print border-b border-gray-200">
-                            <div className="bg-white p-3 flex gap-4 text-xs items-center justify-between shadow-sm z-20 relative">
-                                <div className="flex gap-6 items-center">
-                                    <div><span className="font-bold text-gray-700">Período:</span> <input disabled={!isAdmin} className="border border-gray-300 rounded-lg p-1.5 ml-2 w-56 bg-gray-50 focus:bg-white outline-none focus:border-blue-500 disabled:opacity-70 disabled:bg-gray-100" placeholder="DEL 00 DE MES A 00 DE MES" value={activeSem.fechas} onChange={e=>{ const ns=semanas.map(s=>s.id===activeSem.id?{...s,fechas:e.target.value}:s); onUpdate({ ...db, semanasSeguimiento:ns }); }}/></div>
-                                    
-                                    <div className="flex items-center gap-2 border-l pl-4">
-                                        <span className="font-bold text-gray-700"><i className="fa-regular fa-calendar-xmark text-red-500 mr-1"></i> Cierre:</span> 
-                                        <input type="date" disabled={!isAdmin} className="border border-gray-300 rounded-lg p-1.5 bg-gray-50 focus:bg-white outline-none focus:border-red-500 disabled:opacity-70 disabled:bg-gray-100" value={activeSem.corteDate || ''} onChange={e=>{ const ns=semanas.map(s=>s.id===activeSem.id?{...s,corteDate:e.target.value}:s); onUpdate({ ...db, semanasSeguimiento:ns }); }}/>
-                                        
-                                        {isAdmin && (
+                            <div className="bg-white p-3 flex flex-col gap-4 text-xs shadow-sm z-20 relative sm:flex-row sm:items-center sm:justify-between">
+                                <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                                    <span className="font-bold text-gray-700">Período:</span>
+                                    <input disabled={!isAdmin} className="border border-gray-300 rounded-lg p-1.5 w-full sm:w-56 bg-gray-50 focus:bg-white outline-none focus:border-blue-500 disabled:opacity-70 disabled:bg-gray-100" placeholder="DEL 00 DE MES A 00 DE MES" value={activeSem.fechas} onChange={e=>{ const ns=semanas.map(s=>s.id===activeSem.id?{...s,fechas:e.target.value}:s); onUpdate({ ...db, semanasSeguimiento:ns }); }}/>
+                                </div>
+                                <div className="flex items-center gap-2 sm:border-l sm:pl-4">
+                                    <span className="font-bold text-gray-700"><i className="fa-regular fa-calendar-xmark text-red-500 mr-1"></i> Cierre:</span>
+                                    <input type="date" disabled={!isAdmin} className="border border-gray-300 rounded-lg p-1.5 bg-gray-50 focus:bg-white outline-none focus:border-red-500 disabled:opacity-70 disabled:bg-gray-100" value={activeSem.corteDate || ''} onChange={e=>{ const ns=semanas.map(s=>s.id===activeSem.id?{...s,corteDate:e.target.value}:s); onUpdate({ ...db, semanasSeguimiento:ns }); }}/>
+                                </div>
+                                {isAdmin && (
                                             <select className={`border border-gray-300 rounded-lg p-1.5 outline-none font-bold ${activeSem.lockStatus === 'UNLOCKED' ? 'bg-green-100 text-green-700 border-green-300' : activeSem.lockStatus === 'LOCKED' ? 'bg-red-100 text-red-700 border-red-300' : 'bg-gray-50 text-gray-600'}`} value={activeSem.lockStatus || 'AUTO'} onChange={e=>{ const ns=semanas.map(s=>s.id===activeSem.id?{...s,lockStatus:e.target.value}:s); onUpdate({ ...db, semanasSeguimiento:ns }); }}>
                                                 <option value="AUTO">Bloqueo Automático (Por Fecha)</option>
                                                 <option value="LOCKED">Forzar Bloqueo de Asesores Ahora</option>
                                                 <option value="UNLOCKED">Permitir Edición Extemporánea</option>
                                             </select>
                                         )}
-                                    </div>
                                 </div>
-                                <div className="flex gap-3">
+                                <div className="flex gap-3 items-center">
                                     <button onClick={exportarSeguimientoCSV} className="bg-blue-50 text-blue-700 border border-blue-200 px-4 py-1.5 rounded-lg font-bold shadow-sm flex items-center gap-2 hover:bg-blue-100 transition-colors"><i className="fa-solid fa-file-csv"></i> Descargar Excel</button>
                                     {isAdmin && <button onClick={()=>setShowImport(true)} className="bg-green-600 text-white px-5 py-1.5 rounded-lg font-bold shadow-md flex items-center gap-2 hover:bg-green-700 transition-transform active:scale-95"><i className="fa-solid fa-wand-magic-sparkles"></i> Carga Rápida Masiva</button>}
+                                    <button onClick={() => resetColumnFilters()} className="text-blue-600 hover:underline font-bold ml-2">Limpiar Filtros de Columnas</button>
                                 </div>
-                            </div>
-                            
-                            <div className="bg-gray-100 p-2.5 flex gap-4 text-xs items-center overflow-x-auto border-t border-gray-200 shadow-inner z-10">
-                                <span className="font-black text-gray-500 uppercase tracking-widest flex items-center gap-1"><i className="fa-solid fa-filter text-blue-500"></i> Filtros de Tabla</span>
-                                
-                                <select className="border border-gray-300 rounded-md p-1.5 outline-none focus:border-blue-500" value={matrixFilterGrupo} onChange={e=>setMatrixFilterGrupo(e.target.value)}>
-                                    <option value="ALL">Grupo: Todos</option><option value="NONE">Sin Grupo</option>
-                                    {db.grupos.map(g=><option key={g.id} value={g.id}>{g.nombre}</option>)}
-                                </select>
-                                
-                                <select className="border border-gray-300 rounded-md p-1.5 outline-none focus:border-blue-500" value={matrixFilterConf} onChange={e=>setMatrixFilterConf(e.target.value)}>
-                                    <option value="ALL">Confirmación: Todos</option><option value="SI">Confirmados</option><option value="NO">No Confirmados</option>
-                                </select>
-                                
-                                <select className="border border-gray-300 rounded-md p-1.5 outline-none focus:border-blue-500" value={matrixFilterEstatus} onChange={e=>setMatrixFilterEstatus(e.target.value)}>
-                                    <option value="ALL">Estatus: Todos</option><option value="ACREDITADO">Acreditados</option><option value="NO ACREDITADO">No Acreditados</option>
-                                </select>
-
-                                <select className="border border-gray-300 rounded-md p-1.5 outline-none focus:border-blue-500 font-semibold text-blue-800" value={matrixFilterAvz} onChange={e=>setMatrixFilterAvz(e.target.value)}>
-                                    <option value="ALL">Filtro Especial: Desactivado</option>
-                                    <option value="PA_INC">Faltan Prods. Aprendizaje</option>
-                                    <option value="ACT_INC">Faltan Actividades</option>
-                                    <option value="ASIS_INC">Faltan Asistencias</option>
-                                    <option value="ENC_INC">Faltan Encuestas</option>
-                                </select>
-
-                                <span className="text-gray-400">|</span>
-
-                                <button onClick={() => setMatrixSort({ type: 'calif', dir: matrixSort.type === 'calif' && matrixSort.dir === 'asc' ? 'desc' : 'asc' })} className={`px-3 py-1.5 rounded-md border font-bold flex items-center gap-1 transition-colors ${matrixSort.type === 'calif' ? 'bg-blue-600 text-white border-blue-700' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}>
-                                    Calif Final <i className={`fa-solid fa-sort-${matrixSort.dir === 'asc' ? 'up' : 'down'} ${matrixSort.type !== 'calif' && 'opacity-30'}`}></i>
-                                </button>
-
-                                <button onClick={() => setMatrixSort({ type: 'estatus', dir: matrixSort.type === 'estatus' && matrixSort.dir === 'asc' ? 'desc' : 'asc' })} className={`px-3 py-1.5 rounded-md border font-bold flex items-center gap-1 transition-colors ${matrixSort.type === 'estatus' ? 'bg-blue-600 text-white border-blue-700' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}>
-                                    Estatus <i className={`fa-solid fa-sort-${matrixSort.dir === 'asc' ? 'alpha-up' : 'alpha-down'} ${matrixSort.type !== 'estatus' && 'opacity-30'}`}></i>
-                                </button>
-
-                                {(matrixSort.type !== 'none' || matrixFilterGrupo !== 'ALL' || matrixFilterConf !== 'ALL' || matrixFilterEstatus !== 'ALL' || matrixFilterAvz !== 'ALL') && (
-                                    <button onClick={() => { setMatrixSort({type:'none', dir:'asc'}); setMatrixFilterGrupo('ALL'); setMatrixFilterConf('ALL'); setMatrixFilterEstatus('ALL'); setMatrixFilterAvz('ALL'); }} className="text-red-500 hover:underline font-bold ml-2">Limpiar Filtros</button>
-                                )}
-                            </div>
                         </div>
                     )}
 
@@ -3670,18 +4156,39 @@ María López	Z9y8x7" />
                                         </tr>
                                         <tr>
                                             <th className="col-sticky" style={{left: 0, width: '40px', minWidth: '40px', maxWidth: '40px'}}>No</th>
-                                            <th className="col-sticky" style={{left: '40px', width: '150px', minWidth: '150px', maxWidth: '150px'}}>CURP</th>
-                                            <th className="col-sticky" style={{left: '190px', width: '350px', minWidth: '350px', maxWidth: '350px'}}>NOMBRE COMPLETO</th>
-                                            <th className="col-sticky shadow-[2px_0_5px_rgba(0,0,0,0.05)]" style={{left: '540px', width: '120px', minWidth: '120px', maxWidth: '120px'}}>USUARIO</th>
+                                            <th className="col-sticky" style={{left: '40px', width: '150px', minWidth: '150px', maxWidth: '150px'}}>{renderHeaderLabel('curp', 'CURP')}</th>
+                                            <th className="col-sticky" style={{left: '190px', width: '350px', minWidth: '350px', maxWidth: '350px'}}>{renderHeaderLabel('nombre', 'NOMBRE COMPLETO')}</th>
+                                            <th className="col-sticky shadow-[2px_0_5px_rgba(0,0,0,0.05)]" style={{left: '540px', width: '120px', minWidth: '120px', maxWidth: '120px'}}>{renderHeaderLabel('usuario', 'USUARIO')}</th>
                                             
-                                            <th>CORREO</th><th>ASESOR</th><th>GRUPO</th>
-                                            <th>CONFIRMACIÓN</th>
-                                            {aSes.map(i => <th key={`as-${i}`}>S {i}</th>)}
-                                            {aPA.map(i => <React.Fragment key={`pa-${i}`}><th>PA {i} Estado</th><th>PA {i} Calif</th></React.Fragment>)}
-                                            {aAct.map(i => <React.Fragment key={`act-${i}`}><th>ACT {i} Estado</th><th>ACT {i} Calif</th></React.Fragment>)}
-                                            <th>CALIF. FINAL</th><th>ESTATUS</th>
-                                            <th>ESTATAL</th><th>INSTITUC.</th>
-                                            <th className="bg-yellow-50">MSG GRUPO</th><th className="bg-yellow-50">MSG PERS.</th><th className="bg-yellow-50">LLAMADA</th><th className="bg-yellow-50" style={{minWidth: '350px'}}>OBSERVACIONES</th>
+                                            <th>{renderHeaderLabel('correo', 'CORREO')}</th><th>{renderHeaderLabel('asesor', 'ASESOR')}</th><th>{renderHeaderLabel('grupo', 'GRUPO')}</th>
+                                            <th>{renderHeaderLabel('conf', 'CONFIRMACIÓN')}</th>
+                                            {aSes.map(i => <th key={`as-${i}`}>{renderHeaderLabel(`asis-${i}`, `S ${i}`)}</th>)}
+                                            {aPA.map(i => <React.Fragment key={`pa-${i}`}><th>{renderHeaderLabel(`paEst-${i}`, `PA ${i} Estado`)}</th><th>{renderHeaderLabel(`paCal-${i}`, `PA ${i} Calif`)}</th></React.Fragment>)}
+                                            {aAct.map(i => <React.Fragment key={`act-${i}`}><th>{renderHeaderLabel(`actEst-${i}`, `ACT ${i} Estado`)}</th><th>{renderHeaderLabel(`actCal-${i}`, `ACT ${i} Calif`)}</th></React.Fragment>)}
+                                            <th>{renderHeaderLabel('calif', 'CALIF. FINAL')}</th><th>{renderHeaderLabel('estatus', 'ESTATUS')}</th>
+                                            <th>{renderHeaderLabel('estatal', 'ESTATAL')}</th><th>{renderHeaderLabel('institucion', 'INSTITUC.')}</th>
+                                            <th className="bg-yellow-50">{renderHeaderLabel('msgGrp', 'MSJ GRUPO')}</th><th className="bg-yellow-50">{renderHeaderLabel('msgPer', 'MSJ PERS.')}</th><th className="bg-yellow-50">{renderHeaderLabel('llamada', 'LLAMADA')}</th><th className="bg-yellow-50" style={{minWidth: '350px'}}>{renderHeaderLabel('obs', 'OBSERVACIONES')}</th>
+                                        </tr>
+                                        <tr className="bg-gray-50 border-t border-gray-200">
+                                            <th className="col-sticky" style={{left: 0, width: '40px', minWidth: '40px', maxWidth: '40px'}}></th>
+                                            <th className="col-sticky" style={{left: '40px', width: '150px', minWidth: '150px', maxWidth: '150px'}}><input type="text" className="w-full text-[10px] p-1 border border-gray-200 rounded" placeholder="Buscar CURP" value={columnFilters.curp} onChange={e => setColumnFilters(prev => ({ ...prev, curp: e.target.value }))} /></th>
+                                            <th className="col-sticky" style={{left: '190px', width: '350px', minWidth: '350px', maxWidth: '350px'}}><input type="text" className="w-full text-[10px] p-1 border border-gray-200 rounded" placeholder="Buscar nombre" value={columnFilters.nombre} onChange={e => setColumnFilters(prev => ({ ...prev, nombre: e.target.value }))} /></th>
+                                            <th className="col-sticky shadow-[2px_0_5px_rgba(0,0,0,0.05)]" style={{left: '540px', width: '120px', minWidth: '120px', maxWidth: '120px'}}><input type="text" className="w-full text-[10px] p-1 border border-gray-200 rounded" placeholder="Buscar usuario" value={columnFilters.usuario} onChange={e => setColumnFilters(prev => ({ ...prev, usuario: e.target.value }))} /></th>
+                                            <th><input type="text" className="w-full text-[10px] p-1 border border-gray-200 rounded" placeholder="Buscar correo" value={columnFilters.correo} onChange={e => setColumnFilters(prev => ({ ...prev, correo: e.target.value }))} /></th>
+                                            <th><input type="text" className="w-full text-[10px] p-1 border border-gray-200 rounded" placeholder="Buscar asesor" value={columnFilters.asesor} onChange={e => setColumnFilters(prev => ({ ...prev, asesor: e.target.value }))} /></th>
+                                            <th><input type="text" className="w-full text-[10px] p-1 border border-gray-200 rounded" placeholder="Buscar grupo" value={columnFilters.grupo} onChange={e => setColumnFilters(prev => ({ ...prev, grupo: e.target.value }))} /></th>
+                                            <th><select className="w-full text-[10px] p-1 border border-gray-200 rounded" value={columnFilters.conf} onChange={e => setColumnFilters(prev => ({ ...prev, conf: e.target.value }))}><option value="ALL">Todos</option><option value="SI">SI</option><option value="NO">NO</option></select></th>
+                                            {aSes.map(i => <th key={`flt-as-${i}`}><select className="w-full text-[10px] p-1 border border-gray-200 rounded" value={columnFilters[`asis-${i}`] || 'ALL'} onChange={e => setColumnFilters(prev => ({ ...prev, [`asis-${i}`]: e.target.value }))}><option value="ALL">Todos</option><option value="SI">SI</option><option value="NO">NO</option></select></th>)}
+                                            {aPA.map(i => <React.Fragment key={`flt-pa-${i}`}><th><select className="w-full text-[10px] p-1 border border-gray-200 rounded" value={columnFilters[`paEst-${i}`] || 'ALL'} onChange={e => setColumnFilters(prev => ({ ...prev, [`paEst-${i}`]: e.target.value }))}><option value="ALL">Todos</option><option value="FINALIZADO">Finalizado</option><option value="NO FINALIZADO">No Finalizado</option></select></th><th><input type="number" className="w-full text-[10px] p-1 border border-gray-200 rounded" placeholder="Calif" value={columnFilters[`paCal-${i}`] || ''} onChange={e => setColumnFilters(prev => ({ ...prev, [`paCal-${i}`]: e.target.value }))} /></th></React.Fragment>)}
+                                            {aAct.map(i => <React.Fragment key={`flt-act-${i}`}><th><select className="w-full text-[10px] p-1 border border-gray-200 rounded" value={columnFilters[`actEst-${i}`] || 'ALL'} onChange={e => setColumnFilters(prev => ({ ...prev, [`actEst-${i}`]: e.target.value }))}><option value="ALL">Todos</option><option value="FINALIZADO">Finalizado</option><option value="NO FINALIZADO">No Finalizado</option></select></th><th><input type="number" className="w-full text-[10px] p-1 border border-gray-200 rounded" placeholder="Calif" value={columnFilters[`actCal-${i}`] || ''} onChange={e => setColumnFilters(prev => ({ ...prev, [`actCal-${i}`]: e.target.value }))} /></th></React.Fragment>)}
+                                            <th><input type="number" className="w-full text-[10px] p-1 border border-gray-200 rounded" placeholder="Calif" value={columnFilters.calif || ''} onChange={e => setColumnFilters(prev => ({ ...prev, calif: e.target.value }))} /></th>
+                                            <th><select className="w-full text-[10px] p-1 border border-gray-200 rounded" value={columnFilters.estatus} onChange={e => setColumnFilters(prev => ({ ...prev, estatus: e.target.value }))}><option value="ALL">Todos</option><option value="ACREDITADO">ACREDITADO</option><option value="NO ACREDITADO">NO ACREDITADO</option></select></th>
+                                            <th><select className="w-full text-[10px] p-1 border border-gray-200 rounded" value={columnFilters.estatal} onChange={e => setColumnFilters(prev => ({ ...prev, estatal: e.target.value }))}><option value="ALL">Todos</option><option value="SI">SI</option><option value="NO">NO</option></select></th>
+                                            <th><select className="w-full text-[10px] p-1 border border-gray-200 rounded" value={columnFilters.institucion} onChange={e => setColumnFilters(prev => ({ ...prev, institucion: e.target.value }))}><option value="ALL">Todos</option><option value="SI">SI</option><option value="NO">NO</option></select></th>
+                                            <th><select className="w-full text-[10px] p-1 border border-gray-200 rounded" value={columnFilters.msgGrp} onChange={e => setColumnFilters(prev => ({ ...prev, msgGrp: e.target.value }))}><option value="ALL">Todos</option><option value="SI">SI</option><option value="NO">NO</option></select></th>
+                                            <th><select className="w-full text-[10px] p-1 border border-gray-200 rounded" value={columnFilters.msgPer} onChange={e => setColumnFilters(prev => ({ ...prev, msgPer: e.target.value }))}><option value="ALL">Todos</option><option value="SI">SI</option><option value="NO">NO</option></select></th>
+                                            <th><select className="w-full text-[10px] p-1 border border-gray-200 rounded" value={columnFilters.llamada} onChange={e => setColumnFilters(prev => ({ ...prev, llamada: e.target.value }))}><option value="ALL">Todos</option><option value="SI">SI</option><option value="NO">NO</option></select></th>
+                                            <th><input type="text" className="w-full text-[10px] p-1 border border-gray-200 rounded" placeholder="Buscar obs" value={columnFilters.obs} onChange={e => setColumnFilters(prev => ({ ...prev, obs: e.target.value }))} /></th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -3701,7 +4208,7 @@ María López	Z9y8x7" />
                                                     
                                                     <td><input type="checkbox" disabled={!canEditCore} checked={d.conf} onChange={e=>updatePData(p.id, 'conf', e.target.checked)} className={`w-4 h-4 ${!canEditCore?'opacity-50':''}`} /></td>
                                                     
-                                                    {aSes.map(i => <td key={`as-${i}`}><input type="checkbox" disabled={!canEditCore} checked={!!d.asis[i]} onChange={e=>updatePData(p.id, 'asis', e.target.checked, i)} className={`w-4 h-4 ${!canEditCore?'opacity-50':''}`}/></td>)}
+                                                    {aSes.map(i => <td key={`as-${i}`}><input type="checkbox" disabled={!canEditCore} checked={!!getEffectiveAsis(p.id)[i]} onChange={e=>updatePData(p.id, 'asis', e.target.checked, i)} className={`w-4 h-4 ${!canEditCore?'opacity-50':''}`}/></td>)}
                                                     
                                                     {aPA.map(i => (
                                                         <React.Fragment key={`pa-${i}`}>
@@ -3900,8 +4407,8 @@ María López	Z9y8x7" />
                     )}
 
                     {showNewSemanaModal && (
-                        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowNewSemanaModal(false)}>
-                            <div className="bg-white rounded-2xl shadow-2xl w-[520px] max-w-full flex flex-col overflow-hidden">
+                        <Modal show={showNewSemanaModal} onClose={() => setShowNewSemanaModal(false)} width="max-w-lg" ariaLabel="Nueva semana">
+                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[520px] flex flex-col overflow-hidden">
                                 <div className="p-5 flex justify-between items-center border-b border-gray-100">
                                     <h2 className="font-bold text-lg text-gray-800 flex items-center gap-3"><i className="fa-solid fa-calendar-plus text-cyan-600"></i> Nueva Semana</h2>
                                     <button onClick={() => setShowNewSemanaModal(false)} className="text-gray-400 hover:text-red-500 transition-colors"><i className="fa-solid fa-xmark text-2xl"></i></button>
@@ -3916,12 +4423,12 @@ María López	Z9y8x7" />
                                     <button onClick={guardarNuevaSemana} className="px-5 py-2 rounded-xl bg-cyan-600 text-white font-bold hover:bg-cyan-700 shadow">Crear semana</button>
                                 </div>
                             </div>
-                        </div>
+                        </Modal>
                     )}
 
                     {showImport && isAdmin && (
-                        <div className="fixed inset-0 bg-blue-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                            <div className="bg-white rounded-2xl shadow-2xl w-[700px] max-w-full flex flex-col max-h-[90vh] overflow-hidden">
+                        <Modal show={showImport} onClose={() => setShowImport(false)} width="max-w-4xl" ariaLabel="Carga rápida Moodle">
+                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[700px] flex flex-col max-h-[90vh] overflow-hidden">
                                 <div className="p-5 flex justify-between items-center bg-gray-50 border-b border-gray-200">
                                     <h2 className="font-bold text-xl text-gray-800 flex items-center gap-3"><i className="fa-solid fa-wand-magic-sparkles text-blue-600"></i> Carga Rápida Moodle</h2>
                                     <button onClick={()=>setShowImport(false)} className="text-gray-400 hover:text-red-500 transition-colors"><i className="fa-solid fa-xmark text-2xl"></i></button>
@@ -3954,7 +4461,7 @@ María López	Z9y8x7" />
                                     <button onClick={procesarImportacion} className="px-6 py-3 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700 shadow-lg shadow-blue-500/30 flex items-center gap-2 transition-transform active:scale-95"><i className="fa-solid fa-play"></i> Procesar Datos</button>
                                 </div>
                             </div>
-                        </div>
+                        </Modal>
                     )}
                 </div>
             );
