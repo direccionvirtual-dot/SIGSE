@@ -527,6 +527,7 @@
             const [modoPersonal, setModoPersonal] = useState({ activo: false, grupoId: null, personalId: null, personalName: '', roleInProject: null });
             const [showLoginPersonal, setShowLoginPersonal] = useState(false);
             const [showLoginAdmin, setShowLoginAdmin] = useState(false);
+            const [loginUser, setLoginUser] = useState('');
             const [loginPass, setLoginPass] = useState('');
             const [loginAdminPass, setLoginAdminPass] = useState('');
             const [toast, setToast] = useState({ show: false, message: '', variant: 'success' });
@@ -580,8 +581,8 @@
 
             const [textoPegado, setTextoPegado] = useState('');
             const [participantesProcesados, setParticipantesProcesados] = useState([]);
-            const [editPersonalModal, setEditPersonalModal] = useState({ show: false, id: null, nombre: '', password: '' });
-            const [createPersonalModal, setCreatePersonalModal] = useState({ show: false, mode: 'individual', nombre: '', password: '', bulkText: '' });
+            const [editPersonalModal, setEditPersonalModal] = useState({ show: false, id: null, nombre: '', usuario: '', password: '' });
+            const [createPersonalModal, setCreatePersonalModal] = useState({ show: false, mode: 'individual', nombre: '', usuario: '', password: '', bulkText: '' });
 
             useEffect(() => {
                 const est = ESTADOS.find(e => e.nombre === estadoSeleccionado);
@@ -1095,14 +1096,27 @@
             };
 
             const intentarLoginPersonal = () => {
-                const userFound = personalGlobal.find(a => a.password === loginPass);
+                const usuario = (loginUser || '').trim();
+                const password = (loginPass || '').trim();
+
+                if (!usuario || !password) {
+                    alert('Ingresa tu usuario y contraseña para continuar.');
+                    return;
+                }
+
+                const userFound = personalGlobal.find(a => {
+                    const username = (a.usuario || a.nombre || '').trim();
+                    return normalizeText(username) === normalizeText(usuario) && String(a.password || '').trim() === password;
+                });
+
                 if (userFound) {
                     setModoPersonal({ activo: true, grupoId: null, personalId: userFound.id, personalName: userFound.nombre, roleInProject: null });
                     setShowLoginPersonal(false);
+                    setLoginUser('');
                     setLoginPass('');
                     setAppView('personal_dashboard');
                 } else {
-                    alert("Contraseña incorrecta o usuario no encontrado.");
+                    alert('Usuario o contraseña incorrectos.');
                 }
             };
 
@@ -1114,47 +1128,51 @@
             };
 
             const resetCreatePersonalModal = () => {
-                setCreatePersonalModal({ show: false, mode: 'individual', nombre: '', password: '', bulkText: '' });
+                setCreatePersonalModal({ show: false, mode: 'individual', nombre: '', usuario: '', password: '', bulkText: '' });
             };
 
             const handleCrearPersonalAdmin = () => {
-                setCreatePersonalModal({ show: true, mode: 'individual', nombre: '', password: '', bulkText: '' });
+                setCreatePersonalModal({ show: true, mode: 'individual', nombre: '', usuario: '', password: '', bulkText: '' });
             };
 
             const registrarPersonalDesdeModal = () => {
                 if (createPersonalModal.mode === 'individual') {
                     const nombre = createPersonalModal.nombre.trim();
+                    const usuario = createPersonalModal.usuario.trim();
                     const password = createPersonalModal.password.trim();
-                    if (!nombre || !password) return alert("Ingresa el nombre completo y la contraseña única.");
+                    if (!nombre || !usuario || !password) return alert('Ingresa nombre completo, usuario y contraseña.');
 
-                    setPersonalGlobal(prev => [...prev, { id: `PERS-${Date.now()}`, nombre, password }]);
-                    alert(`Persona registrada. Contraseña: ${password}`);
+                    setPersonalGlobal(prev => [...prev, { id: `PERS-${Date.now()}`, nombre, usuario, password }]);
+                    alert(`Persona registrada. Usuario: ${usuario} • Contraseña: ${password}`);
                     resetCreatePersonalModal();
                     return;
                 }
 
                 const texto = createPersonalModal.bulkText.trim();
-                if (!texto) return alert("Pega los datos para realizar la carga masiva.");
+                if (!texto) return alert('Pega los datos para realizar la carga masiva.');
 
                 const lineas = texto.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-                if (lineas.length === 0) return alert("No se detectaron filas para registrar.");
+                if (lineas.length === 0) return alert('No se detectaron filas para registrar.');
 
                 const encabezado = lineas[0].split(/\t|;|,|\|/).map(c => normalizeText(c));
                 const tieneNombre = encabezado.some(h => h.includes('NOMBRE') && h.includes('COMPLETO'));
+                const tieneUsuario = encabezado.some(h => h.includes('USUARIO') || h.includes('USERNAME') || h.includes('NOMBREDEUSUARIO'));
                 const tienePassword = encabezado.some(h => h.includes('CONTRASENA') || h.includes('PASSWORD'));
-                const inicio = (tieneNombre && tienePassword) ? 1 : 0;
+                const inicio = (tieneNombre && (tieneUsuario || tienePassword)) ? 1 : 0;
 
                 const registros = [];
                 lineas.slice(inicio).forEach((linea, index) => {
                     const celdas = linea.split(/\t|;|,|\|/).map(c => c.trim());
                     const nombre = celdas[0] || '';
-                    const password = celdas[1] || '';
-                    if (nombre && password) {
-                        registros.push({ id: `PERS-${Date.now()}-${index + 1}`, nombre, password });
+                    const usuario = celdas[1] || celdas[0] || '';
+                    const password = celdas[2] || celdas[1] || '';
+
+                    if (nombre && usuario && password) {
+                        registros.push({ id: `PERS-${Date.now()}-${index + 1}`, nombre, usuario, password });
                     }
                 });
 
-                if (registros.length === 0) return alert("No se pudieron leer filas válidas. Usa el formato Nombre Completo | Contraseña Única.");
+                if (registros.length === 0) return alert('No se pudieron leer filas válidas. Usa el formato: Nombre Completo | Usuario | Contraseña Única.');
 
                 setPersonalGlobal(prev => [...prev, ...registros]);
                 alert(`Se registraron ${registros.length} personas correctamente.`);
@@ -1162,10 +1180,10 @@
             };
 
             const guardarEdicionPersonal = () => {
-                const { id, nombre, password } = editPersonalModal;
-                if(!nombre || !password) { showToast("El nombre y la contraseña son obligatorios.", 'error'); return; }
-                
-                const nuevosPersonal = personalGlobal.map(a => a.id === id ? { ...a, nombre, password } : a);
+                const { id, nombre, usuario, password } = editPersonalModal;
+                if(!nombre || !usuario || !password) { showToast('El nombre, usuario y la contraseña son obligatorios.', 'error'); return; }
+
+                const nuevosPersonal = personalGlobal.map(a => a.id === id ? { ...a, nombre, usuario, password } : a);
                 setPersonalGlobal(nuevosPersonal);
 
                 const nuevasBases = basesDeDatos.map(db => {
@@ -1177,8 +1195,8 @@
                 });
                 setBasesDeDatos(nuevasBases);
 
-                setEditPersonalModal({ show: false, id: null, nombre: '', password: '' });
-                alert("Personal actualizado correctamente en todo el sistema.");
+                setEditPersonalModal({ show: false, id: null, nombre: '', usuario: '', password: '' });
+                alert('Personal actualizado correctamente en todo el sistema.');
             };
 
             const eliminarPersonal = (id) => {
@@ -1210,7 +1228,7 @@
                         </div>
 
                         <div className="grid grid-cols-1 gap-8 w-full max-w-xl z-10">
-                            <button onClick={() => { setLoginPass(''); setLoginAdminPass(''); setShowLoginPersonal(true); setShowLoginAdmin(false); }} aria-label="Ingreso al Portal" className={`group bg-white text-blue-700 rounded-2xl p-5 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 flex flex-col items-center text-center focus:outline-none focus:ring-4 focus:ring-blue-200/60 ${showLoginPersonal ? 'ring-4 ring-blue-200/70' : ''}`}>
+                            <button onClick={() => { setLoginUser(''); setLoginPass(''); setLoginAdminPass(''); setShowLoginPersonal(true); setShowLoginAdmin(false); }} aria-label="Ingreso al Portal" className={`group bg-white text-blue-700 rounded-2xl p-5 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 flex flex-col items-center text-center focus:outline-none focus:ring-4 focus:ring-blue-200/60 ${showLoginPersonal ? 'ring-4 ring-blue-200/70' : ''}`}>
                                 <div className="bg-blue-100 p-4 rounded-full mb-4 group-hover:bg-blue-200 transition-colors duration-300">
                                     <i className="fa-solid fa-users-viewfinder text-3xl text-blue-700"></i>
                                 </div>
@@ -1224,7 +1242,7 @@
                             <div className="px-6 py-5 max-w-xs text-center" style={{ fontFamily: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif', fontSize: '0.875rem', lineHeight: '1.25rem' }}>
                                 <div className="inline-flex items-center justify-center gap-2 text-white/80 font-semibold mb-2">
                                     <i className="fa-solid fa-gear text-base text-white/80"></i>
-                                    <a href="#" onClick={e => { e.preventDefault(); setLoginPass(''); setLoginAdminPass(''); setShowLoginAdmin(true); setShowLoginPersonal(false); }} className="text-white/80 hover:text-white transition-colors duration-150">Administrador del Sistema</a>
+                                    <a href="#" onClick={e => { e.preventDefault(); setLoginUser(''); setLoginPass(''); setLoginAdminPass(''); setShowLoginAdmin(true); setShowLoginPersonal(false); }} className="text-white/80 hover:text-white transition-colors duration-150">Administrador del Sistema</a>
                                 </div>
                                 {firebaseStatus === 'connected' ? (
                                     <>
@@ -1263,7 +1281,22 @@
                                                 <h2 className="text-2xl font-bold tracking-tight text-slate-900">{showLoginAdmin ? 'Administrador' : 'Portal de Personal'}</h2>
                                             </div>
                                         </div>
-                                        <p className="mb-5 text-sm leading-6 text-slate-500">Ingresa tu contraseña para continuar con tu espacio de trabajo.</p>
+                                        <p className="mb-5 text-sm leading-6 text-slate-500">{showLoginAdmin ? 'Ingresa la contraseña del administrador para continuar.' : 'Ingresa tu usuario y contraseña para acceder al portal.'}</p>
+                                        {!showLoginAdmin && (
+                                            <>
+                                                <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-slate-500" htmlFor="login-user">Usuario</label>
+                                                <input
+                                                    id="login-user"
+                                                    type="text"
+                                                    className="mb-4 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base font-medium text-slate-900 outline-none transition-all placeholder:text-slate-400 focus:border-cyan-500 focus:bg-white focus:ring-4 focus:ring-cyan-500/10"
+                                                    placeholder="Escribe tu usuario"
+                                                    value={loginUser}
+                                                    onChange={e => setLoginUser(e.target.value)}
+                                                    onKeyPress={e => e.key === 'Enter' && intentarLoginPersonal()}
+                                                    autoFocus
+                                                />
+                                            </>
+                                        )}
                                         <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-slate-500" htmlFor="login-password">Contraseña</label>
                                         <input
                                             id="login-password"
@@ -1273,10 +1306,10 @@
                                             value={showLoginAdmin ? loginAdminPass : loginPass}
                                             onChange={e => showLoginAdmin ? setLoginAdminPass(e.target.value) : setLoginPass(e.target.value)}
                                             onKeyPress={e => e.key === 'Enter' && (showLoginAdmin ? loginAdministrador() : intentarLoginPersonal())}
-                                            autoFocus
+                                            autoFocus={!showLoginAdmin}
                                         />
                                         <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                                            <button onClick={() => { setShowLoginPersonal(false); setShowLoginAdmin(false); setLoginPass(''); setLoginAdminPass(''); }} className="rounded-xl px-5 py-3 font-semibold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800">Cancelar</button>
+                                            <button onClick={() => { setShowLoginPersonal(false); setShowLoginAdmin(false); setLoginUser(''); setLoginPass(''); setLoginAdminPass(''); }} className="rounded-xl px-5 py-3 font-semibold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800">Cancelar</button>
                                             <button onClick={showLoginAdmin ? loginAdministrador : intentarLoginPersonal} className="rounded-xl bg-slate-900 px-6 py-3 font-bold text-white shadow-lg shadow-slate-900/20 transition-all hover:bg-cyan-700 active:scale-[0.98]">Ingresar <i className="fa-solid fa-arrow-right ml-2 text-xs"></i></button>
                                         </div>
                                     </div>
@@ -1546,22 +1579,23 @@
                                             <div className="p-0 flex-1 overflow-auto max-h-[600px]">
                                                 <table className="w-full text-left text-sm whitespace-nowrap">
                                                     <thead className="bg-white sticky top-0 shadow-sm z-10">
-                                                        <tr><th className="p-4 text-gray-500 font-semibold">Nombre Completo</th><th className="p-4 text-gray-500 font-semibold">Contraseña Única</th><th className="p-4 text-gray-500 font-semibold text-center">Gestión</th></tr>
+                                                        <tr><th className="p-4 text-gray-500 font-semibold">Nombre Completo</th><th className="p-4 text-gray-500 font-semibold">Usuario</th><th className="p-4 text-gray-500 font-semibold">Contraseña Única</th><th className="p-4 text-gray-500 font-semibold text-center">Gestión</th></tr>
                                                     </thead>
                                                     <tbody>
                                                         {personalFiltrado.map(a => (
                                                             <tr key={a.id} className="border-b border-gray-50 hover:bg-indigo-50/50 transition-colors">
                                                                 <td className="p-4 font-semibold text-gray-800">{a.nombre}</td>
+                                                                <td className="p-4 font-mono text-xs text-gray-700 bg-indigo-50/40 px-2 rounded">{a.usuario || '-'}</td>
                                                                 <td className="p-4 font-mono text-xs text-gray-500 bg-gray-50/50 px-2 rounded">{a.password}</td>
                                                                 <td className="p-4 text-center">
                                                                     <div className="flex justify-center gap-2">
-                                                                        <button onClick={() => setEditPersonalModal({show: true, id: a.id, nombre: a.nombre, password: a.password})} className="w-8 h-8 rounded-lg text-indigo-600 hover:bg-indigo-100 flex items-center justify-center transition-colors"><i className="fa-solid fa-pen"></i></button>
+                                                                        <button onClick={() => setEditPersonalModal({show: true, id: a.id, nombre: a.nombre, usuario: a.usuario || '', password: a.password})} className="w-8 h-8 rounded-lg text-indigo-600 hover:bg-indigo-100 flex items-center justify-center transition-colors"><i className="fa-solid fa-pen"></i></button>
                                                                         <button onClick={() => eliminarPersonal(a.id)} className="w-8 h-8 rounded-lg text-gray-400 hover:bg-red-100 hover:text-red-600 flex items-center justify-center transition-colors"><i className="fa-solid fa-trash"></i></button>
                                                                     </div>
                                                                 </td>
                                                             </tr>
                                                         ))}
-                                                        {personalGlobal.length === 0 && <tr><td colSpan="3" className="text-center py-10 text-gray-400">No hay personal registrado.</td></tr>}
+                                                        {personalGlobal.length === 0 && <tr><td colSpan="4" className="text-center py-10 text-gray-400">No hay personal registrado.</td></tr>}
                                                     </tbody>
                                                 </table>
                                             </div>
@@ -1932,6 +1966,10 @@
                                                 <input type="text" className="w-full border border-gray-300 rounded-lg p-3 text-sm focus:border-indigo-500 outline-none" value={createPersonalModal.nombre} onChange={e => setCreatePersonalModal(prev => ({ ...prev, nombre: e.target.value }))} placeholder="Ej. Ana María López" />
                                             </div>
                                             <div>
+                                                <label className="block text-xs font-bold text-gray-700 mb-1">Usuario de Portal</label>
+                                                <input type="text" className="w-full border border-gray-300 rounded-lg p-3 text-sm focus:border-indigo-500 outline-none" value={createPersonalModal.usuario} onChange={e => setCreatePersonalModal(prev => ({ ...prev, usuario: e.target.value }))} placeholder="Ej. ana.lopez" />
+                                            </div>
+                                            <div>
                                                 <label className="block text-xs font-bold text-gray-700 mb-1">Contraseña Única</label>
                                                 <input type="text" className="w-full border border-gray-300 rounded-lg p-3 text-sm font-mono focus:border-indigo-500 outline-none" value={createPersonalModal.password} onChange={e => setCreatePersonalModal(prev => ({ ...prev, password: e.target.value }))} placeholder="Ej. A1b2C3" />
                                             </div>
@@ -1940,15 +1978,15 @@
                                         <div className="space-y-4 mb-6">
                                             <div>
                                                 <label className="block text-xs font-bold text-gray-700 mb-1">Pega los datos</label>
-                                                <textarea rows="8" className="w-full border border-gray-300 rounded-lg p-3 text-sm font-mono focus:border-indigo-500 outline-none" value={createPersonalModal.bulkText} onChange={e => setCreatePersonalModal(prev => ({ ...prev, bulkText: e.target.value }))} placeholder="Nombre Completo	Contraseña Única
-Juan Pérez	A1b2C3
-María López	Z9y8x7" />
+                                                <textarea rows="8" className="w-full border border-gray-300 rounded-lg p-3 text-sm font-mono focus:border-indigo-500 outline-none" value={createPersonalModal.bulkText} onChange={e => setCreatePersonalModal(prev => ({ ...prev, bulkText: e.target.value }))} placeholder="Nombre Completo	Usuario	Contraseña Única
+Juan Pérez	juan.perez	A1b2C3
+María López	maria.lopez	Z9y8x7" />
                                             </div>
                                             <div className="rounded-lg bg-indigo-50 p-3 text-xs text-indigo-700 border border-indigo-100">
                                                 <p className="font-semibold mb-1">Formato esperado:</p>
-                                                <p>Nombre Completo · Contraseña Única</p>
-                                                <p className="mt-1 font-mono">Juan Pérez · A1b2C3</p>
-                                                <p className="mt-1">También acepta encabezados con los nombres: Nombre Completo y Contraseña Única.</p>
+                                                <p>Nombre Completo · Usuario · Contraseña Única</p>
+                                                <p className="mt-1 font-mono">Juan Pérez · juan.perez · A1b2C3</p>
+                                                <p className="mt-1">También acepta encabezados con los nombres: Nombre Completo, Usuario y Contraseña Única.</p>
                                             </div>
                                         </div>
                                     )}
@@ -1964,7 +2002,7 @@ María López	Z9y8x7" />
                         )}
 
                         {editPersonalModal.show && (
-                            <Modal show={editPersonalModal.show} onClose={() => setEditPersonalModal({ show:false, id:null, nombre:'', password:'' })} width="max-w-lg" ariaLabel="Editar personal">
+                            <Modal show={editPersonalModal.show} onClose={() => setEditPersonalModal({ show:false, id:null, nombre:'', usuario:'', password:'' })} width="max-w-lg" ariaLabel="Editar personal">
                                 <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[400px] p-6 transform transition-all">
                                     <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><i className="fa-solid fa-user-pen text-indigo-600"></i> Editar Personal</h3>
                                     <p className="text-xs text-gray-500 mb-4">Los cambios de nombre se verán reflejados en todos los proyectos donde coordine o asesore.</p>
@@ -1975,13 +2013,17 @@ María López	Z9y8x7" />
                                             <input type="text" className="w-full border border-gray-300 rounded-lg p-3 text-sm focus:border-indigo-500 outline-none" value={editPersonalModal.nombre} onChange={e=>setEditPersonalModal({...editPersonalModal, nombre: e.target.value})} />
                                         </div>
                                         <div>
+                                            <label className="block text-xs font-bold text-gray-700 mb-1">Usuario de Portal</label>
+                                            <input type="text" className="w-full border border-gray-300 rounded-lg p-3 text-sm focus:border-indigo-500 outline-none" value={editPersonalModal.usuario} onChange={e=>setEditPersonalModal({...editPersonalModal, usuario: e.target.value})} />
+                                        </div>
+                                        <div>
                                             <label className="block text-xs font-bold text-gray-700 mb-1">Contraseña de Portal Única</label>
                                             <input type="text" className="w-full border border-gray-300 rounded-lg p-3 text-sm font-mono focus:border-indigo-500 outline-none" value={editPersonalModal.password} onChange={e=>setEditPersonalModal({...editPersonalModal, password: e.target.value})} />
                                         </div>
                                     </div>
 
                                     <div className="flex justify-end gap-3">
-                                        <button onClick={()=>setEditPersonalModal({show:false, id:null, nombre:'', password:''})} className="px-4 py-2 text-gray-600 font-semibold hover:bg-gray-100 rounded-lg transition-colors">Cancelar</button>
+                                        <button onClick={()=>setEditPersonalModal({show:false, id:null, nombre:'', usuario:'', password:''})} className="px-4 py-2 text-gray-600 font-semibold hover:bg-gray-100 rounded-lg transition-colors">Cancelar</button>
                                         <button onClick={guardarEdicionPersonal} className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 shadow-md transition-colors">Guardar Cambios</button>
                                     </div>
                                 </div>
