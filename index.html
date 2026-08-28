@@ -137,6 +137,49 @@
         const firebaseEnabled = !!firebaseDb;
         const remoteStateDoc = firebaseDb ? firebaseDb.collection('prodep_app').doc('app_state') : null;
 
+        const getTodayUsageKey = () => new Date().toISOString().slice(0, 10);
+
+        const getUsageStatsForDay = async (dayKey = getTodayUsageKey()) => {
+            if (!firebaseEnabled) return { writesToday: 0, limit: 20000, dayKey };
+            try {
+                const ref = firebaseDb.collection('usageStats').doc(dayKey);
+                const snap = await ref.get();
+                if (!snap.exists) return { writesToday: 0, limit: 20000, dayKey };
+                const data = snap.data() || {};
+                return {
+                    writesToday: Number(data.writesToday || 0),
+                    limit: Number(data.limit || 20000),
+                    dayKey
+                };
+            } catch (error) {
+                console.warn('Firebase: no se pudo leer el conteo de escrituras diarias.', error);
+                return { writesToday: 0, limit: 20000, dayKey };
+            }
+        };
+
+        const incrementUsageStats = async (amount = 1) => {
+            if (!firebaseEnabled) return null;
+            const dayKey = getTodayUsageKey();
+            const ref = firebaseDb.collection('usageStats').doc(dayKey);
+            try {
+                await ref.set({
+                    writesToday: firebase.firestore.FieldValue.increment(amount),
+                    limit: 20000,
+                    updatedAt: new Date().toISOString()
+                }, { merge: true });
+                const stats = await getUsageStatsForDay(dayKey);
+                return stats;
+            } catch (error) {
+                console.warn('Firebase: no se pudo actualizar el conteo de escrituras.', error);
+                return null;
+            }
+        };
+
+        const notifyUsageUpdated = (stats) => {
+            if (!stats) return;
+            window.dispatchEvent(new CustomEvent('sigse-usage-update', { detail: stats }));
+        };
+
         const saveRemoteState = async (updates) => {
             if (!firebaseEnabled) return;
             try {
@@ -144,6 +187,8 @@
                     ...updates,
                     updatedAt: new Date().toISOString()
                 }, { merge: true });
+                const stats = await incrementUsageStats(1);
+                if (stats) notifyUsageUpdated(stats);
             } catch (error) {
                 console.warn('Firebase: no se pudo guardar el estado remoto.', error);
             }
@@ -531,6 +576,7 @@
             const [loginPass, setLoginPass] = useState('');
             const [loginAdminPass, setLoginAdminPass] = useState('');
             const [toast, setToast] = useState({ show: false, message: '', variant: 'success' });
+            const [usageStats, setUsageStats] = useState({ writesToday: 0, limit: 20000, dayKey: getTodayUsageKey() });
             const toastTimeoutRef = useRef(null);
 
             const showToast = (message, variant = 'success') => {
@@ -540,7 +586,34 @@
             };
 
             useEffect(() => {
-                return () => { if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current); };
+                let isMounted = true;
+                const loadUsageStats = async () => {
+                    const stats = await getUsageStatsForDay();
+                    if (!isMounted) return;
+                    setUsageStats(stats);
+                };
+
+                loadUsageStats();
+
+                const handleUsageUpdate = (event) => {
+                    const detail = event.detail || {};
+                    const stats = {
+                        writesToday: Number(detail.writesToday || 0),
+                        limit: Number(detail.limit || 20000),
+                        dayKey: detail.dayKey || getTodayUsageKey()
+                    };
+                    if (!isMounted) return;
+                    setUsageStats(stats);
+                    const pct = Math.round((stats.writesToday / Math.max(stats.limit, 1)) * 100);
+                    showToast(`Guardado. Escrituras hoy: ${stats.writesToday}/${stats.limit} (${pct}%)`, 'success');
+                };
+
+                window.addEventListener('sigse-usage-update', handleUsageUpdate);
+                return () => {
+                    isMounted = false;
+                    window.removeEventListener('sigse-usage-update', handleUsageUpdate);
+                    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+                };
             }, []);
 
             const renderToast = () => toast.show ? (
@@ -681,9 +754,11 @@
                 return basesDeDatos.reduce((acc, db) => {
                     const yearKey = db.info.anio || 'Sin Año';
                     const sectorKey = db.info.sectorFormativo || 'Sin Sector';
+                    const estadoKey = db.info.estado || 'Sin Estado';
                     if (!acc[yearKey]) acc[yearKey] = {};
-                    if (!acc[yearKey][sectorKey]) acc[yearKey][sectorKey] = [];
-                    acc[yearKey][sectorKey].push(db);
+                    if (!acc[yearKey][sectorKey]) acc[yearKey][sectorKey] = {};
+                    if (!acc[yearKey][sectorKey][estadoKey]) acc[yearKey][sectorKey][estadoKey] = [];
+                    acc[yearKey][sectorKey][estadoKey].push(db);
                     return acc;
                 }, {});
             }, [basesDeDatos]);
@@ -696,9 +771,11 @@
                     if (!matcher.includes(search)) return acc;
                     const yearKey = db.info.anio || 'Sin Año';
                     const sectorKey = db.info.sectorFormativo || 'Sin Sector';
+                    const estadoKey = db.info.estado || 'Sin Estado';
                     if (!acc[yearKey]) acc[yearKey] = {};
-                    if (!acc[yearKey][sectorKey]) acc[yearKey][sectorKey] = [];
-                    acc[yearKey][sectorKey].push(db);
+                    if (!acc[yearKey][sectorKey]) acc[yearKey][sectorKey] = {};
+                    if (!acc[yearKey][sectorKey][estadoKey]) acc[yearKey][sectorKey][estadoKey] = [];
+                    acc[yearKey][sectorKey][estadoKey].push(db);
                     return acc;
                 }, {});
             }, [basesDeDatos, coursesOffersFilter, ofertasAgrupadas]);
@@ -713,7 +790,7 @@
             }, [personalGlobal, coursesPersonalFilter]);
 
             const guardarBaseDeDatos = () => {
-                if (!estadoSeleccionado || !siglas || participantesProcesados.length === 0) { showToast("Faltan datos o información válida.", 'error'); return; }
+                if (!estadoSeleccionado || !siglas) { showToast("Faltan datos mínimos del curso (estado o siglas).", 'error'); return; }
                 const sectorFormativoFinal = sectorFormativoTipo === 'Otros' ? (sectorFormativoOtro.trim() || 'Otros') : sectorFormativoTipo;
                 const nuevaBD = {
                     id: Date.now().toString(),
@@ -722,7 +799,7 @@
                         nombreCurso, horas, modalidad, moodlePass, numSesiones: parseInt(numSesiones), numPA: parseInt(numPA), numAct: parseInt(numAct),
                         acreditacion: parseInt(acreditacion) || 80, calculoFinalTipo, coordinadorIds 
                     },
-                    participantes: participantesProcesados, grupos: [], semanasSeguimiento: [],
+                    participantes: participantesProcesados || [], grupos: [], semanasSeguimiento: [],
                     fechaCreacion: new Date().toLocaleDateString()
                 };
                 setBasesDeDatos([...basesDeDatos, nuevaBD]);
@@ -730,6 +807,7 @@
                 setAppView('workspace');
                 setIdCurso(''); setSiglas(''); setNombreCurso(''); setTextoPegado(''); setParticipantesProcesados([]); setCoordinadorIds([]);
                 setSectorFormativoTipo('Educación Continua'); setSectorFormativoOtro('');
+                showToast(participantesProcesados.length > 0 ? 'Curso creado correctamente.' : 'Curso creado sin participantes; puedes incorporarlos después.', 'success');
             };
 
             const dbActiva = basesDeDatos.find(db => db.id === activeDbId);
@@ -1219,10 +1297,9 @@
                             <div className="bg-white/10 p-5 rounded-2xl inline-block mb-6 backdrop-blur-sm border border-white/20 shadow-xl">
                                 <img src="https://escueladeposgrados.edu.mx/wp-content/uploads/2022/06/LOGO-BLANCO_ES.png" alt="Escuela de Posgrados" className="h-20 w-auto object-contain" />
                             </div>
-                            <h1 className="text-3xl md:text-4xl font-semibold mb-3 tracking-tight leading-tight max-w-2xl mx-auto">
+                            <h1 className="text-xl md:text-2xl font-semibold mb-3 tracking-tight leading-tight max-w-2xl mx-auto">
                                 Sistema Integral de Gestión y Seguimiento de Ofertas Educativas<br />
                                 <span className="block text-cyan-400 font-light text-2xl md:text-3xl mt-3">SIGSE</span>
-                                <span className="text-xs md:text-sm text-white font-normal block mt-2">v6.0</span>
                             </h1>
                             
                         </div>
@@ -1246,11 +1323,11 @@
                                 </div>
                                 {firebaseStatus === 'connected' ? (
                                     <>
-                                        <div className="inline-flex items-center justify-center gap-2 text-white/90 font-semibold mb-1">
-                                            <i className="fa-solid fa-cloud-check text-base text-emerald-300"></i>
+                                        <div className="inline-flex items-center justify-center gap-2 text-white/80 font-medium mb-1 text-[10px] sm:text-[11px]">
+                                            <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v6.0</div>
+                                        <div className="text-[10px] text-slate-200">v7.0</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -1258,7 +1335,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v6.0</div>
+                                        <div className="text-xs text-slate-200">v7.0</div>
                                     </div>
                                 )}
                             </div>
@@ -1329,7 +1406,7 @@
                         <header className="bg-gray-900 text-white p-4 shadow-md flex justify-between items-center no-print sticky top-0 z-40">
                             <div className="flex items-center gap-3">
                                 <i className="fa-solid fa-laptop-code text-2xl text-cyan-400"></i>
-                                <h1 className="text-xl font-bold">Portal Administrador <span className="text-gray-400 text-sm font-normal ml-2">ESCUELA DE POSGRADOS - SIGSE v6.0</span></h1>
+                                <h1 className="text-xl font-bold">Portal Administrador <span className="text-gray-400 text-sm font-normal ml-2">ESCUELA DE POSGRADOS - SIGSE v7.0</span></h1>
                             </div>
                             <div className="flex items-center gap-4">
                                 <button onClick={cerrarSesion} className="bg-red-500/20 text-red-300 border border-red-500/50 px-4 py-1.5 rounded-lg font-bold text-sm hover:bg-red-500 hover:text-white transition-colors flex items-center gap-2">
@@ -1383,17 +1460,17 @@
                                             <p className="text-sm text-slate-500">Explora y administra tus proyectos creados.</p>
                                         </button>
                                         <button onClick={() => setCoursesSection('personal')} className={`rounded-2xl border px-5 py-4 text-left transition ${coursesSection === 'personal' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50/50'}`}>
-                                            <div className="flex items-center gap-3 mb-2 text-blue-700"><i className="fa-solid fa-address-book text-lg"></i><span className="font-bold">Directorio global</span></div>
+                                            <div className="flex items-center gap-3 mb-2 text-blue-700"><i className="fa-solid fa-address-book text-lg"></i><span className="font-bold">Plantilla de Personal</span></div>
                                             <p className="text-sm text-slate-500">Gestiona el personal y sus accesos desde un solo espacio.</p>
                                         </button>
                                     </div>
 
                                     {coursesSection === 'new' && (
-                                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                                            <div className="lg:col-span-5 space-y-6">
-                                                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
-                                                    <h2 className="text-lg font-bold mb-4 text-blue-900 flex items-center gap-2"><i className="fa-solid fa-square-plus text-blue-600"></i> 1. Nueva Base de Datos</h2>
-                                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="w-full">
+                                            <div className="space-y-6">
+                                                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 w-full">
+                                                    <h2 className="text-lg font-bold mb-4 text-blue-900 flex items-center gap-2"><i className="fa-solid fa-square-plus text-blue-600"></i> 1. Oferta Educativa</h2>
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                                                         <div>
                                                             <label className="block text-xs font-bold text-gray-600 mb-1">Sector Formativo</label>
                                                             <select className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:border-blue-500" value={sectorFormativoTipo} onChange={e => setSectorFormativoTipo(e.target.value)}>
@@ -1461,24 +1538,9 @@
                                                         <div><label className="block text-xs font-bold text-gray-600 mb-1">Acreditación</label><input type="number" className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none" value={acreditacion} onChange={e=>setAcreditacion(e.target.value)}/></div>
                                                         <div><label className="block text-xs font-bold text-gray-600 mb-1">Pass Moodle</label><input type="text" className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none" value={moodlePass} onChange={e=>setMoodlePass(e.target.value)}/></div>
                                                     </div>
-                                                </div>
-                                            </div>
-                                            <div className="lg:col-span-7 h-full">
-                                                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col h-full">
-                                                    <div className="flex justify-between items-center mb-2">
-                                                        <h2 className="text-lg font-bold text-blue-900 flex items-center gap-2"><i className="fa-solid fa-file-excel text-green-600"></i> 2. Pegado de Excel Original</h2>
-                                                        <button onClick={descargarPlantillaBase} className="bg-green-100 text-green-700 hover:bg-green-600 hover:text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 shadow-sm border border-green-200">
-                                                            <i className="fa-solid fa-download"></i> Descargar Plantilla Oficial
-                                                        </button>
-                                                    </div>
-                                                    <p className="text-sm text-gray-500 mb-4">Copia la tabla de tu Excel (o de la plantilla) con todo y los encabezados y pégala en el siguiente cuadro. El sistema extraerá CURP, Nombre, Correos, etc. automáticamente.</p>
-                                                    <textarea className="flex-1 w-full p-4 border-dashed border-2 border-gray-300 rounded-xl bg-gray-50 text-xs font-mono outline-none focus:border-blue-500 focus:bg-white transition-colors" placeholder="Pegar aquí..." value={textoPegado} onChange={e=>procesarTextoPegado(e.target.value)}></textarea>
-                                                    <div className="flex items-center justify-between mt-4">
-                                                        <div className="text-sm px-4 py-2 bg-blue-50 text-blue-800 font-bold rounded-lg border border-blue-100">
-                                                            Registros detectados: {participantesProcesados.length}
-                                                        </div>
-                                                        <button onClick={guardarBaseDeDatos} disabled={participantesProcesados.length===0} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:shadow-none text-white font-bold rounded-xl shadow-lg shadow-blue-500/30 transition-all flex items-center gap-2">
-                                                            <i className="fa-solid fa-rocket"></i> Generar Proyecto
+                                                    <div className="mt-6 flex justify-end">
+                                                        <button onClick={guardarBaseDeDatos} className="rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold uppercase tracking-wide text-white shadow-lg shadow-blue-500/20 transition hover:bg-blue-700">
+                                                            Crear Oferta
                                                         </button>
                                                     </div>
                                                 </div>
@@ -1507,48 +1569,90 @@
                                                         <tr><th className="p-4 text-gray-500 font-semibold">Código</th><th className="p-4 text-gray-500 font-semibold">Curso</th><th className="p-4 text-gray-500 font-semibold text-center">Acción</th></tr>
                                                     </thead>
                                                     <tbody>
-                                                        {Object.keys(ofertasFiltradas).sort((a,b) => b.localeCompare(a)).map(year => (
-                                                            <React.Fragment key={year}>
-                                                                {Object.keys(ofertasFiltradas[year]).sort().map(sector => {
-                                                                    const groupKey = `${year}-${sector}`;
-                                                                    const isExpanded = expandedOfertas[groupKey] ?? true;
-                                                                    const sectorItems = ofertasFiltradas[year][sector];
-                                                                    return (
-                                                                        <React.Fragment key={groupKey}>
-                                                                            <tr onClick={() => setExpandedOfertas(prev => ({ ...prev, [groupKey]: !prev[groupKey] }))} className="bg-blue-50 cursor-pointer hover:bg-blue-100 transition-colors">
-                                                                                <td colSpan="3" className="p-3 text-sm font-semibold text-blue-900 border-b border-gray-200">
-                                                                                    <div className="flex items-center justify-between gap-4">
-                                                                                        <div>{year} / {sector}</div>
-                                                                                        <div className="flex items-center gap-3 text-xs text-blue-700 font-semibold">
-                                                                                            <span>{sectorItems.length} proyecto{sectorItems.length === 1 ? '' : 's'}</span>
-                                                                                            <i className={`fa-solid ${isExpanded ? 'fa-chevron-up' : 'fa-chevron-down'}`}></i>
-                                                                                        </div>
-                                                                                    </div>
-                                                                                </td>
-                                                                            </tr>
-                                                                            {isExpanded && sectorItems.map(db => (
-                                                                                <tr key={db.id} className="border-b border-gray-50 hover:bg-blue-50/50 transition-colors group">
-                                                                                    <td className="p-4">
-                                                                                        <div className="font-bold text-blue-700">{db.info.siglas}-{db.info.idEstado}</div>
-                                                                                        <div className="text-xs text-gray-400">{db.info.anio} • {db.participantes.length} alumnos</div>
-                                                                                    </td>
-                                                                                    <td className="p-4 truncate max-wxs">
-                                                                                        <div className="font-semibold text-gray-800 truncate" title={db.info.nombreCurso}>{db.info.nombreCurso}</div>
-                                                                                        <div className="text-xs text-gray-500">{db.info.estado}</div>
-                                                                                    </td>
-                                                                                    <td className="p-4 text-center">
-                                                                                        <div className="flex justify-center gap-2">
-                                                                                            <button onClick={() => { setActiveDbId(db.id); setAppView('workspace'); }} className="w-8 h-8 rounded-lg bg-blue-100 text-blue-600 hover:bg-blue-600 hover:text-white flex items-center justify-center transition-colors"><i className="fa-solid fa-arrow-right"></i></button>
-                                                                                            <button onClick={() => { if(confirm("¿Eliminar proyecto completo?")) setBasesDeDatos(basesDeDatos.filter(b => b.id !== db.id)) }} className="w-8 h-8 rounded-lg text-gray-400 hover:bg-red-100 hover:text-red-600 flex items-center justify-center transition-colors"><i className="fa-solid fa-trash"></i></button>
+                                                        {Object.keys(ofertasFiltradas).sort((a,b) => b.localeCompare(a)).map(year => {
+                                                            const sectorsByYear = ofertasFiltradas[year] || {};
+                                                            const totalYear = Object.values(sectorsByYear).reduce((sum, statesBySector) => sum + Object.values(statesBySector).reduce((subSum, group) => subSum + group.length, 0), 0);
+                                                            const yearKey = `year-${year}`;
+                                                            const currentYear = new Date().getFullYear().toString();
+                                                            const isYearExpanded = expandedOfertas[yearKey] ?? (String(year) === currentYear);
+
+                                                            return (
+                                                                <React.Fragment key={year}>
+                                                                    <tr onClick={() => setExpandedOfertas(prev => ({ ...prev, [yearKey]: !prev[yearKey] }))} className="bg-blue-50 cursor-pointer hover:bg-blue-100 transition-colors">
+                                                                        <td colSpan="3" className="p-3 text-sm font-semibold text-blue-900 border-b border-gray-200">
+                                                                            <div className="flex items-center justify-between gap-4">
+                                                                                <div>{year}</div>
+                                                                                <div className="flex items-center gap-3 text-xs text-blue-700 font-semibold">
+                                                                                    <span>{totalYear} proyecto{totalYear === 1 ? '' : 's'}</span>
+                                                                                    <i className={`fa-solid ${isYearExpanded ? 'fa-chevron-up' : 'fa-chevron-down'}`}></i>
+                                                                                </div>
+                                                                            </div>
+                                                                        </td>
+                                                                    </tr>
+                                                                    {isYearExpanded && Object.keys(sectorsByYear).sort().map(sector => {
+                                                                        const statesBySector = sectorsByYear[sector] || {};
+                                                                        const totalSector = Object.values(statesBySector).reduce((sum, group) => sum + group.length, 0);
+                                                                        const sectorKey = `${yearKey}-sector-${sector}`;
+                                                                        const isSectorExpanded = expandedOfertas[sectorKey] ?? false;
+
+                                                                        return (
+                                                                            <React.Fragment key={`${year}-${sector}`}>
+                                                                                <tr onClick={() => setExpandedOfertas(prev => ({ ...prev, [sectorKey]: !prev[sectorKey] }))} className="bg-sky-50 cursor-pointer hover:bg-sky-100 transition-colors">
+                                                                                    <td colSpan="3" className="p-3 pl-8 text-sm font-semibold text-sky-900 border-b border-gray-200">
+                                                                                        <div className="flex items-center justify-between gap-4">
+                                                                                            <div>{sector}</div>
+                                                                                            <div className="flex items-center gap-3 text-xs text-sky-700 font-semibold">
+                                                                                                <span>{totalSector} proyecto{totalSector === 1 ? '' : 's'}</span>
+                                                                                                <i className={`fa-solid ${isSectorExpanded ? 'fa-chevron-up' : 'fa-chevron-down'}`}></i>
+                                                                                            </div>
                                                                                         </div>
                                                                                     </td>
                                                                                 </tr>
-                                                                            ))}
-                                                                        </React.Fragment>
-                                                                    );
-                                                                })}
-                                                            </React.Fragment>
-                                                        ))}
+                                                                                {isSectorExpanded && Object.keys(statesBySector).sort().map(estado => {
+                                                                                    const estadoItems = statesBySector[estado] || [];
+                                                                                    const estadoKey = `${sectorKey}-estado-${estado}`;
+                                                                                    const isEstadoExpanded = expandedOfertas[estadoKey] ?? false;
+
+                                                                                    return (
+                                                                                        <React.Fragment key={`${year}-${sector}-${estado}`}>
+                                                                                            <tr onClick={() => setExpandedOfertas(prev => ({ ...prev, [estadoKey]: !prev[estadoKey] }))} className="bg-indigo-50 cursor-pointer hover:bg-indigo-100 transition-colors">
+                                                                                                <td colSpan="3" className="p-3 pl-12 text-sm font-semibold text-indigo-900 border-b border-gray-200">
+                                                                                                    <div className="flex items-center justify-between gap-4">
+                                                                                                        <div>{estado}</div>
+                                                                                                        <div className="flex items-center gap-3 text-xs text-indigo-700 font-semibold">
+                                                                                                            <span>{estadoItems.length} proyecto{estadoItems.length === 1 ? '' : 's'}</span>
+                                                                                                            <i className={`fa-solid ${isEstadoExpanded ? 'fa-chevron-up' : 'fa-chevron-down'}`}></i>
+                                                                                                        </div>
+                                                                                                    </div>
+                                                                                                </td>
+                                                                                            </tr>
+                                                                                            {isEstadoExpanded && estadoItems.map(db => (
+                                                                                                <tr key={db.id} className="border-b border-gray-50 hover:bg-blue-50/50 transition-colors group">
+                                                                                                    <td className="p-4 pl-16">
+                                                                                                        <div className="font-bold text-blue-700">{db.info.siglas}-{db.info.idEstado}</div>
+                                                                                                        <div className="text-xs text-gray-400">{db.info.anio} • {db.participantes.length} alumnos</div>
+                                                                                                    </td>
+                                                                                                    <td className="p-4 truncate max-wxs">
+                                                                                                        <div className="font-semibold text-gray-800 truncate" title={db.info.nombreCurso}>{db.info.nombreCurso}</div>
+                                                                                                        <div className="text-xs text-gray-500">{db.info.estado}</div>
+                                                                                                    </td>
+                                                                                                    <td className="p-4 text-center">
+                                                                                                        <div className="flex justify-center gap-2">
+                                                                                                            <button onClick={() => { setActiveDbId(db.id); setAppView('workspace'); }} className="w-8 h-8 rounded-lg bg-blue-100 text-blue-600 hover:bg-blue-600 hover:text-white flex items-center justify-center transition-colors"><i className="fa-solid fa-arrow-right"></i></button>
+                                                                                                            <button onClick={() => { if(confirm("¿Eliminar proyecto completo?")) setBasesDeDatos(basesDeDatos.filter(b => b.id !== db.id)) }} className="w-8 h-8 rounded-lg text-gray-400 hover:bg-red-100 hover:text-red-600 flex items-center justify-center transition-colors"><i className="fa-solid fa-trash"></i></button>
+                                                                                                        </div>
+                                                                                                    </td>
+                                                                                                </tr>
+                                                                                            ))}
+                                                                                        </React.Fragment>
+                                                                                    );
+                                                                                })}
+                                                                            </React.Fragment>
+                                                                        );
+                                                                    })}
+                                                                </React.Fragment>
+                                                            );
+                                                        })}
                                                         {basesDeDatos.length === 0 && <tr><td colSpan="3" className="text-center py-10 text-gray-400">Aún no hay proyectos. Genera uno arriba.</td></tr>}
                                                     </tbody>
                                                 </table>
@@ -1561,7 +1665,7 @@
                                             <div className="p-5 border-b border-gray-100 bg-gray-50 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                                                 <div className="flex items-center gap-3">
                                                     <i className="fa-solid fa-address-book text-xl text-indigo-500"></i>
-                                                    <h2 className="text-lg font-bold text-gray-800">Directorio Global de Personal</h2>
+                                                    <h2 className="text-lg font-bold text-gray-800">Plantilla</h2>
                                                 </div>
                                                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                                                     <input
@@ -2175,7 +2279,22 @@ María López	maria.lopez	Z9y8x7" />
             if (appView === 'workspace') {
                 return (
                     <>
-                        <Workspace db={dbActiva} appView={appView} setAppView={setAppView} asesoresGlobales={personalGlobal} setAsesoresGlobales={setPersonalGlobal} zoomAccounts={zoomAccounts} onUpdate={updateActiveDb} modoPersonal={modoPersonal} />
+                        <Workspace
+                            db={dbActiva}
+                            appView={appView}
+                            setAppView={setAppView}
+                            asesoresGlobales={personalGlobal}
+                            setAsesoresGlobales={setPersonalGlobal}
+                            zoomAccounts={zoomAccounts}
+                            onUpdate={updateActiveDb}
+                            modoPersonal={modoPersonal}
+                            textoPegado={textoPegado}
+                            setTextoPegado={setTextoPegado}
+                            participantesProcesados={participantesProcesados}
+                            setParticipantesProcesados={setParticipantesProcesados}
+                            procesarTextoPegado={procesarTextoPegado}
+                            descargarPlantillaBase={descargarPlantillaBase}
+                        />
                         {renderToast()}
                     </>
                 );
@@ -2187,7 +2306,7 @@ María López	maria.lopez	Z9y8x7" />
         // ==========================================
         // COMPONENTE WORKSPACE (4.0 LÓGICA DE PERMISOS)
         // ==========================================
-        function Workspace({ db, appView, setAppView, asesoresGlobales, setAsesoresGlobales, zoomAccounts, onUpdate, modoPersonal }) {
+        function Workspace({ db, appView, setAppView, asesoresGlobales, setAsesoresGlobales, zoomAccounts, onUpdate, modoPersonal, textoPegado, setTextoPegado, participantesProcesados, setParticipantesProcesados, procesarTextoPegado, descargarPlantillaBase }) {
             const isPersonal = modoPersonal.activo;
             const isAsesor = isPersonal && modoPersonal.roleInProject === 'asesor';
             const isCoordinador = isPersonal && modoPersonal.roleInProject === 'coordinador';
@@ -2215,6 +2334,7 @@ María López	maria.lopez	Z9y8x7" />
                             {(isAdmin || isCoordinador) && <button onClick={()=>setTab('resumen')} className={`px-4 py-1.5 rounded-lg transition-colors whitespace-nowrap ${tab==='resumen'?'bg-white text-blue-900 shadow':'hover:bg-blue-700 text-blue-100'}`}><i className="fa-solid fa-chart-pie"></i> Resumen</button>}
                             
                             {isAdmin && <button onClick={()=>setTab('ajustes')} className={`px-4 py-1.5 rounded-lg transition-colors whitespace-nowrap ${tab==='ajustes'?'bg-white text-blue-900 shadow':'hover:bg-blue-700 text-blue-100'}`}><i className="fa-solid fa-gear"></i> Ajustes</button>}
+                            {isAdmin && <button onClick={()=>setTab('pegadoExcel')} className={`px-4 py-1.5 rounded-lg transition-colors whitespace-nowrap ${tab==='pegadoExcel'?'bg-white text-blue-900 shadow':'hover:bg-blue-700 text-blue-100'}`}><i className="fa-solid fa-file-excel"></i> Alumnos</button>}
                             {isAdmin && <button onClick={()=>setTab('grupos')} className={`px-4 py-1.5 rounded-lg transition-colors whitespace-nowrap ${tab==='grupos'?'bg-white text-blue-900 shadow':'hover:bg-blue-700 text-blue-100'}`}><i className="fa-solid fa-users"></i> Grupos</button>}
                             {isAdmin && <button onClick={()=>setTab('datos')} className={`px-4 py-1.5 rounded-lg transition-colors whitespace-nowrap ${tab==='datos'?'bg-white text-blue-900 shadow':'hover:bg-blue-700 text-blue-100'}`}><i className="fa-solid fa-table"></i> Asignar</button>}
                             
@@ -2228,6 +2348,7 @@ María López	maria.lopez	Z9y8x7" />
                     <div className="flex-1 overflow-hidden flex flex-col p-3 print:p-0">
                         {tab === 'resumen' && (isAdmin || isCoordinador) && <TabResumen db={db} />}
                         {tab === 'ajustes' && isAdmin && <TabAjustes db={db} onUpdate={onUpdate} asesoresGlobales={asesoresGlobales} />}
+                        {tab === 'pegadoExcel' && isAdmin && <TabPegadoExcel db={db} onUpdate={onUpdate} textoPegado={textoPegado} setTextoPegado={setTextoPegado} participantesProcesados={participantesProcesados} setParticipantesProcesados={setParticipantesProcesados} procesarTextoPegado={procesarTextoPegado} descargarPlantillaBase={descargarPlantillaBase} />}
                         {tab === 'grupos' && isAdmin && <TabGrupos db={db} onUpdate={onUpdate} asesoresGlobales={asesoresGlobales} />}
                         {tab === 'datos' && isAdmin && <TabDatos db={db} onUpdate={onUpdate} />}
                         {tab === 'exportar' && (isAdmin || isCoordinador) && <TabExportar db={db} onUpdate={onUpdate} isAdmin={isAdmin} isCoordinador={isCoordinador} />}
@@ -2359,6 +2480,148 @@ María López	maria.lopez	Z9y8x7" />
                                 ))}
                             </tbody>
                         </table>
+                    </div>
+                </div>
+            );
+        }
+
+        function TabPegadoExcel({ db, onUpdate, textoPegado, setTextoPegado, participantesProcesados, setParticipantesProcesados, procesarTextoPegado, descargarPlantillaBase }) {
+            const [mostrarCargaManual, setMostrarCargaManual] = useState(false);
+            const [alumnoManual, setAlumnoManual] = useState({
+                no: '', correo: '', rfc: '', curp: '', edad: '', sexo: '', nombre: '', paterno: '', materno: '', telefono: '', cct: '', subsistema: '', municipio: '', funcion: '', nivel: '', servicio: ''
+            });
+
+            const agregarParticipantesPegados = () => {
+                if (!participantesProcesados.length) return;
+                const nuevos = participantesProcesados.filter(nuevo => !db.participantes.some(actual => {
+                    const mismoCurp = Boolean(actual.curp && nuevo.curp && actual.curp.trim().toLowerCase() === nuevo.curp.trim().toLowerCase());
+                    const mismoCorreo = Boolean(actual.correo && nuevo.correo && actual.correo.trim().toLowerCase() === nuevo.correo.trim().toLowerCase());
+                    return mismoCurp || mismoCorreo;
+                }));
+
+                if (!nuevos.length) {
+                    setTextoPegado('');
+                    setParticipantesProcesados([]);
+                    return;
+                }
+
+                onUpdate({ ...db, participantes: [...db.participantes, ...nuevos] });
+                setTextoPegado('');
+                setParticipantesProcesados([]);
+            };
+
+            const guardarAlumnoManual = () => {
+                const nombre = (alumnoManual.nombre || '').trim();
+                const paterno = (alumnoManual.paterno || '').trim();
+                const materno = (alumnoManual.materno || '').trim();
+                const curp = (alumnoManual.curp || '').trim();
+                const correo = (alumnoManual.correo || '').trim();
+
+                if (!nombre && !curp && !correo) {
+                    alert('Completa al menos nombre, CURP o correo antes de guardar.');
+                    return;
+                }
+
+                const nuevo = {
+                    id: `P-${Date.now()}`,
+                    no: alumnoManual.no || '',
+                    correo: correo,
+                    rfc: (alumnoManual.rfc || '').trim(),
+                    curp: curp,
+                    edad: alumnoManual.edad || '',
+                    sexo: (alumnoManual.sexo || '').trim(),
+                    nombre: nombre,
+                    paterno: paterno,
+                    materno: materno,
+                    completo: `${paterno} ${materno} ${nombre}`.trim(),
+                    telefono: (alumnoManual.telefono || '').trim(),
+                    cct: (alumnoManual.cct || '').trim(),
+                    subsistema: (alumnoManual.subsistema || '').trim(),
+                    municipio: (alumnoManual.municipio || '').trim(),
+                    funcion: (alumnoManual.funcion || '').trim(),
+                    nivel: (alumnoManual.nivel || '').trim(),
+                    servicio: (alumnoManual.servicio || '').trim(),
+                    grupoId: null
+                };
+
+                onUpdate({ ...db, participantes: [...db.participantes, nuevo] });
+                setAlumnoManual({ no: '', correo: '', rfc: '', curp: '', edad: '', sexo: '', nombre: '', paterno: '', materno: '', telefono: '', cct: '', subsistema: '', municipio: '', funcion: '', nivel: '', servicio: '' });
+                setMostrarCargaManual(false);
+            };
+
+            const camposAlumno = [
+                { key: 'no', label: 'NO. CONSECUTIVO', type: 'text' },
+                { key: 'correo', label: 'CORREO ELECTRONICO', type: 'email' },
+                { key: 'rfc', label: 'RFC', type: 'text' },
+                { key: 'curp', label: 'CURP', type: 'text' },
+                { key: 'edad', label: 'EDAD', type: 'number' },
+                { key: 'sexo', label: 'SEXO', type: 'text' },
+                { key: 'nombre', label: 'NOMBRE', type: 'text' },
+                { key: 'paterno', label: 'APELLIDO PATERNO', type: 'text' },
+                { key: 'materno', label: 'APELLIDO MATERNO', type: 'text' },
+                { key: 'telefono', label: 'TELEFONO', type: 'text' },
+                { key: 'cct', label: 'CLAVE CENTRO DE TRABAJO', type: 'text' },
+                { key: 'subsistema', label: 'SUBSISTEMA', type: 'text' },
+                { key: 'municipio', label: 'MUNICIPIO', type: 'text' },
+                { key: 'funcion', label: 'FUNCION', type: 'text' },
+                { key: 'nivel', label: 'NIVEL EDUCATIVO', type: 'text' },
+                { key: 'servicio', label: 'SERVICIO MODALIDAD', type: 'text' }
+            ];
+
+            return (
+                <div className="bg-white rounded-2xl shadow-sm h-full flex flex-col overflow-hidden p-6">
+                    <div className="flex justify-between items-center mb-4">
+                        <h2 className="text-lg font-bold text-blue-900 flex items-center gap-2"><i className="fa-solid fa-file-excel text-green-600"></i> Alumnos</h2>
+                        <button onClick={descargarPlantillaBase} className="bg-green-100 text-green-700 hover:bg-green-600 hover:text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 shadow-sm border border-green-200">
+                            <i className="fa-solid fa-download"></i> Descargar Plantilla Oficial
+                        </button>
+                    </div>
+
+                    <div className="mb-5 flex flex-wrap items-center gap-3">
+                        <button onClick={() => setMostrarCargaManual(!mostrarCargaManual)} className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-lg shadow-indigo-500/25 transition-all flex items-center gap-2">
+                            <i className="fa-solid fa-user-plus"></i> Carga de alumno
+                        </button>
+                        <button onClick={agregarParticipantesPegados} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg shadow-blue-500/30 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed" disabled={!participantesProcesados.length}>
+                            <i className="fa-solid fa-user-plus"></i> Carga masiva
+                        </button>
+                    </div>
+
+                    {mostrarCargaManual && (
+                        <div className="mb-6 rounded-2xl border border-indigo-200 bg-indigo-50 p-4 shadow-sm">
+                            <div className="mb-3 flex items-center justify-between">
+                                <h3 className="text-base font-bold text-indigo-900">Registro manual de alumno</h3>
+                                <button onClick={() => setMostrarCargaManual(false)} className="text-xs font-bold text-indigo-700 hover:text-indigo-900">Cerrar</button>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                                {camposAlumno.map(campo => (
+                                    <label key={campo.key} className="block text-xs font-bold text-gray-700">
+                                        <span className="mb-1 block uppercase tracking-wide">{campo.label}</span>
+                                        <input
+                                            type={campo.type}
+                                            value={alumnoManual[campo.key] || ''}
+                                            onChange={e => {
+                                                const value = campo.key === 'correo' ? e.target.value.toLowerCase() : e.target.value.toUpperCase();
+                                                setAlumnoManual(prev => ({ ...prev, [campo.key]: value }));
+                                            }}
+                                            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                                        />
+                                    </label>
+                                ))}
+                            </div>
+                            <div className="mt-4 flex justify-end">
+                                <button onClick={guardarAlumnoManual} className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-lg shadow-indigo-500/25 transition-all">
+                                    Guardar alumno
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    <p className="text-sm text-gray-500 mb-4">Pega aquí la información del Excel con encabezados para importar alumnos al curso actual.</p>
+                    <textarea className="flex-1 w-full p-4 border-dashed border-2 border-gray-300 rounded-xl bg-gray-50 text-xs font-mono outline-none focus:border-blue-500 focus:bg-white transition-colors" placeholder="Pegar aquí..." value={textoPegado} onChange={e=>procesarTextoPegado(e.target.value)}></textarea>
+                    <div className="flex items-center justify-between mt-4">
+                        <div className="text-sm px-4 py-2 bg-blue-50 text-blue-800 font-bold rounded-lg border border-blue-100">
+                            Registros detectados: {participantesProcesados.length}
+                        </div>
                     </div>
                 </div>
             );
