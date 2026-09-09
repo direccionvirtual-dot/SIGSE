@@ -25,6 +25,10 @@
     <!-- Plugin de DataLabels para Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0"></script>
 
+    <!-- Captura de pantallas y exportación PDF -->
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.0/jspdf.umd.min.js"></script>
+
     <!-- Firebase (compatibilidad UMD) -->
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
@@ -38,6 +42,19 @@
         .seguimiento-table th { background-color: #f3f4f6; position: sticky; top: 0; z-index: 10; font-size: 0.7rem; }
         .seguimiento-table thead tr:nth-child(2) th { top: 38px; z-index: 9; }
         .seguimiento-table thead tr:first-child th { z-index: 12; }
+
+        .asignar-table { border-collapse: separate; border-spacing: 0; }
+        .asignar-table thead th {
+            position: sticky;
+            top: 0;
+            z-index: 20;
+            background-color: #fff;
+            box-shadow: 0 1px 0 #e5e7eb;
+        }
+        .asignar-checkbox:focus-visible {
+            outline: 2px dotted #2563eb;
+            outline-offset: 3px;
+        }
         
         /* Sistema de columnas ancladas */
         .seguimiento-table .col-sticky { position: sticky; background-color: #fff; z-index: 11; text-align: left; }
@@ -330,9 +347,10 @@
         // ==========================================
         // COMPONENTE GENÉRICO DE GRÁFICAS 
         // ==========================================
-        function ChartCard({ type, labels, datasets, title }) {
+        function ChartCard({ type, labels, datasets, title, subtitle, id }) {
             const canvasRef = useRef(null);
             const chartRef = useRef(null);
+            const cardRef = useRef(null);
 
             useEffect(() => {
                 if(!canvasRef.current) return;
@@ -409,29 +427,55 @@
                 return () => { if(chartRef.current) chartRef.current.destroy(); }
             }, [type, labels, datasets]);
 
-            const copyImage = () => {
-                const canvas = canvasRef.current;
-                canvas.toBlob(blob => {
-                    if(navigator.clipboard && navigator.clipboard.write) {
-                        navigator.clipboard.write([new ClipboardItem({'image/png': blob})]).then(()=>alert("Gráfica copiada al portapapeles. ¡Lista para pegar en tus informes!")).catch(e => alert("Tu navegador bloqueó el pegado directo. Usa el botón de Descargar PNG."));
-                    } else { alert("Tu navegador no soporta copiado directo. Usa Descargar."); }
-                });
-            };
-            
-            const downloadImage = () => {
-                const link = document.createElement('a');
-                link.download = `${title.replace(/ /g, '_')}.png`;
-                link.href = canvasRef.current.toDataURL('image/png', 1.0);
-                link.click();
+            const copyImage = async () => {
+                const target = cardRef.current;
+                if (!target) return alert('No se pudo preparar la copia de la gráfica.');
+
+                try {
+                    if (!window.html2canvas) {
+                        const canvas = canvasRef.current;
+                        if (!canvas) return alert('La captura de imagen no está disponible en este navegador.');
+                        canvas.toBlob(blob => {
+                            if (!blob) return alert('No se pudo generar la imagen.');
+                            if (navigator.clipboard && navigator.clipboard.write) {
+                                navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]).then(() => alert('Gráfica copiada al portapapeles.')).catch(() => alert('Tu navegador bloqueó el pegado directo.'));
+                            } else {
+                                alert('Tu navegador no soporta copiado directo.');
+                            }
+                        }, 'image/png');
+                        return;
+                    }
+
+                    const canvas = await window.html2canvas(target, { backgroundColor: '#ffffff', scale: 2, useCORS: true, scrollX: 0, scrollY: 0 });
+                    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+                    if (!blob) return alert('No se pudo generar la imagen.');
+
+                    if (navigator.clipboard && navigator.clipboard.write) {
+                        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+                        alert('Gráfica copiada al portapapeles.');
+                    } else {
+                        const url = canvas.toDataURL('image/png');
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = `${title.replace(/ /g, '_')}.png`;
+                        link.click();
+                        alert('La imagen se descargó porque tu navegador no permite copiar directo al portapapeles.');
+                    }
+                } catch (error) {
+                    console.error('Error al copiar la gráfica:', error);
+                    alert('No se pudo copiar la gráfica. Intenta nuevamente.');
+                }
             };
 
             return (
-                <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5 h-full flex flex-col break-inside-avoid">
-                    <div className="flex justify-between items-start mb-4 border-b pb-2">
-                        <h3 className="font-bold text-gray-800 text-sm">{title}</h3>
-                        <div className="flex gap-2 no-print">
+                <div id={id} ref={cardRef} className="bg-white border border-gray-200 rounded-xl shadow-sm p-5 h-full flex flex-col break-inside-avoid">
+                    <div className="flex justify-between items-start mb-4 border-b pb-2 gap-3">
+                        <div className="min-w-0">
+                            <h3 className="font-bold text-gray-800 text-sm">{title}</h3>
+                            {subtitle && <div className="text-[11px] text-gray-500 mt-1">{subtitle}</div>}
+                        </div>
+                        <div className="flex gap-2 no-print shrink-0">
                             <button onClick={copyImage} className="text-gray-400 hover:text-blue-600 bg-gray-50 hover:bg-blue-50 p-2 rounded-lg transition-colors" title="Copiar al portapapeles"><i className="fa-solid fa-copy"></i></button>
-                            <button onClick={downloadImage} className="text-gray-400 hover:text-green-600 bg-gray-50 hover:bg-green-50 p-2 rounded-lg transition-colors" title="Descargar como PNG"><i className="fa-solid fa-download"></i></button>
                         </div>
                     </div>
                     <div className="flex-1 min-h-[300px] w-full relative">
@@ -566,6 +610,14 @@
             const [controlEvidenceFilters, setControlEvidenceFilters] = useState({ year: '', estado: '', curso: '', grupo: '' });
             const [controlTableSort, setControlTableSort] = useState({ table: 'sessions', key: 'numero', direction: 'asc' });
             const [activeDbId, setActiveDbId] = useState(null);
+            const [recentOfferIds, setRecentOfferIds] = useState(() => {
+                try {
+                    const saved = window.localStorage.getItem('prodep_recent_offers');
+                    return saved ? JSON.parse(saved) : [];
+                } catch (error) {
+                    return [];
+                }
+            });
             const [firebaseStatus, setFirebaseStatus] = useState('checking');
             const [firebaseStatusMessage, setFirebaseStatusMessage] = useState('Verificando conexión a Firebase...');
             
@@ -629,6 +681,26 @@
                     </div>
                 </div>
             ) : null;
+
+            const trackRecentOffer = useCallback((dbId) => {
+                if (!dbId) return;
+                setRecentOfferIds(prev => {
+                    const filtered = prev.filter(id => id !== dbId);
+                    const next = [dbId, ...filtered].slice(0, 5);
+                    try {
+                        window.localStorage.setItem('prodep_recent_offers', JSON.stringify(next));
+                    } catch (error) {}
+                    return next;
+                });
+            }, []);
+
+            const recentOffers = useMemo(() =>
+                recentOfferIds
+                    .map(id => basesDeDatos.find(db => db.id === id))
+                    .filter(Boolean)
+                    .slice(0, 5),
+                [basesDeDatos, recentOfferIds]
+            );
 
             // Campos de Creación Nueva BD
             const [anio, setAnio] = useState(new Date().getFullYear().toString());
@@ -804,6 +876,7 @@
                 };
                 setBasesDeDatos([...basesDeDatos, nuevaBD]);
                 setActiveDbId(nuevaBD.id);
+                trackRecentOffer(nuevaBD.id);
                 setAppView('workspace');
                 setIdCurso(''); setSiglas(''); setNombreCurso(''); setTextoPegado(''); setParticipantesProcesados([]); setCoordinadorIds([]);
                 setSectorFormativoTipo('Educación Continua'); setSectorFormativoOtro('');
@@ -1327,7 +1400,7 @@
                                             <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-[10px] text-slate-200">v7.0</div>
+                                        <div className="text-[10px] text-slate-200">v7.6</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -1335,7 +1408,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v7.0</div>
+                                        <div className="text-xs text-slate-200">v7.6</div>
                                     </div>
                                 )}
                             </div>
@@ -1406,7 +1479,13 @@
                         <header className="bg-gray-900 text-white p-4 shadow-md flex justify-between items-center no-print sticky top-0 z-40">
                             <div className="flex items-center gap-3">
                                 <i className="fa-solid fa-laptop-code text-2xl text-cyan-400"></i>
-                                <h1 className="text-xl font-bold">Portal Administrador <span className="text-gray-400 text-sm font-normal ml-2">ESCUELA DE POSGRADOS - SIGSE v7.0</span></h1>
+                                <button
+                                    type="button"
+                                    onClick={() => setAdminSection('menu')}
+                                    className="text-left text-xl font-bold text-white transition-colors hover:text-cyan-300 focus:outline-none"
+                                >
+                                    Portal Administrador
+                                </button>
                             </div>
                             <div className="flex items-center gap-4">
                                 <button onClick={cerrarSesion} className="bg-red-500/20 text-red-300 border border-red-500/50 px-4 py-1.5 rounded-lg font-bold text-sm hover:bg-red-500 hover:text-white transition-colors flex items-center gap-2">
@@ -1417,51 +1496,97 @@
 
                         <main className="max-w-7xl mx-auto p-6 space-y-6">
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                                <button onClick={() => setAdminSection('admin')} className={`rounded-2xl p-6 shadow-sm border ${adminSection === 'admin' ? 'border-blue-600 bg-blue-50' : 'border-gray-200 bg-white'} transition-colors hover:border-blue-500`}>
-                                    <div className="flex items-center justify-center w-14 h-14 rounded-full bg-blue-100 text-blue-600 mb-4">
-                                        <i className="fa-solid fa-user-shield text-2xl"></i>
+                                <button onClick={() => setAdminSection('admin')} className={`rounded-2xl p-4 shadow-sm border ${adminSection === 'admin' ? 'border-blue-600 bg-blue-50' : 'border-gray-200 bg-white'} transition-colors hover:border-blue-500 flex items-center justify-center gap-3 min-h-[90px]`}>
+                                    <div className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-100 text-blue-600 shrink-0">
+                                        <i className="fa-solid fa-user-shield text-lg"></i>
                                     </div>
-                                    <h3 className="text-lg font-bold text-gray-800 mb-2">Configuración Administrador</h3>
-                                    <p className="text-sm text-gray-500">Modificar contraseñas y administrar cuentas de administrador.</p>
+                                    <h3 className="text-sm font-bold text-gray-800 text-left">Configuración Administrador</h3>
                                 </button>
-                                <button onClick={() => setAdminSection('courses')} className={`rounded-2xl p-6 shadow-sm border ${adminSection === 'courses' ? 'border-blue-600 bg-blue-50' : 'border-gray-200 bg-white'} transition-colors hover:border-blue-500`}>
-                                    <div className="flex items-center justify-center w-14 h-14 rounded-full bg-green-100 text-green-600 mb-4">
-                                        <i className="fa-solid fa-graduation-cap text-2xl"></i>
+                                <button onClick={() => setAdminSection('courses')} className={`rounded-2xl p-4 shadow-sm border ${adminSection === 'courses' ? 'border-blue-600 bg-blue-50' : 'border-gray-200 bg-white'} transition-colors hover:border-blue-500 flex items-center justify-center gap-3 min-h-[90px]`}>
+                                    <div className="flex items-center justify-center w-10 h-10 rounded-full bg-green-100 text-green-600 shrink-0">
+                                        <i className="fa-solid fa-graduation-cap text-lg"></i>
                                     </div>
-                                    <h3 className="text-lg font-bold text-gray-800 mb-2">Configuración Cursos</h3>
-                                    <p className="text-sm text-gray-500">Entrar a la gestión de cursos ya construida.</p>
+                                    <h3 className="text-sm font-bold text-gray-800 text-left">Configuración Cursos</h3>
                                 </button>
-                                <button onClick={() => setAdminSection('control')} className={`rounded-2xl p-6 shadow-sm border ${adminSection === 'control' ? 'border-blue-600 bg-blue-50' : 'border-gray-200 bg-white'} transition-colors hover:border-blue-500`}>
-                                    <div className="flex items-center justify-center w-14 h-14 rounded-full bg-yellow-100 text-yellow-600 mb-4">
-                                        <i className="fa-solid fa-sliders text-2xl"></i>
+                                <button onClick={() => setAdminSection('control')} className={`rounded-2xl p-4 shadow-sm border ${adminSection === 'control' ? 'border-blue-600 bg-blue-50' : 'border-gray-200 bg-white'} transition-colors hover:border-blue-500 flex items-center justify-center gap-3 min-h-[90px]`}>
+                                    <div className="flex items-center justify-center w-10 h-10 rounded-full bg-yellow-100 text-yellow-600 shrink-0">
+                                        <i className="fa-solid fa-sliders text-lg"></i>
                                     </div>
-                                    <h3 className="text-lg font-bold text-gray-800 mb-2">Configuración Control</h3>
-                                    <p className="text-sm text-gray-500">Cuentas Zoom y controles operativos de las sesiones.</p>
+                                    <h3 className="text-sm font-bold text-gray-800 text-left">Configuración Control</h3>
                                 </button>
                             </div>
 
                             {adminSection === 'menu' && (
-                                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 text-center">
-                                    <h2 className="text-2xl font-bold text-gray-900 mb-2">Bienvenido al Portal de Administración</h2>
-                                    <p className="text-gray-600 mb-4">Selecciona uno de los tres apartados para continuar: administrador, cursos o control.</p>
-                                    <div className="text-sm text-gray-500">El apartado de control ya incluye el catálogo de cuentas Zoom y crecerá con sesiones, asistencias y evidencias.</div>
+                                <div className="space-y-6">
+                                    <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 text-center">
+                                        <h2 className="text-2xl font-bold text-gray-900 mb-2">Bienvenido al Portal de Administración</h2>
+                                        <p className="text-gray-600 mb-4">Selecciona uno de los tres apartados para continuar: administrador, cursos o control.</p>
+                                        <div className="text-sm text-gray-500">El apartado de control ya incluye el catálogo de cuentas Zoom y crecerá con sesiones, asistencias y evidencias.</div>
+                                    </div>
+
+                                    <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
+                                        <div className="flex items-center justify-between gap-3 mb-5">
+                                            <div className="flex items-center gap-3">
+                                                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100 text-blue-600">
+                                                    <i className="fa-solid fa-clock-rotate-left text-lg"></i>
+                                                </div>
+                                                <h3 className="text-xl font-bold text-gray-900">Ofertas Recientes</h3>
+                                            </div>
+                                            <span className="rounded-full bg-blue-100 px-2.5 py-1 text-[11px] font-bold text-blue-700 uppercase tracking-wide">{recentOffers.length} cursos</span>
+                                        </div>
+
+                                        {recentOffers.length === 0 ? (
+                                            <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500 text-center">
+                                                Aún no has abierto ninguna oferta. Cuando entres a un curso desde la lista, aparecerá aquí.
+                                            </div>
+                                        ) : (
+                                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                                                {recentOffers.map(db => (
+                                                    <button
+                                                        key={db.id}
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setActiveDbId(db.id);
+                                                            trackRecentOffer(db.id);
+                                                            setAppView('workspace');
+                                                        }}
+                                                        className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-blue-50 via-white to-indigo-50 p-4 text-left shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-lg hover:shadow-blue-100"
+                                                    >
+                                                        <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-blue-500 via-indigo-500 to-cyan-400"></div>
+                                                        <div className="mb-3 flex items-center justify-between gap-2">
+                                                            <span className="rounded-full bg-blue-600 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm">{db.info.siglas || 'SIN SIGLA'}</span>
+                                                            <span className="inline-flex items-center gap-1 rounded-full bg-white/80 px-2 py-1 text-[10px] font-semibold text-blue-700 ring-1 ring-blue-100">
+                                                                <i className="fa-solid fa-arrow-up-right-from-square text-[9px]"></i>
+                                                                Abrir
+                                                            </span>
+                                                        </div>
+                                                        <div className="text-sm font-bold text-slate-900 leading-5 min-h-[2.5rem]">{db.info.nombreCurso || 'Curso sin nombre'}</div>
+                                                        <div className="mt-3 flex items-center justify-between gap-2 text-[11px] text-slate-500">
+                                                            <span className="truncate font-medium">{db.info.estado || 'Sin estado'}</span>
+                                                            <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-600">{db.info.anio || 'Sin año'}</span>
+                                                        </div>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             )}
 
                             {adminSection === 'courses' && (
                                 <>
                                     <div className="grid grid-cols-1 gap-4 mb-6 sm:grid-cols-3">
-                                        <button onClick={() => setCoursesSection('new')} className={`rounded-2xl border px-5 py-4 text-left transition ${coursesSection === 'new' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50/50'}`}>
-                                            <div className="flex items-center gap-3 mb-2 text-blue-700"><i className="fa-solid fa-folder-plus text-lg"></i><span className="font-bold">Nueva oferta</span></div>
-                                            <p className="text-sm text-slate-500">Registra un proyecto con todos los datos y el pegado de Excel.</p>
+                                        <button onClick={() => setCoursesSection('new')} className={`rounded-2xl border px-4 py-3 text-left transition ${coursesSection === 'new' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50/50'} flex items-center justify-center gap-3 min-h-[76px]`}>
+                                            <i className="fa-solid fa-folder-plus text-lg text-blue-700"></i>
+                                            <span className="font-bold text-sm text-gray-800">Nueva oferta</span>
                                         </button>
-                                        <button onClick={() => setCoursesSection('offers')} className={`rounded-2xl border px-5 py-4 text-left transition ${coursesSection === 'offers' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50/50'}`}>
-                                            <div className="flex items-center gap-3 mb-2 text-blue-700"><i className="fa-solid fa-folder-open text-lg"></i><span className="font-bold">Ofertas activas</span></div>
-                                            <p className="text-sm text-slate-500">Explora y administra tus proyectos creados.</p>
+                                        <button onClick={() => setCoursesSection('offers')} className={`rounded-2xl border px-4 py-3 text-left transition ${coursesSection === 'offers' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50/50'} flex items-center justify-center gap-3 min-h-[76px]`}>
+                                            <i className="fa-solid fa-folder-open text-lg text-blue-700"></i>
+                                            <span className="font-bold text-sm text-gray-800">Ofertas activas</span>
                                         </button>
-                                        <button onClick={() => setCoursesSection('personal')} className={`rounded-2xl border px-5 py-4 text-left transition ${coursesSection === 'personal' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50/50'}`}>
-                                            <div className="flex items-center gap-3 mb-2 text-blue-700"><i className="fa-solid fa-address-book text-lg"></i><span className="font-bold">Plantilla de Personal</span></div>
-                                            <p className="text-sm text-slate-500">Gestiona el personal y sus accesos desde un solo espacio.</p>
+                                        <button onClick={() => setCoursesSection('personal')} className={`rounded-2xl border px-4 py-3 text-left transition ${coursesSection === 'personal' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50/50'} flex items-center justify-center gap-3 min-h-[76px]`}>
+                                            <i className="fa-solid fa-address-book text-lg text-blue-700"></i>
+                                            <span className="font-bold text-sm text-gray-800">Plantilla de Personal</span>
                                         </button>
                                     </div>
 
@@ -1638,7 +1763,7 @@
                                                                                                     </td>
                                                                                                     <td className="p-4 text-center">
                                                                                                         <div className="flex justify-center gap-2">
-                                                                                                            <button onClick={() => { setActiveDbId(db.id); setAppView('workspace'); }} className="w-8 h-8 rounded-lg bg-blue-100 text-blue-600 hover:bg-blue-600 hover:text-white flex items-center justify-center transition-colors"><i className="fa-solid fa-arrow-right"></i></button>
+                                                                                                            <button onClick={() => { setActiveDbId(db.id); trackRecentOffer(db.id); setAppView('workspace'); }} className="w-8 h-8 rounded-lg bg-blue-100 text-blue-600 hover:bg-blue-600 hover:text-white flex items-center justify-center transition-colors"><i className="fa-solid fa-arrow-right"></i></button>
                                                                                                             <button onClick={() => { if(confirm("¿Eliminar proyecto completo?")) setBasesDeDatos(basesDeDatos.filter(b => b.id !== db.id)) }} className="w-8 h-8 rounded-lg text-gray-400 hover:bg-red-100 hover:text-red-600 flex items-center justify-center transition-colors"><i className="fa-solid fa-trash"></i></button>
                                                                                                         </div>
                                                                                                     </td>
@@ -1772,22 +1897,22 @@
                                         </div>
                                         <button onClick={() => setAdminSection('menu')} className="self-start md:self-auto bg-gray-100 text-gray-700 px-4 py-2 rounded-xl hover:bg-gray-200 transition-colors">Volver al menú</button>
                                     </div>
-                                    <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-4">
-                                        <button onClick={() => setControlSection('zoom')} className={`rounded-2xl border px-5 py-4 text-left transition ${controlSection === 'zoom' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50/50'}`}>
-                                            <div className="flex items-center gap-3 mb-2 text-blue-700"><i className="fa-solid fa-video text-lg"></i><span className="font-bold">Cuentas Zoom</span></div>
-                                            <p className="text-sm text-slate-500">Nueva cuenta y catálogo.</p>
+                                    <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-5">
+                                        <button onClick={() => setControlSection('zoom')} className={`rounded-2xl border px-4 py-3 transition ${controlSection === 'zoom' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50/50'} flex items-center justify-center gap-3 min-h-[76px]`}>
+                                            <i className="fa-solid fa-video text-lg text-blue-700"></i>
+                                            <span className="font-bold text-sm text-gray-800">Cuentas Zoom</span>
                                         </button>
-                                        <button onClick={() => setControlSection('sessions')} className={`rounded-2xl border px-5 py-4 text-left transition ${controlSection === 'sessions' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50/50'}`}>
-                                            <div className="flex items-center gap-3 mb-2 text-blue-700"><i className="fa-solid fa-calendar-days text-lg"></i><span className="font-bold">Control de Sesiones</span></div>
-                                            <p className="text-sm text-slate-500">Gestiona horarios y enlaces.</p>
+                                        <button onClick={() => setControlSection('sessions')} className={`rounded-2xl border px-4 py-3 transition ${controlSection === 'sessions' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50/50'} flex items-center justify-center gap-3 min-h-[76px]`}>
+                                            <i className="fa-solid fa-calendar-days text-lg text-blue-700"></i>
+                                            <span className="font-bold text-sm text-gray-800">Control de Sesiones</span>
                                         </button>
-                                        <button onClick={() => setControlSection('attendances')} className={`rounded-2xl border px-5 py-4 text-left transition ${controlSection === 'attendances' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50/50'}`}>
-                                            <div className="flex items-center gap-3 mb-2 text-blue-700"><i className="fa-solid fa-clipboard-check text-lg"></i><span className="font-bold">Control de Asistencias</span></div>
-                                            <p className="text-sm text-slate-500">Formularios y respuestas.</p>
+                                        <button onClick={() => setControlSection('attendances')} className={`rounded-2xl border px-4 py-3 transition ${controlSection === 'attendances' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50/50'} flex items-center justify-center gap-3 min-h-[76px]`}>
+                                            <i className="fa-solid fa-clipboard-check text-lg text-blue-700"></i>
+                                            <span className="font-bold text-sm text-gray-800">Control de Asistencias</span>
                                         </button>
-                                        <button onClick={() => setControlSection('evidences')} className={`rounded-2xl border px-5 py-4 text-left transition ${controlSection === 'evidences' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50/50'}`}>
-                                            <div className="flex items-center gap-3 mb-2 text-blue-700"><i className="fa-solid fa-folder-open text-lg"></i><span className="font-bold">Control de Evidencias</span></div>
-                                            <p className="text-sm text-slate-500">Carpetas por grupo.</p>
+                                        <button onClick={() => setControlSection('evidences')} className={`rounded-2xl border px-4 py-3 transition ${controlSection === 'evidences' ? 'border-blue-600 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50/50'} flex items-center justify-center gap-3 min-h-[76px]`}>
+                                            <i className="fa-solid fa-folder-open text-lg text-blue-700"></i>
+                                            <span className="font-bold text-sm text-gray-800">Control de Evidencias</span>
                                         </button>
                                     </div>
 
@@ -2320,7 +2445,7 @@ María López	maria.lopez	Z9y8x7" />
             };
 
             return (
-                <div className="min-h-screen bg-gray-100 flex flex-col font-sans text-sm">
+                <div className="h-screen max-h-screen overflow-hidden bg-gray-100 flex flex-col font-sans text-sm">
                     <header className="bg-blue-900 text-white px-4 py-2 flex justify-between items-center shadow-md no-print">
                         <div className="flex items-center gap-4">
                             <button onClick={handleVolver} className="hover:text-gray-300 text-sm bg-blue-800 px-3 py-1.5 rounded-lg border border-blue-700 transition-colors shadow-inner flex items-center gap-2"><i className="fa-solid fa-arrow-left"></i> Volver al Panel</button>
@@ -2345,7 +2470,7 @@ María López	maria.lopez	Z9y8x7" />
                         </div>
                     </header>
 
-                    <div className="flex-1 overflow-hidden flex flex-col p-3 print:p-0">
+                    <div className="flex-1 min-h-0 overflow-hidden flex flex-col p-3 print:p-0">
                         {tab === 'resumen' && (isAdmin || isCoordinador) && <TabResumen db={db} />}
                         {tab === 'ajustes' && isAdmin && <TabAjustes db={db} onUpdate={onUpdate} asesoresGlobales={asesoresGlobales} />}
                         {tab === 'pegadoExcel' && isAdmin && <TabPegadoExcel db={db} onUpdate={onUpdate} textoPegado={textoPegado} setTextoPegado={setTextoPegado} participantesProcesados={participantesProcesados} setParticipantesProcesados={setParticipantesProcesados} procesarTextoPegado={procesarTextoPegado} descargarPlantillaBase={descargarPlantillaBase} />}
@@ -2713,6 +2838,7 @@ María López	maria.lopez	Z9y8x7" />
         // --- PESTAÑAS GRUPOS, DATOS, EXPORTAR ---
         function TabGrupos({ db, onUpdate, asesoresGlobales }) {
             const [n, setN] = useState({ nombre: '', asesorId: '', asesor: '', contacto: '', dia: '', hora: '', whatsapp: '' });
+            const [bulkCount, setBulkCount] = useState('');
             const [editingGroup, setEditingGroup] = useState(null);
             const [groupEditData, setGroupEditData] = useState(null);
 
@@ -2721,6 +2847,28 @@ María López	maria.lopez	Z9y8x7" />
                 if(!n.asesorId) return alert("Debes seleccionar a una persona de la lista de Personal Global");
                 onUpdate({ ...db, grupos: [...db.grupos, {...n, id: Date.now().toString()}] }); 
                 setN({ nombre: '', asesorId: '', asesor: '', contacto: '', dia: '', hora: '', whatsapp: '' }); 
+            };
+            const addBulk = () => {
+                const total = parseInt(bulkCount, 10);
+                if (!total || total < 1) return alert('Indica una cantidad válida de grupos.');
+                if (!n.asesorId) return alert('Debes seleccionar a una persona de la lista de Personal Global.');
+
+                const nombresExistentes = new Set(db.grupos.map(group => String(group.nombre || '').trim().toUpperCase()));
+                const gruposNuevos = [];
+                let consecutivo = 1;
+
+                while (gruposNuevos.length < total) {
+                    const nombre = `GRUPO ${String(consecutivo).padStart(2, '0')}`;
+                    consecutivo += 1;
+                    if (nombresExistentes.has(nombre)) continue;
+
+                    nombresExistentes.add(nombre);
+                    gruposNuevos.push({ ...n, nombre, id: `${Date.now()}-${gruposNuevos.length}` });
+                }
+
+                onUpdate({ ...db, grupos: [...db.grupos, ...gruposNuevos] });
+                setBulkCount('');
+                alert(`Se agregaron ${gruposNuevos.length} grupos correctamente.`);
             };
             const del = (id) => onUpdate({ ...db, grupos: db.grupos.filter(g => g.id !== id), participantes: db.participantes.map(p => p.grupoId === id ? { ...p, grupoId: null } : p) });
             const openEditGroup = (group) => {
@@ -2761,6 +2909,16 @@ María López	maria.lopez	Z9y8x7" />
                         <div><label className="block text-xs font-bold text-gray-700 mb-1">Turno / Hora</label><input type="text" className="w-full p-2.5 border border-gray-300 bg-white rounded-lg text-sm focus:border-blue-500 outline-none" value={n.hora} onChange={e=>setN({...n, hora: e.target.value})} /></div>
                         <div><label className="block text-xs font-bold text-gray-700 mb-1">Enlace WhatsApp</label><div className="flex gap-2"><input type="text" className="w-full p-2.5 border border-gray-300 bg-white rounded-lg text-sm flex-1 focus:border-blue-500 outline-none" value={n.whatsapp} onChange={e=>setN({...n, whatsapp: e.target.value})} /><button onClick={add} className="bg-blue-600 text-white px-4 py-2.5 rounded-lg shadow hover:bg-blue-700 font-bold transition-transform active:scale-95"><i className="fa-solid fa-plus"></i></button></div></div>
                     </div>
+                    <div className="px-6 py-4 bg-blue-50 border-b border-blue-100 flex flex-col md:flex-row md:items-end gap-3">
+                        <div>
+                            <label className="block text-xs font-bold text-blue-900 mb-1">Agregar grupos masivamente</label>
+                            <p className="text-xs text-blue-700">Usará el asesor, día, hora y WhatsApp seleccionados arriba.</p>
+                        </div>
+                        <div className="flex gap-2 md:ml-auto">
+                            <input type="number" min="1" max="99" className="w-28 p-2.5 border border-blue-200 bg-white rounded-lg text-sm outline-none focus:border-blue-500" placeholder="Cantidad" value={bulkCount} onChange={e => setBulkCount(e.target.value)} aria-label="Cantidad de grupos a crear" />
+                            <button onClick={addBulk} className="bg-blue-700 text-white px-4 py-2.5 rounded-lg shadow hover:bg-blue-800 font-bold transition-colors flex items-center gap-2"><i className="fa-solid fa-layer-group"></i> Generar grupos</button>
+                        </div>
+                    </div>
                     <div className="flex-1 overflow-auto">
                         <table className="w-full text-sm text-left whitespace-nowrap">
                             <thead className="bg-white sticky top-0 shadow-sm z-10"><tr><th className="p-4 text-gray-500">Grupo</th><th className="p-4 text-gray-500">Asesor</th><th className="p-4 text-gray-500">Día / Hora</th><th className="p-4 text-gray-500">WhatsApp</th><th className="p-4 text-gray-500 text-center">Acción</th></tr></thead>
@@ -2783,7 +2941,7 @@ María López	maria.lopez	Z9y8x7" />
                     </div>
 
                     {editingGroup && groupEditData && (
-                        <Modal show={editingGroup && groupEditData} onClose={closeEditGroup} width="max-w-3xl" ariaLabel="Editar grupo de trabajo">
+                        <Modal show={Boolean(editingGroup && groupEditData)} onClose={closeEditGroup} width="max-w-3xl" ariaLabel="Editar grupo de trabajo">
                             <div className="bg-white rounded-3xl shadow-2xl w-full p-6 overflow-auto max-h-[90vh]">
                                 <div className="flex items-center justify-between mb-4">
                                     <div>
@@ -2915,6 +3073,18 @@ María López	maria.lopez	Z9y8x7" />
                 if (newSet.has(id)) newSet.delete(id); else newSet.add(id);
                 setSelectedIds(newSet);
             };
+            const moveCheckboxFocus = (event, currentIndex) => {
+                const navigationKeys = ['ArrowDown', 'ArrowUp', 'ArrowRight', 'ArrowLeft'];
+                if (!navigationKeys.includes(event.key)) return;
+
+                const checkboxes = Array.from(document.querySelectorAll('.asignar-checkbox'));
+                const direction = event.key === 'ArrowDown' || event.key === 'ArrowRight' ? 1 : -1;
+                const nextIndex = currentIndex + direction;
+                if (!checkboxes[nextIndex]) return;
+
+                event.preventDefault();
+                checkboxes[nextIndex].focus();
+            };
 
             const aplicarGrupoMasivo = () => {
                 if (!grupoAsignar) return alert("Selecciona un grupo primero");
@@ -2922,10 +3092,16 @@ María López	maria.lopez	Z9y8x7" />
                 onUpdate({ ...db, participantes: nuevosParticipantes });
                 setSelectedIds(new Set()); 
             };
+            const quitarGrupoMasivo = () => {
+                const nuevosParticipantes = db.participantes.map(p => selectedIds.has(p.id) ? { ...p, grupoId: null } : p);
+                onUpdate({ ...db, participantes: nuevosParticipantes });
+                setSelectedIds(new Set());
+                setGrupoAsignar('');
+            };
 
             return (
-                <div className="bg-white rounded-2xl shadow-sm h-full flex flex-col overflow-hidden">
-                    <div className="p-4 border-b border-gray-100 bg-white flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
+                <div className="bg-white rounded-2xl shadow-sm h-full min-h-0 flex flex-col overflow-hidden">
+                    <div className="sticky top-0 z-30 p-4 border-b border-gray-100 bg-white shadow-sm flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
                         <div className="font-bold text-gray-800 flex items-center gap-2"><i className="fa-solid fa-filter text-blue-500"></i> Filtros:</div>
                         <select className="p-2 border border-gray-200 bg-gray-50 rounded-lg text-sm w-full md:w-48 focus:border-blue-500 outline-none" value={filtros.grupo} onChange={e=>setFiltros({...filtros, grupo: e.target.value})}>
                             <option value="ALL">Todos los Grupos</option>
@@ -2950,7 +3126,7 @@ María López	maria.lopez	Z9y8x7" />
                     </div>
 
                     {selectedIds.size > 0 && (
-                        <div className="p-3 bg-blue-600 border-b flex items-center justify-between shadow-sm text-white">
+                        <div className="shrink-0 p-3 bg-blue-600 border-b flex items-center justify-between shadow-sm text-white">
                             <div className="font-bold text-sm px-3">{selectedIds.size} participantes seleccionados listos para asignar.</div>
                             <div className="flex gap-2">
                                 <select className="p-2 border-none bg-white text-gray-800 rounded-lg text-sm font-semibold outline-none" value={grupoAsignar} onChange={e=>setGrupoAsignar(e.target.value)}>
@@ -2958,24 +3134,25 @@ María López	maria.lopez	Z9y8x7" />
                                     {db.grupos.map(g => <option key={g.id} value={g.id}>{g.nombre} ({g.asesor})</option>)}
                                 </select>
                                 <button onClick={aplicarGrupoMasivo} className="bg-green-500 hover:bg-green-400 text-white px-5 py-2 rounded-lg text-sm font-bold shadow transition-colors">Aplicar Grupo</button>
+                                <button onClick={quitarGrupoMasivo} className="bg-red-500 hover:bg-red-400 text-white px-5 py-2 rounded-lg text-sm font-bold shadow transition-colors">Quitar grupo</button>
                             </div>
                         </div>
                     )}
 
-                    <div className="flex-1 overflow-auto relative bg-gray-50">
-                        <table className="w-full text-xs text-left whitespace-nowrap">
-                            <thead className="bg-white sticky top-0 z-10 shadow-sm">
+                    <div className="flex-1 min-h-0 overflow-auto relative bg-gray-50">
+                        <table className="asignar-table w-full text-xs text-left whitespace-nowrap">
+                            <thead className="bg-white">
                                 <tr>
-                                    <th className="p-3 text-center w-10 border-b border-gray-100"><input type="checkbox" className="w-4 h-4" checked={selectedIds.size > 0 && selectedIds.size === participantesFiltrados.length} onChange={toggleSelectAll} /></th>
-                                    <th className="p-3 border-b border-gray-100 text-blue-800 font-bold">GRUPO ASIGNADO</th>
-                                    <th className="p-3 border-b border-gray-100 font-semibold text-gray-500">NO.</th>
-                                    <th className="p-3 border-b border-gray-100 font-semibold text-gray-500">CURP</th>
-                                    <th className="p-3 border-b border-gray-100 font-semibold text-gray-500">NOMBRE COMPLETO</th>
-                                    <th className="p-3 border-b border-gray-100 font-semibold text-gray-500">MUNICIPIO</th>
-                                    <th className="p-3 border-b border-gray-100 font-semibold text-gray-500">FUNCIÓN</th>
-                                    <th className="p-3 border-b border-gray-100 font-semibold text-gray-500">NIVEL</th>
-                                    <th className="p-3 border-b border-gray-100 font-semibold text-gray-500">CORREO</th>
-                                    <th className="p-3 border-b border-gray-100 font-semibold text-gray-500">ACCIONES</th>
+                                    <th className="sticky top-0 z-20 bg-white p-3 text-center w-10 border-b border-gray-100"><input type="checkbox" className="w-4 h-4" checked={selectedIds.size > 0 && selectedIds.size === participantesFiltrados.length} onChange={toggleSelectAll} /></th>
+                                    <th className="sticky top-0 z-20 bg-white p-3 border-b border-gray-100 text-blue-800 font-bold">GRUPO ASIGNADO</th>
+                                    <th className="sticky top-0 z-20 bg-white p-3 border-b border-gray-100 font-semibold text-gray-500">NO.</th>
+                                    <th className="sticky top-0 z-20 bg-white p-3 border-b border-gray-100 font-semibold text-gray-500">CURP</th>
+                                    <th className="sticky top-0 z-20 bg-white p-3 border-b border-gray-100 font-semibold text-gray-500">NOMBRE COMPLETO</th>
+                                    <th className="sticky top-0 z-20 bg-white p-3 border-b border-gray-100 font-semibold text-gray-500">MUNICIPIO</th>
+                                    <th className="sticky top-0 z-20 bg-white p-3 border-b border-gray-100 font-semibold text-gray-500">FUNCIÓN</th>
+                                    <th className="sticky top-0 z-20 bg-white p-3 border-b border-gray-100 font-semibold text-gray-500">NIVEL</th>
+                                    <th className="sticky top-0 z-20 bg-white p-3 border-b border-gray-100 font-semibold text-gray-500">CORREO</th>
+                                    <th className="sticky top-0 z-20 bg-white p-3 border-b border-gray-100 font-semibold text-gray-500">ACCIONES</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -2983,7 +3160,7 @@ María López	maria.lopez	Z9y8x7" />
                                     const grupoObj = db.grupos.find(g => g.id === p.grupoId);
                                     return (
                                         <tr key={p.id} className={`border-b border-gray-100 hover:bg-blue-50/50 transition-colors ${selectedIds.has(p.id) ? 'bg-blue-100/50' : 'bg-white'}`}>
-                                            <td className="p-3 text-center"><input type="checkbox" className="w-4 h-4" checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)} /></td>
+                                            <td className="p-3 text-center"><input type="checkbox" className="asignar-checkbox w-4 h-4" data-asignar-checkbox="true" aria-label={`Seleccionar a ${p.completo || 'participante'}`} checked={selectedIds.has(p.id)} onKeyDown={event => moveCheckboxFocus(event, participantesFiltrados.findIndex(item => item.id === p.id))} onChange={() => toggleSelect(p.id)} /></td>
                                             <td className="p-3 font-bold text-blue-700">{grupoObj ? grupoObj.nombre : <span className="text-red-400 bg-red-50 px-2 py-0.5 rounded text-[10px]">Sin grupo</span>}</td>
                                             <td className="p-3 text-gray-500">{p.no}</td>
                                             <td className="p-3 font-mono text-[10px] text-gray-500">{p.curp}</td>
@@ -3113,7 +3290,7 @@ María López	maria.lopez	Z9y8x7" />
             const activeSem = semanas[semanas.length - 1]; 
 
             const getPData = useCallback((pId) => {
-                const defaultP = { conf: false, asis: {}, paEst: {}, paCal: {}, actEst: {}, actCal: {}, encEst: false, encInst: false, msgGrp: false, msgPer: false, llam: false, obs: '' };
+                const defaultP = { conf: false, asis: {}, paEst: {}, paCal: {}, paRem: {}, actEst: {}, actCal: {}, actRem: {}, encEst: false, encInst: false, msgGrp: false, msgPer: false, llam: false, obs: '' };
                 if (!activeSem) return defaultP;
 
                 // Build indexed list with robust timestamp fallback (id parse -> corteDate -> array index)
@@ -3142,7 +3319,7 @@ María López	maria.lopez	Z9y8x7" />
                 const toMerge = indexed.slice(0, activeIndex + 1).map(e => e.s).filter(Boolean);
 
                 // Merge progressively: earlier weeks -> later weeks (later override)
-                const res = { ...defaultP, asis: {}, paEst: {}, paCal: {}, actEst: {}, actCal: {} };
+                const res = { ...defaultP, asis: {}, paEst: {}, paCal: {}, paRem: {}, actEst: {}, actCal: {}, actRem: {} };
                 toMerge.forEach(sem => {
                     if (!sem || !sem.data) return;
                     const sd = sem.data[pId];
@@ -3152,7 +3329,7 @@ María López	maria.lopez	Z9y8x7" />
                         if (sd[k] !== undefined) res[k] = sd[k];
                     });
 
-                    ['asis','paEst','paCal','actEst','actCal'].forEach(n => {
+                    ['asis','paEst','paCal','paRem','actEst','actCal','actRem'].forEach(n => {
                         if (!res[n]) res[n] = {};
                         const src = sd[n];
                         if (!src) return;
@@ -3162,7 +3339,7 @@ María López	maria.lopez	Z9y8x7" />
                             src.forEach((v, idx) => {
                                 const k = idx + 1;
                                 let val = v;
-                                if (n === 'asis' || n === 'paEst' || n === 'actEst') val = (val === true || val === 'true');
+                                if (n === 'asis' || n === 'paEst' || n === 'paRem' || n === 'actEst' || n === 'actRem') val = (val === true || val === 'true');
                                 if (n === 'paCal' || n === 'actCal') val = parseFloatSafe(val);
                                 res[n][k] = val;
                             });
@@ -3177,7 +3354,7 @@ María López	maria.lopez	Z9y8x7" />
                                 if (val === 'true') val = true;
                                 if (val === 'false') val = false;
 
-                                if (n === 'asis' || n === 'paEst' || n === 'actEst') {
+                                if (n === 'asis' || n === 'paEst' || n === 'paRem' || n === 'actEst' || n === 'actRem') {
                                     val = (val === true || val === 'true');
                                 }
                                 if (n === 'paCal' || n === 'actCal') {
@@ -3749,8 +3926,235 @@ María López	maria.lopez	Z9y8x7" />
                 backgroundColor: ['#f87171', '#10b981']
             }];
 
-            const cursoId = (db.info.idCurso || `${db.info.siglas || ''}${db.info.idEstado ? `-${db.info.idEstado}` : ''}`).trim();
+            const cursoId = (db.info.siglas || `${db.info.idCurso || ''}${db.info.idEstado ? `-${db.info.idEstado}` : ''}`).trim();
             const chartTitleWithCurso = (baseTitle) => cursoId ? `${baseTitle} ${cursoId}` : baseTitle;
+            const cursoHeaderMeta = [db.info.siglas, db.info.idEstado || db.info.estado, db.info.anio].filter(Boolean).join(' ');
+
+            const copiarEficienciaTerminalActividadesComoImagen = async () => {
+                const target = document.getElementById('eficiencia-terminal-actividades-card');
+                if (!target) return alert('No se pudo capturar la información de Eficiencia Terminal de Actividades.');
+                if (!window.html2canvas) return alert('La captura de imagen no está disponible en este navegador.');
+
+                try {
+                    const canvas = await window.html2canvas(target, { backgroundColor: '#ffffff', scale: 2, useCORS: true, scrollX: 0, scrollY: 0 });
+                    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+                    if (!blob) return alert('No se pudo generar la imagen.');
+
+                    if (navigator.clipboard && navigator.clipboard.write) {
+                        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+                        alert('La información de Eficiencia Terminal de Actividades se copió como imagen al portapapeles.');
+                    } else {
+                        const url = canvas.toDataURL('image/png');
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = `Eficiencia_Terminal_Actividades_${(db.info?.siglas || 'curso')}.png`;
+                        link.click();
+                        alert('La imagen se descargó porque tu navegador no permite copiar directo al portapapeles.');
+                    }
+                } catch (error) {
+                    console.error('Error al copiar la imagen de Eficiencia Terminal de Actividades:', error);
+                    alert('No se pudo copiar la imagen. Intenta nuevamente.');
+                }
+            };
+
+            const copiarEficienciaTerminalGeneralComoImagen = async () => {
+                const target = document.getElementById('eficiencia-terminal-general-card');
+                if (!target) return alert('No se pudo capturar la información de Eficiencia Terminal General.');
+                if (!window.html2canvas) return alert('La captura de imagen no está disponible en este navegador.');
+
+                try {
+                    const canvas = await window.html2canvas(target, { backgroundColor: '#ffffff', scale: 2, useCORS: true, scrollX: 0, scrollY: 0 });
+                    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+                    if (!blob) return alert('No se pudo generar la imagen.');
+
+                    if (navigator.clipboard && navigator.clipboard.write) {
+                        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+                        alert('La información de Eficiencia Terminal General se copió como imagen al portapapeles.');
+                    } else {
+                        const url = canvas.toDataURL('image/png');
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = `Eficiencia_Terminal_General_${(db.info?.siglas || 'curso')}.png`;
+                        link.click();
+                        alert('La imagen se descargó porque tu navegador no permite copiar directo al portapapeles.');
+                    }
+                } catch (error) {
+                    console.error('Error al copiar la imagen de Eficiencia Terminal General:', error);
+                    alert('No se pudo copiar la imagen. Intenta nuevamente.');
+                }
+            };
+
+            const exportarReporteEficienciaPdf = async () => {
+                const target = document.querySelector('.print-only-container');
+                if (!target) return alert('No se pudo preparar la exportación del PDF del reporte.');
+                if (!window.html2canvas || !window.jspdf) return alert('La exportación a PDF no está disponible en este navegador.');
+
+                try {
+                    const canvas = await window.html2canvas(target, {
+                        backgroundColor: '#ffffff',
+                        scale: 2,
+                        useCORS: true,
+                        scrollX: 0,
+                        scrollY: 0,
+                        windowWidth: target.scrollWidth,
+                        windowHeight: target.scrollHeight
+                    });
+
+                    const { jsPDF } = window.jspdf;
+                    const siglasCurso = String(db.info?.siglas || 'CURSO').trim().replace(/\s+/g, '-').toUpperCase();
+                    const estadoCurso = String(db.info?.idEstado || db.info?.estado || 'ESTADO').trim().replace(/\s+/g, '-').toUpperCase();
+                    const anioCurso = String(db.info?.anio || new Date().getFullYear()).trim();
+                    const semanaTexto = String(activeSem?.nombre || 'Semana activa').replace(/^SEMANA\s*/i, 'Semana ').trim();
+                    const fileName = `Reporte_Eficiencia_${siglasCurso}-${estadoCurso}-${anioCurso}_${semanaTexto}.pdf`;
+
+                    const pdf = new jsPDF('p', 'pt', 'a4');
+                    const pageWidth = pdf.internal.pageSize.getWidth();
+                    const pageHeight = pdf.internal.pageSize.getHeight();
+                    const margin = 20;
+                    const pageBodyHeight = pageHeight - (margin * 2);
+                    const contentWidth = pageWidth - (margin * 2);
+                    const headerOffsetY = 110;
+
+                    const ofertaNombre = String(db.info?.nombreCurso || db.info?.siglas || 'OFERTA').trim();
+                    const ofertaId = String(db.info?.idCurso || db.info?.siglas || 'SIN ID').trim();
+                    const semanaHeader = String(activeSem?.nombre || 'Semana activa').replace(/^SEMANA\s*/i, '').trim();
+                    const semanaHeaderDisplay = semanaHeader.match(/^\d+\.?\s*/)
+                        ? `Semana ${semanaHeader}`
+                        : semanaHeader;
+                    const institucionNombre = 'ESCUELA DE POSGRADOS EN EDUCACIÓN VIRTUAL S.C.';
+                    const maxTitleWidth = pageWidth - (margin * 2) - 24;
+
+                    const buildWrappedHeader = (text, maxWidth, startSize) => {
+                        let fontSize = startSize;
+                        let lines = [];
+                        let valid = false;
+
+                        while (fontSize >= 11 && !valid) {
+                            pdf.setFontSize(fontSize);
+                            const words = text.split(/\s+/).filter(Boolean);
+                            const candidate = [];
+                            let current = '';
+
+                            for (const word of words) {
+                                const next = current ? `${current} ${word}` : word;
+                                if (pdf.getTextWidth(next) <= maxWidth || !current) {
+                                    current = next;
+                                } else {
+                                    candidate.push(current);
+                                    current = word;
+                                }
+                            }
+                            if (current) candidate.push(current);
+
+                            const allFit = candidate.every(line => pdf.getTextWidth(line) <= maxWidth);
+                            if (allFit) {
+                                lines = candidate;
+                                valid = true;
+                            } else {
+                                fontSize -= 1;
+                            }
+                        }
+
+                        return { lines, fontSize };
+                    };
+
+                    const lineHeight = 1.15;
+                    const { lines: nombreLineas, fontSize: nombreFontSize } = buildWrappedHeader(ofertaNombre.toUpperCase(), maxTitleWidth, 14);
+                    const { lines: institucionLineas, fontSize: institucionFontSize } = buildWrappedHeader(institucionNombre.toUpperCase(), maxTitleWidth, 12);
+
+                    const logoUrl = 'https://secure.gravatar.com/avatar/ed4e9795c26c0428f3dbd13932cfd6277a83bdaed6e57d30370e6865f0e628bc?s=250&d=mm&r=g';
+                    const logoWidth = 36;
+                    const logoHeight = 36;
+                    const logoX = margin;
+                    const logoY = 16;
+
+                    const img = await new Promise((resolve, reject) => {
+                        const image = new Image();
+                        image.crossOrigin = 'anonymous';
+                        image.onload = () => resolve(image);
+                        image.onerror = reject;
+                        image.src = logoUrl;
+                    });
+
+                    const canvasLogo = document.createElement('canvas');
+                    canvasLogo.width = img.naturalWidth || 250;
+                    canvasLogo.height = img.naturalHeight || 250;
+                    const ctxLogo = canvasLogo.getContext('2d');
+                    ctxLogo.drawImage(img, 0, 0, canvasLogo.width, canvasLogo.height);
+                    const logoData = canvasLogo.toDataURL('image/png');
+                    pdf.addImage(logoData, 'PNG', logoX, logoY, logoWidth, logoHeight, undefined, 'FAST');
+
+                    const centerX = pageWidth / 2;
+                    const textWidth = pageWidth - (margin * 2) - (logoWidth + 20);
+                    const wrappedText = pdf.splitTextToSize(institucionNombre.toUpperCase(), textWidth);
+
+                    pdf.setFontSize(institucionFontSize);
+                    pdf.setFont(undefined, 'normal');
+                    pdf.text(wrappedText, centerX, 35, { align: 'center' });
+
+                    pdf.setFontSize(nombreFontSize);
+                    pdf.setFont(undefined, 'bold');
+                    const titleStartY = 40 + (institucionLineas.length * (institucionFontSize * lineHeight)) + 20;
+                    pdf.text(nombreLineas, margin, titleStartY);
+
+                    pdf.setFontSize(10);
+                    pdf.setFont(undefined, 'normal');
+                    const idY = titleStartY + (nombreLineas.length * (nombreFontSize * lineHeight)) + 8;
+                    pdf.text(ofertaId, margin, idY);
+
+                    pdf.setFontSize(10);
+                    pdf.setFont(undefined, 'normal');
+                    pdf.text(semanaHeaderDisplay, margin, idY + (10 * lineHeight));
+
+                    const reportBodyStartY = idY + 28;
+
+                    const reportBlocks = Array.from(document.querySelectorAll('.print-only-container > *')).filter(block => {
+                        const tag = block.tagName && block.tagName.toLowerCase();
+                        if (!tag) return false;
+                        if (block.classList && block.classList.contains('no-print')) return false;
+                        return true;
+                    });
+
+                    let currentY = margin + headerOffsetY;
+                    const addBlockToPdf = async (block) => {
+                        const blockCanvas = await window.html2canvas(block, {
+                            backgroundColor: '#ffffff',
+                            scale: 2,
+                            useCORS: true,
+                            scrollX: 0,
+                            scrollY: 0,
+                            windowWidth: block.scrollWidth,
+                            windowHeight: block.scrollHeight
+                        });
+
+                        const blockImgData = blockCanvas.toDataURL('image/png');
+                        const blockHeight = (blockCanvas.height * contentWidth) / blockCanvas.width;
+                        const pageBottom = pageHeight - margin;
+
+                        if (block.id === 'asistencias-chart-card' || block.id === 'eficiencia-general-chart-card') {
+                            if (currentY + blockHeight > pageBottom) {
+                                pdf.addPage();
+                                currentY = margin;
+                            }
+                        } else if (currentY + blockHeight > pageBottom) {
+                            pdf.addPage();
+                            currentY = margin;
+                        }
+
+                        pdf.addImage(blockImgData, 'PNG', margin, currentY, contentWidth, blockHeight, undefined, 'FAST');
+                        currentY += blockHeight + 18;
+                    };
+
+                    for (const block of reportBlocks) {
+                        await addBlockToPdf(block);
+                    }
+
+                    pdf.save(fileName);
+                } catch (error) {
+                    console.error('Error al exportar el reporte a PDF:', error);
+                    alert('No se pudo exportar el PDF. Intenta nuevamente.');
+                }
+            };
 
             return (
                 <div className="p-8 bg-gray-50 flex-1 overflow-auto">
@@ -3761,13 +4165,19 @@ María López	maria.lopez	Z9y8x7" />
                             </h2>
                             <p className="text-gray-500 mt-2">Cálculos basados en el estatus de la <strong>{activeSem.nombre}</strong></p>
                         </div>
-                        <button onClick={()=>window.print()} className="bg-gray-900 text-white px-6 py-3 rounded-xl shadow-lg hover:bg-black font-bold flex items-center gap-3 transition-transform active:scale-95"><i className="fa-solid fa-print"></i> Imprimir Reporte</button>
+                        <button onClick={exportarReporteEficienciaPdf} className="bg-gray-900 text-white px-6 py-3 rounded-xl shadow-lg hover:bg-black font-bold flex items-center gap-3 transition-transform active:scale-95"><i className="fa-solid fa-file-pdf"></i> Descargar Reporte</button>
                     </div>
 
                     <div className="space-y-8 max-w-7xl mx-auto print-only-container">
                         
-                        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden break-inside-avoid">
-                            <h3 className="font-bold text-gray-800 bg-gray-50 p-4 border-b border-gray-100 uppercase text-sm tracking-wider">Eficiencia Terminal General</h3>
+                        <div id="eficiencia-terminal-general-card" className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden break-inside-avoid">
+                            <div className="flex items-start justify-between gap-3 bg-gray-50 p-4 border-b border-gray-100">
+                                <div>
+                                    <h3 className="font-bold text-gray-800 uppercase text-sm tracking-wider">Eficiencia Terminal General - {cursoHeaderMeta}</h3>
+                                    <div className="text-xs text-gray-500 mt-1">{activeSem.nombre}</div>
+                                </div>
+                                <button onClick={copiarEficienciaTerminalGeneralComoImagen} className="text-gray-500 hover:text-blue-600 bg-white hover:bg-blue-50 border border-gray-200 rounded-xl p-2.5 transition-colors no-print" title="Copiar imagen de la tabla"><i className="fa-solid fa-copy"></i></button>
+                            </div>
                             <div className="overflow-x-auto p-4">
                                 <table className="w-full text-xs text-center border-collapse">
                                     <thead className="bg-blue-50 text-blue-900">
@@ -3800,12 +4210,30 @@ María López	maria.lopez	Z9y8x7" />
                         </div>
 
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 break-inside-avoid">
-                            <ChartCard type="bar" title={chartTitleWithCurso('Comparativa por Grupo (General)')} labels={labelsGrupos} datasets={dataGenGrupos} />
-                            <ChartCard type="doughnut" title={chartTitleWithCurso('Distribución Global del Curso')} labels={labelsGenTotales} datasets={dataGenTotales} />
+                            <ChartCard
+                                type="bar"
+                                title={`Comparativa de Atención / Acreditación por grupos - ${[db.info.siglas, db.info.idEstado || db.info.estado, db.info.anio].filter(Boolean).join(' ')}`}
+                                subtitle={String(activeSem?.nombre || '').replace(/^SEMANA\s*/i, 'Semana ').trim()}
+                                labels={labelsGrupos}
+                                datasets={dataGenGrupos}
+                            />
+                            <ChartCard
+                                type="doughnut"
+                                title={`Atención / Acreditación Global - ${[db.info.siglas, db.info.idEstado || db.info.estado, db.info.anio].filter(Boolean).join(' ')}`}
+                                subtitle={String(activeSem?.nombre || '').replace(/^SEMANA\s*/i, 'Semana ').trim()}
+                                labels={labelsGenTotales}
+                                datasets={dataGenTotales}
+                            />
                         </div>
 
-                        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden break-inside-avoid">
-                            <h3 className="font-bold text-gray-800 bg-gray-50 p-4 border-b border-gray-100 uppercase text-sm tracking-wider">Eficiencia Terminal por Actividades</h3>
+                        <div id="eficiencia-terminal-actividades-card" className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden break-inside-avoid">
+                            <div className="flex items-start justify-between gap-3 bg-gray-50 p-4 border-b border-gray-100">
+                                <div>
+                                    <h3 className="font-bold text-gray-800 uppercase text-sm tracking-wider">Eficiencia Terminal de Actividades - {cursoHeaderMeta}</h3>
+                                    <div className="text-[11px] text-gray-500 mt-1">{String(activeSem?.nombre || '').replace(/^SEMANA\s*/i, 'Semana ').trim()}</div>
+                                </div>
+                                <button onClick={copiarEficienciaTerminalActividadesComoImagen} className="text-gray-500 hover:text-blue-600 bg-white hover:bg-blue-50 border border-gray-200 rounded-xl p-2.5 transition-colors no-print" title="Copiar imagen de la tabla"><i className="fa-solid fa-copy"></i></button>
+                            </div>
                             <div className="overflow-x-auto p-4">
                                 <table className="w-full text-xs text-center border-collapse">
                                     <thead className="bg-purple-50 text-purple-900">
@@ -3841,16 +4269,42 @@ María López	maria.lopez	Z9y8x7" />
                         </div>
 
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 break-inside-avoid">
-                            <ChartCard type="bar" title={chartTitleWithCurso('Desempeño de Actividades por Grupo')} labels={labelsGrupos} datasets={dataActGrupos} />
-                            <ChartCard type="bar" title={chartTitleWithCurso('Entregas Globales por Actividad (%)')} labels={labelsActTotales} datasets={dataActTotales} />
+                            <ChartCard
+                                type="bar"
+                                title={`Entregas de Actividades por Grupo (%) - ${[db.info.siglas, db.info.idEstado || db.info.estado, db.info.anio].filter(Boolean).join(' ')}`}
+                                subtitle={String(activeSem?.nombre || '').replace(/^SEMANA\s*/i, 'Semana ').trim()}
+                                labels={labelsGrupos}
+                                datasets={dataActGrupos}
+                            />
+                            <ChartCard
+                                type="bar"
+                                title={`Entregas Globales de Actividades (%) - ${[db.info.siglas, db.info.idEstado || db.info.estado, db.info.anio].filter(Boolean).join(' ')}`}
+                                subtitle={String(activeSem?.nombre || '').replace(/^SEMANA\s*/i, 'Semana ').trim()}
+                                labels={labelsActTotales}
+                                datasets={dataActTotales}
+                            />
                         </div>
 
                         <div className="break-inside-avoid">
-                            <ChartCard type="bar" title={chartTitleWithCurso('Asistencias')} labels={labelsAsistencias} datasets={dataAsistencias} />
+                            <ChartCard
+                                id="asistencias-chart-card"
+                                type="bar"
+                                title={`Asistencias - ${[db.info.siglas, db.info.idEstado || db.info.estado, db.info.anio].filter(Boolean).join(' ')}`}
+                                subtitle={String(activeSem?.nombre || '').replace(/^SEMANA\s*/i, 'Semana ').trim()}
+                                labels={labelsAsistencias}
+                                datasets={dataAsistencias}
+                            />
                         </div>
 
                         <div className="break-inside-avoid">
-                            <ChartCard type="pie" title={chartTitleWithCurso('Eficiencia Terminal General (% Inscritos)')} labels={['% No Acreditados', '% Acreditados']} datasets={dataEfiGlobal} />
+                            <ChartCard
+                                id="eficiencia-general-chart-card"
+                                type="pie"
+                                title={`Eficiencia Terminal General (% Inscritos) - ${[db.info.siglas, db.info.idEstado || db.info.estado, db.info.anio].filter(Boolean).join(' ')}`}
+                                subtitle={String(activeSem?.nombre || '').replace(/^SEMANA\s*/i, 'Semana ').trim()}
+                                labels={['% No Acreditados', '% Acreditados']}
+                                datasets={dataEfiGlobal}
+                            />
                         </div>
 
                     </div>
@@ -3877,8 +4331,70 @@ María López	maria.lopez	Z9y8x7" />
             const [showImport, setShowImport] = useState(false);
             const [importTarget, setImportTarget] = useState('masivo-estados'); 
             const [importText, setImportText] = useState('');
+            const [showDatosGlobalesModal, setShowDatosGlobalesModal] = useState(false);
             const [showNewSemanaModal, setShowNewSemanaModal] = useState(false);
             const [newSemanaName, setNewSemanaName] = useState('');
+            const [editingSemanaId, setEditingSemanaId] = useState(null);
+            const [editingSemanaName, setEditingSemanaName] = useState('');
+            const datosGlobalesCursoNombre = db.info?.nombreCurso || 'Curso sin nombre';
+            const datosGlobalesCursoId = db.info?.idCurso || db.info?.siglas || 'Sin ID';
+
+            const exportarDatosGlobalesComoImagen = async () => {
+                const target = document.getElementById('datos-globales-popup-content');
+                if (!target) return alert('No se pudo capturar el contenido de Datos Globales.');
+                if (!window.html2canvas) return alert('La captura de imagen no está disponible en este navegador.');
+
+                try {
+                    const canvas = await window.html2canvas(target, { backgroundColor: '#ffffff', scale: 2, useCORS: true, scrollX: 0, scrollY: 0 });
+                    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+                    if (!blob) return alert('No se pudo generar la imagen.');
+
+                    if (navigator.clipboard && navigator.clipboard.write) {
+                        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+                        alert('La información de Datos Globales se copió como imagen al portapapeles.');
+                    } else {
+                        const url = canvas.toDataURL('image/png');
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = `Datos_Globales_${(db.info?.siglas || 'curso')}.png`;
+                        link.click();
+                        alert('La imagen se descargó porque tu navegador no permite copiar directo al portapapeles.');
+                    }
+                } catch (error) {
+                    console.error('Error al copiar Datos Globales como imagen:', error);
+                    alert('No se pudo copiar la imagen. Intenta nuevamente.');
+                }
+            };
+
+            const exportarDatosGlobalesComoPdf = async () => {
+                const target = document.getElementById('datos-globales-popup-content');
+                if (!target) return alert('No se pudo preparar la exportación del PDF.');
+                if (!window.html2canvas || !window.jspdf) return alert('La exportación a PDF no está disponible en este navegador.');
+
+                try {
+                    const canvas = await window.html2canvas(target, { backgroundColor: '#ffffff', scale: 2, useCORS: true, scrollX: 0, scrollY: 0 });
+                    const imgData = canvas.toDataURL('image/png');
+                    const { jsPDF } = window.jspdf;
+                    const siglasCurso = String(db.info?.siglas || 'CURSO').trim().replace(/\s+/g, '-').toUpperCase();
+                    const estadoCurso = String(db.info?.idEstado || db.info?.estado || 'ESTADO').trim().replace(/\s+/g, '-').toUpperCase();
+                    const anioCurso = String(db.info?.anio || new Date().getFullYear()).trim();
+                    const anioCorto = anioCurso.length > 2 ? anioCurso.slice(-2) : anioCurso;
+                    const semanaTexto = activeSem?.nombre ? String(activeSem.nombre).replace(/^SEMANA\s*/i, 'Semana ').trim() : 'Semana activa';
+                    const fileName = `Datos_Globales_${siglasCurso}-${estadoCurso}-${anioCorto}_${semanaTexto}.pdf`;
+                    const pdf = new jsPDF('p', 'pt', 'a4');
+                    const pageWidth = pdf.internal.pageSize.getWidth();
+                    const pageHeight = pdf.internal.pageSize.getHeight();
+                    const imgWidth = pageWidth - 40;
+                    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+                    const maxHeight = pageHeight - 60;
+                    const finalHeight = Math.min(imgHeight, maxHeight);
+                    pdf.addImage(imgData, 'PNG', 20, 20, imgWidth, finalHeight, undefined, 'FAST');
+                    pdf.save(fileName);
+                } catch (error) {
+                    console.error('Error al exportar Datos Globales a PDF:', error);
+                    alert('No se pudo exportar el PDF. Intenta nuevamente.');
+                }
+            };
 
             const [reportFilter, setReportFilter] = useState('ALL');
             const [reportFilterGrupo, setReportFilterGrupo] = useState('ALL');
@@ -3895,16 +4411,18 @@ María López	maria.lopez	Z9y8x7" />
 
             const createColumnFilterState = useCallback(() => {
                 const base = {
-                    curp: '', nombre: '', usuario: '', correo: '', asesor: '', grupo: '', conf: 'ALL', calif: '', estatus: 'ALL', estatal: 'ALL', institucion: 'ALL', msgGrp: 'ALL', msgPer: 'ALL', llamada: 'ALL', obs: ''
+                    curp: '', nombre: '', usuario: '', correo: '', asesor: '', grupo: '', conf: 'ALL', porcentajeAsis: '', calif: '', estatus: 'ALL', estatal: 'ALL', institucion: 'ALL', msgGrp: 'ALL', msgPer: 'ALL', llamada: 'ALL', obs: ''
                 };
                 aSes.forEach(i => base[`asis-${i}`] = 'ALL');
                 aPA.forEach(i => {
                     base[`paEst-${i}`] = 'ALL';
                     base[`paCal-${i}`] = '';
+                    base[`paRem-${i}`] = 'ALL';
                 });
                 aAct.forEach(i => {
                     base[`actEst-${i}`] = 'ALL';
                     base[`actCal-${i}`] = '';
+                    base[`actRem-${i}`] = 'ALL';
                 });
                 return base;
             }, [aSes, aPA, aAct]);
@@ -3942,7 +4460,7 @@ María López	maria.lopez	Z9y8x7" />
             }
 
             const canEditCore = isAdmin;
-            const canEditManual = isAdmin || (isAsesor && !isLockedForAsesor); 
+            const canEditManual = isAdmin || ((isAsesor || isCoordinador) && !isLockedForAsesor);
 
             const addSemana = () => {
                 setNewSemanaName('Semana ' + (semanas.length + 1));
@@ -3965,15 +4483,39 @@ María López	maria.lopez	Z9y8x7" />
 
             const renameSemana = () => {
                 if(!activeSem) return;
-                const newName = prompt("Ingresa el nuevo nombre para esta semana:", activeSem.nombre);
-                if (newName && newName.trim()) {
-                    const newSemanas = semanas.map(s => s.id === activeSem.id ? { ...s, nombre: newName.trim() } : s);
-                    onUpdate({ ...db, semanasSeguimiento: newSemanas });
+                setEditingSemanaId(activeSem.id);
+                setEditingSemanaName(activeSem.nombre);
+            };
+
+            const closeEditSemana = () => {
+                setEditingSemanaId(null);
+                setEditingSemanaName('');
+            };
+
+            const saveSemanaChanges = () => {
+                if (!editingSemanaName || !editingSemanaName.trim()) {
+                    alert('El nombre de la semana no puede estar vacío');
+                    return;
                 }
+                const newSemanas = semanas.map(s => s.id === editingSemanaId ? { ...s, nombre: editingSemanaName.trim() } : s);
+                onUpdate({ ...db, semanasSeguimiento: newSemanas });
+                closeEditSemana();
+            };
+
+            const deleteSemana = () => {
+                if (!confirm('¿Está seguro de que desea eliminar esta semana? Los datos de seguimiento de esta semana se perderán.')) return;
+                const newSemanas = semanas.filter(s => s.id !== editingSemanaId);
+                if (newSemanas.length === 0) {
+                    alert('Debe mantener al menos una semana en el seguimiento');
+                    return;
+                }
+                onUpdate({ ...db, semanasSeguimiento: newSemanas });
+                setActiveSemId(newSemanas[0].id);
+                closeEditSemana();
             };
 
             const getPData = useCallback((pId) => {
-                if(!activeSem || !activeSem.data[pId]) return { conf: false, asis: {}, paEst: {}, paCal: {}, actEst: {}, actCal: {}, encEst: false, encInst: false, msgGrp: false, msgPer: false, llam: false, obs: '' };
+                if(!activeSem || !activeSem.data[pId]) return { conf: false, asis: {}, paEst: {}, paCal: {}, paRem: {}, actEst: {}, actCal: {}, actRem: {}, encEst: false, encInst: false, msgGrp: false, msgPer: false, llam: false, obs: '' };
                 return activeSem.data[pId];
             }, [activeSem]);
 
@@ -4049,6 +4591,10 @@ María López	maria.lopez	Z9y8x7" />
                     const idx = parseInt(key.split('-')[1], 10);
                     return parseFloatSafe(d.paCal[idx]) || 0;
                 }
+                if (key.startsWith('paRem-')) {
+                    const idx = parseInt(key.split('-')[1], 10);
+                    return d.paRem[idx] ? 'SI' : 'NO';
+                }
                 if (key.startsWith('actEst-')) {
                     const idx = parseInt(key.split('-')[1], 10);
                     return d.actEst[idx] ? 'FINALIZADO' : 'NO FINALIZADO';
@@ -4057,7 +4603,12 @@ María López	maria.lopez	Z9y8x7" />
                     const idx = parseInt(key.split('-')[1], 10);
                     return parseFloatSafe(d.actCal[idx]) || 0;
                 }
+                if (key.startsWith('actRem-')) {
+                    const idx = parseInt(key.split('-')[1], 10);
+                    return d.actRem[idx] ? 'SI' : 'NO';
+                }
                 if (key === 'calif') return calcFinal(p.id);
+                if (key === 'porcentajeAsis') return db.info.numSesiones > 0 ? parseFloatSafe((Object.keys(getEffectiveAsis(p.id)).length / db.info.numSesiones * 100).toFixed(2)) : 0;
                 if (key === 'estatus') return status;
                 if (key === 'estatal') return d.encEst ? 'SI' : 'NO';
                 if (key === 'institucion') return d.encInst ? 'SI' : 'NO';
@@ -4075,14 +4626,19 @@ María López	maria.lopez	Z9y8x7" />
                     const normalizedValue = (value ?? '').toString().toUpperCase();
                     const normalizedFilter = filterValue.toString().toUpperCase();
 
-                    if (filterKey === 'calif' || filterKey.startsWith('paCal-') || filterKey.startsWith('actCal-')) {
+                    if (filterKey === 'calif' || filterKey === 'porcentajeAsis' || filterKey.startsWith('paCal-') || filterKey.startsWith('actCal-')) {
                         const filterNumber = parseFloat(filterValue);
                         if (!isNaN(filterNumber)) {
-                            return parseFloat(normalizedValue) === filterNumber;
+                            const currentNumber = parseFloat(normalizedValue);
+                            if (isNaN(currentNumber)) return false;
+                            if (filterKey === 'porcentajeAsis') {
+                                return Math.round(currentNumber) === Math.round(filterNumber);
+                            }
+                            return currentNumber === filterNumber;
                         }
                     }
 
-                    if (['conf','estatus','estatal','institucion','msgGrp','msgPer','llamada'].includes(filterKey) || filterKey.startsWith('asis-') || filterKey.startsWith('paEst-') || filterKey.startsWith('actEst-')) {
+                    if (['conf','estatus','estatal','institucion','msgGrp','msgPer','llamada'].includes(filterKey) || filterKey.startsWith('asis-') || filterKey.startsWith('paEst-') || filterKey.startsWith('paRem-') || filterKey.startsWith('actEst-') || filterKey.startsWith('actRem-')) {
                         return normalizedValue === normalizedFilter;
                     }
 
@@ -4108,13 +4664,15 @@ María López	maria.lopez	Z9y8x7" />
                 return aStr.localeCompare(bStr, 'es', { sensitivity: 'base' });
             }, [getColumnValue]);
 
-            const renderHeaderLabel = useCallback((key, label) => {
+            const renderHeaderLabel = useCallback((key, label, options = {}) => {
                 const active = columnSort.key === key;
                 const icon = active ? (columnSort.dir === 'asc' ? 'sort-up' : 'sort-down') : 'sort';
+                const { align = 'left' } = options;
+                const isCentered = align === 'center';
                 return (
-                    <button type="button" onClick={() => toggleColumnSort(key)} className={`inline-flex items-center justify-between gap-1 w-full text-left text-[11px] uppercase tracking-wide ${active ? 'text-blue-700 font-bold' : 'text-gray-700'}`}>
-                        <span>{label}</span>
-                        <i className={`fa-solid fa-${icon} text-[10px] ${active ? 'text-blue-700' : 'text-gray-400'}`} />
+                    <button type="button" onClick={() => toggleColumnSort(key)} className={`relative inline-flex items-center w-full text-[11px] uppercase tracking-wide ${isCentered ? 'justify-center' : 'justify-between gap-1'} ${active ? 'text-blue-700 font-bold' : 'text-gray-700'}`}>
+                        <span className={isCentered ? 'text-center' : 'text-left'}>{label}</span>
+                        <i className={`fa-solid fa-${icon} text-[10px] ${isCentered ? 'absolute right-1' : 'ml-1'} ${active ? 'text-blue-700' : 'text-gray-400'}`} />
                     </button>
                 );
             }, [columnSort, toggleColumnSort]);
@@ -4234,7 +4792,7 @@ María López	maria.lopez	Z9y8x7" />
             const updatePData = (pId, field, value, subField = null) => {
                 if(!activeSem) return;
                 const newData = { ...activeSem.data };
-                if(!newData[pId]) newData[pId] = { conf: false, asis: {}, paEst: {}, paCal: {}, actEst: {}, actCal: {}, encEst: false, encInst: false, msgGrp: false, msgPer: false, llam: false, obs: '' };
+                if(!newData[pId]) newData[pId] = { conf: false, asis: {}, paEst: {}, paCal: {}, paRem: {}, actEst: {}, actCal: {}, actRem: {}, encEst: false, encInst: false, msgGrp: false, msgPer: false, llam: false, obs: '' };
                 
                 if (subField !== null) newData[pId][field] = { ...newData[pId][field], [subField]: value };
                 else newData[pId][field] = value;
@@ -4333,16 +4891,18 @@ María López	maria.lopez	Z9y8x7" />
                 setShowImport(false); setImportText('');
             };
 
-            const exportarSeguimientoCSV = () => {
+            const exportarSeguimientoXLSX = () => {
                 if(!activeSem) return;
+                if (typeof XLSX === 'undefined') return alert("Librería de Excel cargando... Intenta en un segundo.");
                 
                 let headers = ['No', 'CURP', 'Nombre Completo', 'Usuario', 'Correo', 'Asesor', 'Grupo', 'Confirmacion'];
                 for(let i=1; i<=db.info.numSesiones; i++) headers.push(`Asistencia S${i}`);
+                headers.push('%');
                 for(let i=1; i<=db.info.numPA; i++) { headers.push(`PA ${i} Estado`); headers.push(`PA ${i} Calif`); }
                 for(let i=1; i<=db.info.numAct; i++) { headers.push(`ACT ${i} Estado`); headers.push(`ACT ${i} Calif`); }
                 headers.push('Calif Final', 'Estatus', 'Encuesta Estatal', 'Encuesta Institucional', 'Mensaje Grupo', 'Mensaje Personal', 'Llamada', 'Observaciones');
 
-                const rows = listParticipantes.map((p, idx) => {
+                const data = listParticipantes.map((p, idx) => {
                     const d = getPData(p.id);
                     const g = db.grupos.find(x=>x.id===p.grupoId)||{};
                     const calFinal = calcFinal(p.id);
@@ -4356,16 +4916,20 @@ María López	maria.lopez	Z9y8x7" />
                         const eff = getEffectiveAsis(p.id);
                         row.push(eff[i] ? 'SI' : 'NO');
                     }
+                    const porcentajeAsis = db.info.numSesiones > 0 ? parseFloatSafe((Object.keys(getEffectiveAsis(p.id)).length / db.info.numSesiones * 100).toFixed(2)) : 0;
+                    row.push(porcentajeAsis);
                     for(let i=1; i<=db.info.numPA; i++) { row.push(d.paEst[i]?'Finalizado':'No Finalizado'); row.push(d.paCal[i]||0); }
                     for(let i=1; i<=db.info.numAct; i++) { row.push(d.actEst[i]?'Finalizado':'No Finalizado'); row.push(d.actCal[i]||0); }
                     
                     row.push(calFinal, status, d.encEst?'SI':'NO', d.encInst?'SI':'NO', d.msgGrp?'SI':'NO', d.msgPer?'SI':'NO', d.llam?'SI':'NO', d.obs||'');
 
-                    return row.map(v => `"${(v||'').toString().replace(/"/g, '""')}"`).join(',');
+                    return row;
                 });
 
-                const csvData = [headers.join(','), ...rows].join('\n');
-                downloadCSV(`Seguimiento_${activeSem.nombre}_${db.info.siglas}.csv`, csvData);
+                const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, "Seguimiento");
+                XLSX.writeFile(wb, `Seguimiento_${activeSem.nombre}_${db.info.siglas}.xlsx`);
             };
 
             if (!activeSem) return <div className="p-10 text-center">Sin semanas creadas.</div>;
@@ -4437,9 +5001,10 @@ María López	maria.lopez	Z9y8x7" />
                                         )}
                                 </div>
                                 <div className="flex gap-3 items-center">
-                                    <button onClick={exportarSeguimientoCSV} className="bg-blue-50 text-blue-700 border border-blue-200 px-4 py-1.5 rounded-lg font-bold shadow-sm flex items-center gap-2 hover:bg-blue-100 transition-colors"><i className="fa-solid fa-file-csv"></i> Descargar Excel</button>
-                                    {isAdmin && <button onClick={()=>setShowImport(true)} className="bg-green-600 text-white px-5 py-1.5 rounded-lg font-bold shadow-md flex items-center gap-2 hover:bg-green-700 transition-transform active:scale-95"><i className="fa-solid fa-wand-magic-sparkles"></i> Carga Rápida Masiva</button>}
-                                    <button onClick={() => resetColumnFilters()} className="text-blue-600 hover:underline font-bold ml-2">Limpiar Filtros de Columnas</button>
+                                    <button onClick={exportarSeguimientoXLSX} className="bg-blue-50 text-blue-700 border border-blue-200 px-4 py-1.5 rounded-lg font-bold shadow-sm flex items-center gap-2 hover:bg-blue-100 transition-colors"><i className="fa-solid fa-file-excel"></i> Descarga Seguimiento</button>
+                                    {isAdmin && <button onClick={()=>setShowImport(true)} className="bg-green-600 text-white px-3 py-1.5 text-xs rounded-lg font-bold shadow-md flex items-center gap-2 hover:bg-green-700 transition-transform active:scale-95"><i className="fa-solid fa-upload"></i> Carga Datos</button>}
+                                    <button onClick={() => resetColumnFilters()} className="text-blue-600 hover:underline font-bold ml-2">Limpiar Filtros</button>
+                                    <button onClick={() => setShowDatosGlobalesModal(true)} className="text-blue-600 hover:underline font-bold ml-2">Datos Globales</button>
                                 </div>
                         </div>
                     )}
@@ -4452,9 +5017,9 @@ María López	maria.lopez	Z9y8x7" />
                                         <tr>
                                             <th colSpan="8" className="col-sticky" style={{left:0}}>DATOS DEL PARTICIPANTE</th>
                                             <th colSpan="1">PLATAFORMA</th>
-                                            <th colSpan={db.info.numSesiones}>ASISTENCIA SESIONES</th>
-                                            <th colSpan={db.info.numPA * 2}>PRODUCTOS DE APRENDIZAJE</th>
-                                            <th colSpan={db.info.numAct * 2}>ACTIVIDADES</th>
+                                            <th colSpan={db.info.numSesiones + 1}>ASISTENCIA SESIONES</th>
+                                            <th colSpan={db.info.numPA * 3}>PRODUCTOS DE APRENDIZAJE</th>
+                                            <th colSpan={db.info.numAct * 3}>ACTIVIDADES</th>
                                             <th colSpan="2">RESULTADO</th>
                                             <th colSpan="2">ENCUESTAS</th>
                                             <th colSpan="4" className="bg-yellow-100 text-yellow-800">ESPACIO EXCLUSIVO ASESOR</th>
@@ -4467,9 +5032,22 @@ María López	maria.lopez	Z9y8x7" />
                                             
                                             <th>{renderHeaderLabel('correo', 'CORREO')}</th><th>{renderHeaderLabel('asesor', 'ASESOR')}</th><th>{renderHeaderLabel('grupo', 'GRUPO')}</th>
                                             <th>{renderHeaderLabel('conf', 'CONFIRMACIÓN')}</th>
-                                            {aSes.map(i => <th key={`as-${i}`}>{renderHeaderLabel(`asis-${i}`, `S ${i}`)}</th>)}
-                                            {aPA.map(i => <React.Fragment key={`pa-${i}`}><th>{renderHeaderLabel(`paEst-${i}`, `PA ${i} Estado`)}</th><th>{renderHeaderLabel(`paCal-${i}`, `PA ${i} Calif`)}</th></React.Fragment>)}
-                                            {aAct.map(i => <React.Fragment key={`act-${i}`}><th>{renderHeaderLabel(`actEst-${i}`, `ACT ${i} Estado`)}</th><th>{renderHeaderLabel(`actCal-${i}`, `ACT ${i} Calif`)}</th></React.Fragment>)}
+                                            {aSes.map(i => <th key={`as-${i}`} className="bg-cyan-600 text-black font-bold">{renderHeaderLabel(`asis-${i}`, `S ${i}`)}</th>)}
+                                            <th className="bg-cyan-600 text-black font-bold text-center">{renderHeaderLabel('porcentajeAsis', '%', { align: 'center' })}</th>
+                                            {aPA.map(i => (
+                                                <React.Fragment key={`pa-${i}`}>
+                                                    <th>{renderHeaderLabel(`paEst-${i}`, `PA ${i} Estado`)}</th>
+                                                    <th>{renderHeaderLabel(`paCal-${i}`, `PA ${i} Calif`)}</th>
+                                                    <th>{renderHeaderLabel(`paRem-${i}`, `PA ${i} Rem`)}</th>
+                                                </React.Fragment>
+                                            ))}
+                                            {aAct.map(i => (
+                                                <React.Fragment key={`act-${i}`}>
+                                                    <th>{renderHeaderLabel(`actEst-${i}`, `ACT ${i} Estado`)}</th>
+                                                    <th>{renderHeaderLabel(`actCal-${i}`, `ACT ${i} Calif`)}</th>
+                                                    <th>{renderHeaderLabel(`actRem-${i}`, `ACT ${i} Rem`)}</th>
+                                                </React.Fragment>
+                                            ))}
                                             <th>{renderHeaderLabel('calif', 'CALIF. FINAL')}</th><th>{renderHeaderLabel('estatus', 'ESTATUS')}</th>
                                             <th>{renderHeaderLabel('estatal', 'ESTATAL')}</th><th>{renderHeaderLabel('institucion', 'INSTITUC.')}</th>
                                             <th className="bg-yellow-50">{renderHeaderLabel('msgGrp', 'MSJ GRUPO')}</th><th className="bg-yellow-50">{renderHeaderLabel('msgPer', 'MSJ PERS.')}</th><th className="bg-yellow-50">{renderHeaderLabel('llamada', 'LLAMADA')}</th><th className="bg-yellow-50" style={{minWidth: '350px'}}>{renderHeaderLabel('obs', 'OBSERVACIONES')}</th>
@@ -4484,8 +5062,21 @@ María López	maria.lopez	Z9y8x7" />
                                             <th><input type="text" className="w-full text-[10px] p-1 border border-gray-200 rounded" placeholder="Buscar grupo" value={columnFilters.grupo} onChange={e => setColumnFilters(prev => ({ ...prev, grupo: e.target.value }))} /></th>
                                             <th><select className="w-full text-[10px] p-1 border border-gray-200 rounded" value={columnFilters.conf} onChange={e => setColumnFilters(prev => ({ ...prev, conf: e.target.value }))}><option value="ALL">Todos</option><option value="SI">SI</option><option value="NO">NO</option></select></th>
                                             {aSes.map(i => <th key={`flt-as-${i}`}><select className="w-full text-[10px] p-1 border border-gray-200 rounded" value={columnFilters[`asis-${i}`] || 'ALL'} onChange={e => setColumnFilters(prev => ({ ...prev, [`asis-${i}`]: e.target.value }))}><option value="ALL">Todos</option><option value="SI">SI</option><option value="NO">NO</option></select></th>)}
-                                            {aPA.map(i => <React.Fragment key={`flt-pa-${i}`}><th><select className="w-full text-[10px] p-1 border border-gray-200 rounded" value={columnFilters[`paEst-${i}`] || 'ALL'} onChange={e => setColumnFilters(prev => ({ ...prev, [`paEst-${i}`]: e.target.value }))}><option value="ALL">Todos</option><option value="FINALIZADO">Finalizado</option><option value="NO FINALIZADO">No Finalizado</option></select></th><th><input type="number" className="w-full text-[10px] p-1 border border-gray-200 rounded" placeholder="Calif" value={columnFilters[`paCal-${i}`] || ''} onChange={e => setColumnFilters(prev => ({ ...prev, [`paCal-${i}`]: e.target.value }))} /></th></React.Fragment>)}
-                                            {aAct.map(i => <React.Fragment key={`flt-act-${i}`}><th><select className="w-full text-[10px] p-1 border border-gray-200 rounded" value={columnFilters[`actEst-${i}`] || 'ALL'} onChange={e => setColumnFilters(prev => ({ ...prev, [`actEst-${i}`]: e.target.value }))}><option value="ALL">Todos</option><option value="FINALIZADO">Finalizado</option><option value="NO FINALIZADO">No Finalizado</option></select></th><th><input type="number" className="w-full text-[10px] p-1 border border-gray-200 rounded" placeholder="Calif" value={columnFilters[`actCal-${i}`] || ''} onChange={e => setColumnFilters(prev => ({ ...prev, [`actCal-${i}`]: e.target.value }))} /></th></React.Fragment>)}
+                                            <th style={{ minWidth: '68px', width: '68px' }} className="text-center"><input type="number" className="w-full min-w-[68px] max-w-[68px] text-[10px] p-1 border border-gray-200 rounded text-center" placeholder="%" min="0" max="100" value={columnFilters.porcentajeAsis || ''} onChange={e => setColumnFilters(prev => ({ ...prev, porcentajeAsis: e.target.value }))} /></th>
+                                            {aPA.map(i => (
+                                                <React.Fragment key={`flt-pa-${i}`}>
+                                                    <th><select className="w-full text-[10px] p-1 border border-gray-200 rounded" value={columnFilters[`paEst-${i}`] || 'ALL'} onChange={e => setColumnFilters(prev => ({ ...prev, [`paEst-${i}`]: e.target.value }))}><option value="ALL">Todos</option><option value="FINALIZADO">Finalizado</option><option value="NO FINALIZADO">No Finalizado</option></select></th>
+                                                    <th><input type="number" className="w-full text-[10px] p-1 border border-gray-200 rounded" placeholder="Calif" value={columnFilters[`paCal-${i}`] || ''} onChange={e => setColumnFilters(prev => ({ ...prev, [`paCal-${i}`]: e.target.value }))} /></th>
+                                                    <th><select className="w-full text-[10px] p-1 border border-gray-200 rounded" value={columnFilters[`paRem-${i}`] || 'ALL'} onChange={e => setColumnFilters(prev => ({ ...prev, [`paRem-${i}`]: e.target.value }))}><option value="ALL">Todos</option><option value="SI">SI</option><option value="NO">NO</option></select></th>
+                                                </React.Fragment>
+                                            ))}
+                                            {aAct.map(i => (
+                                                <React.Fragment key={`flt-act-${i}`}>
+                                                    <th><select className="w-full text-[10px] p-1 border border-gray-200 rounded" value={columnFilters[`actEst-${i}`] || 'ALL'} onChange={e => setColumnFilters(prev => ({ ...prev, [`actEst-${i}`]: e.target.value }))}><option value="ALL">Todos</option><option value="FINALIZADO">Finalizado</option><option value="NO FINALIZADO">No Finalizado</option></select></th>
+                                                    <th><input type="number" className="w-full text-[10px] p-1 border border-gray-200 rounded" placeholder="Calif" value={columnFilters[`actCal-${i}`] || ''} onChange={e => setColumnFilters(prev => ({ ...prev, [`actCal-${i}`]: e.target.value }))} /></th>
+                                                    <th><select className="w-full text-[10px] p-1 border border-gray-200 rounded" value={columnFilters[`actRem-${i}`] || 'ALL'} onChange={e => setColumnFilters(prev => ({ ...prev, [`actRem-${i}`]: e.target.value }))}><option value="ALL">Todos</option><option value="SI">SI</option><option value="NO">NO</option></select></th>
+                                                </React.Fragment>
+                                            ))}
                                             <th><input type="number" className="w-full text-[10px] p-1 border border-gray-200 rounded" placeholder="Calif" value={columnFilters.calif || ''} onChange={e => setColumnFilters(prev => ({ ...prev, calif: e.target.value }))} /></th>
                                             <th><select className="w-full text-[10px] p-1 border border-gray-200 rounded" value={columnFilters.estatus} onChange={e => setColumnFilters(prev => ({ ...prev, estatus: e.target.value }))}><option value="ALL">Todos</option><option value="ACREDITADO">ACREDITADO</option><option value="NO ACREDITADO">NO ACREDITADO</option></select></th>
                                             <th><select className="w-full text-[10px] p-1 border border-gray-200 rounded" value={columnFilters.estatal} onChange={e => setColumnFilters(prev => ({ ...prev, estatal: e.target.value }))}><option value="ALL">Todos</option><option value="SI">SI</option><option value="NO">NO</option></select></th>
@@ -4515,6 +5106,8 @@ María López	maria.lopez	Z9y8x7" />
                                                     
                                                     {aSes.map(i => <td key={`as-${i}`}><input type="checkbox" disabled={!canEditCore} checked={!!getEffectiveAsis(p.id)[i]} onChange={e=>updatePData(p.id, 'asis', e.target.checked, i)} className={`w-4 h-4 ${!canEditCore?'opacity-50':''}`}/></td>)}
                                                     
+                                                    <td className="font-bold text-center bg-cyan-100 text-cyan-900">{db.info.numSesiones > 0 ? formatPercent((Object.keys(getEffectiveAsis(p.id)).length / db.info.numSesiones * 100).toFixed(2)) : '0%'}</td>
+                                                    
                                                     {aPA.map(i => (
                                                         <React.Fragment key={`pa-${i}`}>
                                                             <td className={`p-0 align-middle ${d.paEst[i] ? 'bg-green-50/30':'bg-red-50/30'}`}>
@@ -4533,6 +5126,9 @@ María López	maria.lopez	Z9y8x7" />
                                                             </td>
                                                             <td className="p-0">
                                                                 <input type="number" disabled={!canEditCore} className={`w-full h-full min-h-[30px] text-center outline-none bg-transparent font-bold text-gray-700 transition-colors ${canEditCore?'focus:bg-white focus:ring-2 focus:ring-blue-500':'opacity-80 cursor-not-allowed'}`} value={d.paCal[i]!==undefined?d.paCal[i]:''} onBlur={e=>updatePData(p.id, 'paCal', parseFloatSafe(e.target.value), i)} onChange={e=>updatePData(p.id, 'paCal', e.target.value, i)} />
+                                                            </td>
+                                                            <td className="text-center p-0">
+                                                                <input type="checkbox" disabled={!canEditManual} checked={!!(d.paRem && d.paRem[i])} onChange={e=>updatePData(p.id, 'paRem', e.target.checked, i)} className={`w-4 h-4 cursor-pointer ${!canEditManual?'opacity-50 cursor-not-allowed':''}`}/>
                                                             </td>
                                                         </React.Fragment>
                                                     ))}
@@ -4555,6 +5151,9 @@ María López	maria.lopez	Z9y8x7" />
                                                             </td>
                                                             <td className="p-0">
                                                                 <input type="number" disabled={!canEditCore} className={`w-full h-full min-h-[30px] text-center outline-none bg-transparent font-bold text-gray-700 transition-colors ${canEditCore?'focus:bg-white focus:ring-2 focus:ring-blue-500':'opacity-80 cursor-not-allowed'}`} value={d.actCal[i]!==undefined?d.actCal[i]:''} onBlur={e=>updatePData(p.id, 'actCal', parseFloatSafe(e.target.value), i)} onChange={e=>updatePData(p.id, 'actCal', e.target.value, i)} />
+                                                            </td>
+                                                            <td className="text-center p-0">
+                                                                <input type="checkbox" disabled={!canEditManual} checked={!!(d.actRem && d.actRem[i])} onChange={e=>updatePData(p.id, 'actRem', e.target.checked, i)} className={`w-4 h-4 cursor-pointer ${!canEditManual?'opacity-50 cursor-not-allowed':''}`}/>
                                                             </td>
                                                         </React.Fragment>
                                                     ))}
@@ -4579,56 +5178,80 @@ María López	maria.lopez	Z9y8x7" />
                                 </table>
                             </div>
 
-                            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 mt-6 p-6">
-                                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-4 mb-6">
-                                    <div>
-                                        <h3 className="text-lg font-bold text-gray-800">Datos Globales</h3>
-                                        <p className="text-sm text-gray-500 mt-1">Tabla por semana con métricas para cada PA y ACT.</p>
-                                    </div>
-                                    <div className="text-sm text-gray-500">Semana activa: {activeSem.nombre}</div>
-                                </div>
+                            {showDatosGlobalesModal && (
+                                <Modal show={showDatosGlobalesModal} onClose={() => setShowDatosGlobalesModal(false)} width="max-w-5xl" ariaLabel="Datos Globales">
+                                    <div id="datos-globales-popup-content" className="bg-white rounded-2xl shadow-2xl w-full max-w-[980px] flex flex-col max-h-[90vh] overflow-hidden">
+                                        <div className="p-5 flex justify-between items-center bg-gray-50 border-b border-gray-200 gap-4">
+                                            <div>
+                                                <h2 className="font-bold text-xl text-gray-800 flex items-center gap-3"><i className="fa-solid fa-chart-column text-blue-600"></i> Datos Globales</h2>
+                                                <div className="mt-2 text-base text-gray-700">
+                                                    <span className="font-bold text-gray-800">Oferta:</span> {datosGlobalesCursoNombre}
+                                                </div>
+                                                <div className="text-base text-gray-700">
+                                                    <span className="font-bold text-gray-800">ID:</span> {datosGlobalesCursoId}
+                                                </div>
+                                                <div className="text-base text-gray-700 mt-1">
+                                                    <span className="font-bold text-gray-800">Semana activa:</span> {activeSem.nombre}
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-2 no-print">
+                                                <button onClick={exportarDatosGlobalesComoImagen} className="text-gray-500 hover:text-blue-600 bg-white hover:bg-blue-50 border border-gray-200 rounded-xl p-2.5 transition-colors" title="Copiar imagen del popup"><i className="fa-solid fa-copy"></i></button>
+                                                <button onClick={exportarDatosGlobalesComoPdf} className="text-gray-500 hover:text-red-600 bg-white hover:bg-red-50 border border-gray-200 rounded-xl p-2.5 transition-colors" title="Descargar PDF"><i className="fa-solid fa-file-pdf"></i></button>
+                                                <button onClick={()=>setShowDatosGlobalesModal(false)} className="text-gray-400 hover:text-red-500 transition-colors"><i className="fa-solid fa-xmark text-2xl"></i></button>
+                                            </div>
+                                        </div>
+                                        <div className="p-6 overflow-auto">
+                                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-4 mb-6">
+                                                <div>
+                                                    <h3 className="text-lg font-bold text-gray-800">Datos Globales</h3>
+                                                    <p className="text-sm text-gray-500 mt-1">Tabla por semana con métricas para cada PA y ACT.</p>
+                                                </div>
+                                            </div>
 
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                                    <div className="bg-green-50 border border-green-100 rounded-2xl p-5">
-                                        <div className="text-sm font-semibold text-green-700 uppercase tracking-widest">Acreditados</div>
-                                        <div className="mt-3 text-4xl font-black text-green-900">{datosGlobales.totalAcreditados}</div>
-                                        <div className="text-sm text-gray-500 mt-2">Participantes con estatus <span className="font-semibold">ACREDITADO</span> en la semana activa.</div>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                                                <div className="bg-green-50 border border-green-100 rounded-2xl p-5">
+                                                    <div className="text-sm font-semibold text-green-700 uppercase tracking-widest">Acreditados</div>
+                                                    <div className="mt-3 text-4xl font-black text-green-900">{datosGlobales.totalAcreditados}</div>
+                                                    <div className="text-sm text-gray-500 mt-2">Participantes con estatus <span className="font-semibold">ACREDITADO</span> en la semana activa.</div>
+                                                </div>
+                                                <div className="bg-blue-50 border border-blue-100 rounded-2xl p-5">
+                                                    <div className="text-sm font-semibold text-blue-700 uppercase tracking-widest">Porcentaje</div>
+                                                    <div className="mt-3 text-4xl font-black text-blue-900">{formatPercent(datosGlobales.porcentajeAcreditados)}</div>
+                                                    <div className="text-sm text-gray-500 mt-2">Sobre <span className="font-semibold">{datosGlobales.totalParticipantes}</span> participantes de la semana activa.</div>
+                                                </div>
+                                            </div>
+                                            <div className="overflow-x-auto">
+                                                <table className="min-w-full text-left text-sm border-collapse">
+                                                    <thead>
+                                                        <tr>
+                                                            <th className="border-b border-gray-200 bg-gray-50 px-4 py-3 font-semibold text-gray-600">Métrica</th>
+                                                            {aPA.map(i => <th key={`hdr-pa-${i}`} className="border-b border-gray-200 bg-gray-50 px-4 py-3 font-semibold text-gray-600">PA {i}</th>)}
+                                                            {aAct.map(i => <th key={`hdr-act-${i}`} className="border-b border-gray-200 bg-gray-50 px-4 py-3 font-semibold text-gray-600">ACT {i}</th>)}
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {['Eficiencia', 'Entregas', 'Por revisar', 'Calificado', 'Faltantes'].map((label, rowIndex) => (
+                                                            <tr key={`row-${rowIndex}`} className={rowIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                                                                <td className="border-b border-gray-200 px-4 py-3 font-semibold text-gray-700">{label}</td>
+                                                                {aPA.map((i, index) => {
+                                                                    const stat = datosGlobales.paStats[index];
+                                                                    const value = label === 'Eficiencia' ? `${stat.eficiencia}%` : label === 'Entregas' ? stat.entregas : label === 'Por revisar' ? stat.porRevisar : label === 'Calificado' ? stat.calificado : stat.faltantes;
+                                                                    return <td key={`pa-${i}-${label}`} className="border-b border-gray-200 px-4 py-3 text-gray-700">{value}</td>;
+                                                                })}
+                                                                {aAct.map((i, index) => {
+                                                                    const stat = datosGlobales.actStats[index];
+                                                                    const value = label === 'Eficiencia' ? `${stat.eficiencia}%` : label === 'Entregas' ? stat.entregas : label === 'Por revisar' ? stat.porRevisar : label === 'Calificado' ? stat.calificado : stat.faltantes;
+                                                                    return <td key={`act-${i}-${label}`} className="border-b border-gray-200 px-4 py-3 text-gray-700">{value}</td>;
+                                                                })}
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div className="bg-blue-50 border border-blue-100 rounded-2xl p-5">
-                                        <div className="text-sm font-semibold text-blue-700 uppercase tracking-widest">Porcentaje</div>
-                                        <div className="mt-3 text-4xl font-black text-blue-900">{formatPercent(datosGlobales.porcentajeAcreditados)}</div>
-                                        <div className="text-sm text-gray-500 mt-2">Sobre <span className="font-semibold">{datosGlobales.totalParticipantes}</span> participantes de la semana activa.</div>
-                                    </div>
-                                </div>
-                                <div className="overflow-x-auto">
-                                    <table className="min-w-full text-left text-sm border-collapse">
-                                        <thead>
-                                            <tr>
-                                                <th className="border-b border-gray-200 bg-gray-50 px-4 py-3 font-semibold text-gray-600">Métrica</th>
-                                                {aPA.map(i => <th key={`hdr-pa-${i}`} className="border-b border-gray-200 bg-gray-50 px-4 py-3 font-semibold text-gray-600">PA {i}</th>)}
-                                                {aAct.map(i => <th key={`hdr-act-${i}`} className="border-b border-gray-200 bg-gray-50 px-4 py-3 font-semibold text-gray-600">ACT {i}</th>)}
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {['Eficiencia', 'Entregas', 'Por revisar', 'Calificado', 'Faltantes'].map((label, rowIndex) => (
-                                                <tr key={`row-${rowIndex}`} className={rowIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                                                    <td className="border-b border-gray-200 px-4 py-3 font-semibold text-gray-700">{label}</td>
-                                                    {aPA.map((i, index) => {
-                                                        const stat = datosGlobales.paStats[index];
-                                                        const value = label === 'Eficiencia' ? `${stat.eficiencia}%` : label === 'Entregas' ? stat.entregas : label === 'Por revisar' ? stat.porRevisar : label === 'Calificado' ? stat.calificado : stat.faltantes;
-                                                        return <td key={`pa-${i}-${label}`} className="border-b border-gray-200 px-4 py-3 text-gray-700">{value}</td>;
-                                                    })}
-                                                    {aAct.map((i, index) => {
-                                                        const stat = datosGlobales.actStats[index];
-                                                        const value = label === 'Eficiencia' ? `${stat.eficiencia}%` : label === 'Entregas' ? stat.entregas : label === 'Por revisar' ? stat.porRevisar : label === 'Calificado' ? stat.calificado : stat.faltantes;
-                                                        return <td key={`act-${i}-${label}`} className="border-b border-gray-200 px-4 py-3 text-gray-700">{value}</td>;
-                                                    })}
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
+                                </Modal>
+                            )}
                         </div>
                     )}
 
@@ -4732,19 +5355,19 @@ María López	maria.lopez	Z9y8x7" />
                     )}
 
                     {showImport && isAdmin && (
-                        <Modal show={showImport} onClose={() => setShowImport(false)} width="max-w-4xl" ariaLabel="Carga rápida Moodle">
-                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[700px] flex flex-col max-h-[90vh] overflow-hidden">
+                        <Modal show={showImport} onClose={() => setShowImport(false)} width="max-w-[calc(100vw-3rem)]" ariaLabel="Carga rápida Moodle">
+                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[calc(100vw-3rem)] flex flex-col max-h-[90vh] overflow-hidden">
                                 <div className="p-5 flex justify-between items-center bg-gray-50 border-b border-gray-200">
-                                    <h2 className="font-bold text-xl text-gray-800 flex items-center gap-3"><i className="fa-solid fa-wand-magic-sparkles text-blue-600"></i> Carga Rápida Moodle</h2>
+                                    <h2 className="font-bold text-xl text-gray-800 flex items-center gap-3"><i className="fa-solid fa-upload text-blue-600"></i> Carga datos de Moodle</h2>
                                     <button onClick={()=>setShowImport(false)} className="text-gray-400 hover:text-red-500 transition-colors"><i className="fa-solid fa-xmark text-2xl"></i></button>
                                 </div>
                                 <div className="p-6 overflow-auto flex-1">
                                     <div className="bg-green-50 p-4 rounded-xl border border-green-100 mb-6 flex gap-3 text-green-800">
-                                        <i className="fa-solid fa-bolt mt-1 text-green-600"></i>
-                                        <p className="text-sm"><strong>¡NUEVO IMPORTADOR MASIVO!</strong> Ahora puedes pegar la tabla completa que descargas de Moodle (incluyendo los títulos de las columnas). El sistema buscará "Usuario" y cruzará <strong>todas</strong> las actividades o calificaciones automáticamente.</p>
+                                        <i className="fa-solid fa-upload mt-1 text-green-600"></i>
+                                        <p className="text-sm"><strong>IMPORTADOR MASIVO.</strong> Pega la tabla completa que descargas de Moodle (incluyendo los títulos de las columnas). El sistema buscará "Usuario" y cruzará todas las actividades o calificaciones automáticamente.</p>
                                     </div>
                                     
-                                    <label className="block text-sm font-bold text-gray-700 mb-2 uppercase tracking-wider text-xs">Destino de la Información</label>
+                                    <label className="block text-sm font-bold text-gray-700 mb-2 uppercase tracking-wider text-xs">Selecciona los datos a cargar</label>
                                     <select className="w-full p-3.5 border border-gray-300 rounded-xl mb-6 bg-white shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-shadow" value={importTarget} onChange={e=>setImportTarget(e.target.value)}>
                                         <optgroup label="¡NUEVO! Importación Masiva Inteligente (Moodle Completo)">
                                             <option value="masivo-estados">Todos los Estados de Entrega (Busca automáticamente todas las PA y Actividades)</option>
@@ -4764,6 +5387,39 @@ María López	maria.lopez	Z9y8x7" />
                                 <div className="p-5 border-t border-gray-100 bg-gray-50 flex justify-end gap-3">
                                     <button onClick={()=>setShowImport(false)} className="px-6 py-3 rounded-xl text-gray-600 font-bold hover:bg-gray-200 transition-colors">Cancelar</button>
                                     <button onClick={procesarImportacion} className="px-6 py-3 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700 shadow-lg shadow-blue-500/30 flex items-center gap-2 transition-transform active:scale-95"><i className="fa-solid fa-play"></i> Procesar Datos</button>
+                                </div>
+                            </div>
+                        </Modal>
+                    )}
+
+                    {editingSemanaId && (
+                        <Modal show={Boolean(editingSemanaId)} onClose={closeEditSemana} width="max-w-md" ariaLabel="Editar ciclo operativo">
+                            <div className="bg-white rounded-2xl shadow-2xl w-full p-6 overflow-auto">
+                                <div className="flex items-center justify-between mb-6">
+                                    <div>
+                                        <h3 className="text-lg font-bold text-gray-900">Editar Ciclo Operativo</h3>
+                                        <p className="text-sm text-gray-500">Modifica el nombre o elimina este ciclo.</p>
+                                    </div>
+                                    <button onClick={closeEditSemana} className="text-gray-500 hover:text-gray-900"><i className="fa-solid fa-xmark text-lg"></i></button>
+                                </div>
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="block text-xs font-semibold text-gray-600 mb-2">Nombre del Ciclo</label>
+                                        <input 
+                                            type="text" 
+                                            className="w-full p-3 border border-gray-200 rounded-xl text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" 
+                                            value={editingSemanaName} 
+                                            onChange={e => setEditingSemanaName(e.target.value)} 
+                                            placeholder="Ej: Semana 1, Marzo 2025"
+                                        />
+                                    </div>
+                                </div>
+                                <div className="mt-6 flex justify-between gap-3">
+                                    <button onClick={deleteSemana} className="px-4 py-2.5 bg-red-100 text-red-700 rounded-xl font-semibold hover:bg-red-200 transition-colors flex items-center gap-2"><i className="fa-solid fa-trash-alt"></i> Eliminar</button>
+                                    <div className="flex gap-3">
+                                        <button onClick={closeEditSemana} className="px-4 py-2.5 bg-gray-100 text-gray-700 rounded-xl font-semibold hover:bg-gray-200 transition-colors">Cancelar</button>
+                                        <button onClick={saveSemanaChanges} className="px-4 py-2.5 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors">Guardar</button>
+                                    </div>
                                 </div>
                             </div>
                         </Modal>
