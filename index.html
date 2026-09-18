@@ -55,6 +55,10 @@
             outline: 2px dotted #2563eb;
             outline-offset: 3px;
         }
+        .seguimiento-checkbox:focus-visible {
+            outline: 2px dotted #2563eb;
+            outline-offset: 3px;
+        }
         
         /* Sistema de columnas ancladas */
         .seguimiento-table .col-sticky { position: sticky; background-color: #fff; z-index: 11; text-align: left; }
@@ -285,7 +289,7 @@
             { nombre: "Aguascalientes", id: "AGS" }, { nombre: "Baja California", id: "BC" },
             { nombre: "Baja California Sur", id: "BCS" }, { nombre: "Campeche", id: "CAM" },
             { nombre: "Chiapas", id: "CHP" }, { nombre: "Chihuahua", id: "CHH" },
-            { nombre: "Ciudad de Mexico", id: "CDMX" }, { nombre: "Coahuila", id: "COA" },
+            { nombre: "Ciudad de Mexico", id: "CDMX" }, { nombre: "Coahuila", id: "COH" },
             { nombre: "Colima", id: "COL" }, { nombre: "Durango", id: "DGO" },
             { nombre: "Estado de Mexico", id: "EMEX" }, { nombre: "Guanajuato", id: "GTO" },
             { nombre: "Guerrero", id: "GRO" }, { nombre: "Hidalgo", id: "HGO" },
@@ -594,6 +598,7 @@
             const [newSessionTotal, setNewSessionTotal] = useState('');
             const [editSessionModal, setEditSessionModal] = useState({ show: false, dbId: null, id: null, numero: 1, dia: '', horario: '', zoomAccountId: '', invitacion: '' });
             const [expandedSessionIds, setExpandedSessionIds] = useState([]);
+            const [expandedSessionHierarchy, setExpandedSessionHierarchy] = useState({});
             const [newAttendanceDbId, setNewAttendanceDbId] = useState('');
             const [newAttendanceNumber, setNewAttendanceNumber] = useState('1');
             const [newAttendanceTotal, setNewAttendanceTotal] = useState('');
@@ -726,14 +731,18 @@
 
             const [textoPegado, setTextoPegado] = useState('');
             const [participantesProcesados, setParticipantesProcesados] = useState([]);
-            const [editPersonalModal, setEditPersonalModal] = useState({ show: false, id: null, nombre: '', usuario: '', password: '' });
-            const [createPersonalModal, setCreatePersonalModal] = useState({ show: false, mode: 'individual', nombre: '', usuario: '', password: '', bulkText: '' });
+            const [coordinadorSearch, setCoordinadorSearch] = useState('');
+            const [editPersonalModal, setEditPersonalModal] = useState({ show: false, id: null, nombre: '', usuario: '', password: '', roles: ['asesor'], assignedGroupIds: [], coordinatorCourseIds: [], selectedGroupCourseId: '' });
+            const [assignedCourseSearch, setAssignedCourseSearch] = useState('');
+            const [createPersonalModal, setCreatePersonalModal] = useState({ show: false, mode: 'individual', nombre: '', usuario: '', password: '', roles: ['asesor'], bulkText: '' });
 
+            const ordenarPersonalPorNombre = (personal) => [...personal].sort((a, b) =>
+                String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es', { sensitivity: 'base' })
+            );
             useEffect(() => {
                 const est = ESTADOS.find(e => e.nombre === estadoSeleccionado);
                 setIdEstado(est ? est.id : '');
             }, [estadoSeleccionado]);
-
             useEffect(() => {
                 const checkFirebaseConnection = async () => {
                     if (!firebaseEnabled) {
@@ -854,8 +863,9 @@
 
             const personalFiltrado = useMemo(() => {
                 const search = (coursesPersonalFilter || '').toLowerCase().trim();
-                if (!search) return personalGlobal;
-                return personalGlobal.filter(personal => {
+                const personalOrdenado = ordenarPersonalPorNombre(personalGlobal);
+                if (!search) return personalOrdenado;
+                return personalOrdenado.filter(personal => {
                     const matcher = [personal.nombre, personal.password].filter(Boolean).join(' ').toLowerCase();
                     return matcher.includes(search);
                 });
@@ -1035,6 +1045,34 @@
                 });
                 return ordenarControl(rows, 'sessions', (row, key) => key === 'curso' ? row.db.info.siglas : key === 'grupo' ? row.db.grupos.find(item => item.id === row.grupoId)?.nombre : row[key]);
             }, [basesDeDatos, controlTableFilters.sessions, controlTableSort, controlSessionFilters]);
+            const controlSessionsHierarchy = useMemo(() => {
+                const years = new Map();
+                controlSessionsVisible.forEach(({ db, ...session }) => {
+                    const year = String(db.info.anio || 'Sin año');
+                    const estado = String(db.info.estado || db.info.idEstado || 'Sin estado');
+                    const curso = String(db.info.siglas || db.info.nombreCurso || 'Sin curso');
+                    const grupo = db.grupos.find(item => item.id === session.grupoId);
+                    const groupKey = grupo?.id || 'sin-grupo';
+                    if (!years.has(year)) years.set(year, new Map());
+                    const states = years.get(year);
+                    if (!states.has(estado)) states.set(estado, new Map());
+                    const courses = states.get(estado);
+                    if (!courses.has(curso)) courses.set(curso, new Map());
+                    const groups = courses.get(curso);
+                    if (!groups.has(groupKey)) groups.set(groupKey, { grupo, sessions: [] });
+                    groups.get(groupKey).sessions.push({ db, session });
+                });
+                return Array.from(years, ([year, states]) => ({
+                    year,
+                    states: Array.from(states, ([estado, courses]) => ({
+                        estado,
+                        courses: Array.from(courses, ([curso, groups]) => ({
+                            curso,
+                            groups: Array.from(groups.values())
+                        }))
+                    }))
+                }));
+            }, [controlSessionsVisible]);
             const controlAttendancesVisible = useMemo(() => {
                 const search = controlTableFilters.attendances.trim().toLowerCase();
                 const rows = basesDeDatos.flatMap(db => (db.controlAsistencias || []).map(row => ({ ...row, db }))).filter(row => {
@@ -1279,11 +1317,11 @@
             };
 
             const resetCreatePersonalModal = () => {
-                setCreatePersonalModal({ show: false, mode: 'individual', nombre: '', usuario: '', password: '', bulkText: '' });
+                setCreatePersonalModal({ show: false, mode: 'individual', nombre: '', usuario: '', password: '', roles: ['asesor'], bulkText: '' });
             };
 
             const handleCrearPersonalAdmin = () => {
-                setCreatePersonalModal({ show: true, mode: 'individual', nombre: '', usuario: '', password: '', bulkText: '' });
+                setCreatePersonalModal({ show: true, mode: 'individual', nombre: '', usuario: '', password: '', roles: ['asesor'], bulkText: '' });
             };
 
             const registrarPersonalDesdeModal = () => {
@@ -1293,7 +1331,25 @@
                     const password = createPersonalModal.password.trim();
                     if (!nombre || !usuario || !password) return alert('Ingresa nombre completo, usuario y contraseña.');
 
-                    setPersonalGlobal(prev => [...prev, { id: `PERS-${Date.now()}`, nombre, usuario, password }]);
+                    const usuarioNormalizado = normalizeText(usuario);
+                    const existente = personalGlobal.find(persona => normalizeText(persona.usuario || persona.nombre) === usuarioNormalizado);
+                    if (existente) {
+                        const reemplazar = confirm(`El usuario "${usuario}" ya existe como "${existente.nombre}".\n\n¿Deseas actualizar su nombre, contraseña y roles?`);
+                        if (!reemplazar) return;
+
+                        setPersonalGlobal(prev => ordenarPersonalPorNombre(prev.map(persona => persona.id === existente.id
+                            ? { ...persona, nombre, usuario, password, roles: createPersonalModal.roles }
+                            : persona)));
+                        setBasesDeDatos(prev => prev.map(db => ({
+                            ...db,
+                            grupos: (db.grupos || []).map(grupo => grupo.asesorId === existente.id ? { ...grupo, asesor: nombre } : grupo)
+                        })));
+                        alert(`Persona actualizada. Usuario: ${usuario}`);
+                        resetCreatePersonalModal();
+                        return;
+                    }
+
+                    setPersonalGlobal(prev => ordenarPersonalPorNombre([...prev, { id: `PERS-${Date.now()}`, nombre, usuario, password, roles: createPersonalModal.roles }]));
                     alert(`Persona registrada. Usuario: ${usuario} • Contraseña: ${password}`);
                     resetCreatePersonalModal();
                     return;
@@ -1311,42 +1367,97 @@
                 const tienePassword = encabezado.some(h => h.includes('CONTRASENA') || h.includes('PASSWORD'));
                 const inicio = (tieneNombre && (tieneUsuario || tienePassword)) ? 1 : 0;
 
-                const registros = [];
+                const registrosPorUsuario = new Map();
                 lineas.slice(inicio).forEach((linea, index) => {
                     const celdas = linea.split(/\t|;|,|\|/).map(c => c.trim());
                     const nombre = celdas[0] || '';
                     const usuario = celdas[1] || celdas[0] || '';
                     const password = celdas[2] || celdas[1] || '';
+                    const rolesTexto = normalizeText(celdas[3] || 'ASESOR');
+                    const roles = [];
+                    if (rolesTexto.includes('ASESOR') || rolesTexto.includes('AMBOS')) roles.push('asesor');
+                    if (rolesTexto.includes('COORDINADOR') || rolesTexto.includes('AMBOS')) roles.push('coordinador');
+                    if (rolesTexto.includes('MANAGER') || rolesTexto.includes('GERENTE')) roles.push('manager');
+                    if (roles.length === 0) roles.push('asesor');
 
                     if (nombre && usuario && password) {
-                        registros.push({ id: `PERS-${Date.now()}-${index + 1}`, nombre, usuario, password });
+                        registrosPorUsuario.set(normalizeText(usuario), { id: `PERS-${Date.now()}-${index + 1}`, nombre, usuario, password, roles });
                     }
                 });
 
+                const registros = Array.from(registrosPorUsuario.values());
                 if (registros.length === 0) return alert('No se pudieron leer filas válidas. Usa el formato: Nombre Completo | Usuario | Contraseña Única.');
 
-                setPersonalGlobal(prev => [...prev, ...registros]);
-                alert(`Se registraron ${registros.length} personas correctamente.`);
+                const existentes = registros.filter(registro => personalGlobal.some(persona => normalizeText(persona.usuario || persona.nombre) === normalizeText(registro.usuario)));
+                const nuevos = registros.filter(registro => !personalGlobal.some(persona => normalizeText(persona.usuario || persona.nombre) === normalizeText(registro.usuario)));
+                const duplicadosEnArchivo = lineas.slice(inicio).length - registros.length;
+
+                let actualizarExistentes = false;
+                if (existentes.length > 0) {
+                    const detalle = existentes.map(registro => {
+                        const actual = personalGlobal.find(persona => normalizeText(persona.usuario || persona.nombre) === normalizeText(registro.usuario));
+                        return `• ${registro.usuario}: ${actual?.nombre || 'sin nombre'} → ${registro.nombre}`;
+                    }).join('\n');
+                    actualizarExistentes = confirm(`Se encontraron ${existentes.length} usuario(s) existente(s):\n\n${detalle}\n\n¿Deseas reemplazar sus nombres, contraseñas y roles?\n\nAceptar = actualizar\nCancelar = conservar los existentes y cargar solo los nuevos.`);
+                }
+
+                const registrosParaAgregar = nuevos.map(registro => ({ ...registro, id: `PERS-${Date.now()}-${registro.usuario}` }));
+                const actualizaciones = actualizarExistentes ? existentes : [];
+                const nuevosPersonal = personalGlobal
+                    .map(persona => {
+                        const actualizacion = actualizaciones.find(registro => normalizeText(registro.usuario) === normalizeText(persona.usuario || persona.nombre));
+                        return actualizacion ? { ...persona, nombre: actualizacion.nombre, usuario: actualizacion.usuario, password: actualizacion.password, roles: actualizacion.roles } : persona;
+                    })
+                    .concat(registrosParaAgregar);
+
+                setPersonalGlobal(ordenarPersonalPorNombre(nuevosPersonal));
+                if (actualizaciones.length > 0) {
+                    setBasesDeDatos(prev => prev.map(db => ({
+                        ...db,
+                        grupos: (db.grupos || []).map(grupo => {
+                            const actualizacion = actualizaciones.find(registro => normalizeText(registro.usuario) === normalizeText(personalGlobal.find(persona => persona.id === grupo.asesorId)?.usuario || ''));
+                            return actualizacion ? { ...grupo, asesor: actualizacion.nombre } : grupo;
+                        })
+                    })));
+                }
+
+                const mensajeDuplicados = duplicadosEnArchivo > 0 ? ` También se omitieron ${duplicadosEnArchivo} fila(s) repetida(s) del archivo.` : '';
+                alert(`Carga terminada: ${registrosParaAgregar.length} persona(s) nueva(s)${actualizaciones.length > 0 ? ` y ${actualizaciones.length} existente(s) actualizada(s)` : ''}.${mensajeDuplicados}`);
                 resetCreatePersonalModal();
             };
 
             const guardarEdicionPersonal = () => {
-                const { id, nombre, usuario, password } = editPersonalModal;
+                const { id, nombre, usuario, password, assignedGroupIds = [], coordinatorCourseIds = [] } = editPersonalModal;
+                const roles = editPersonalModal.roles.filter(role =>
+                    role !== 'asesor' && role !== 'coordinador'
+                        ? true
+                        : role === 'asesor' ? assignedGroupIds.length > 0 : coordinatorCourseIds.length > 0
+                );
                 if(!nombre || !usuario || !password) { showToast('El nombre, usuario y la contraseña son obligatorios.', 'error'); return; }
+                if (!roles.length) { showToast('Selecciona al menos un rol.', 'error'); return; }
 
-                const nuevosPersonal = personalGlobal.map(a => a.id === id ? { ...a, nombre, usuario, password } : a);
+                const gruposConOtroAsesor = basesDeDatos.flatMap(db => (db.grupos || []).filter(grupo => assignedGroupIds.includes(grupo.id) && grupo.asesorId && grupo.asesorId !== id && grupo.asesor).map(grupo => `${db.info.siglas || 'Curso'} · ${grupo.nombre} (${grupo.asesor})`));
+                if (gruposConOtroAsesor.length > 0 && !confirm(`Estos grupos ya tienen otro asesor:\n\n${gruposConOtroAsesor.join('\n')}\n\n¿Deseas asignarlos a ${nombre}?`)) return;
+
+                const nuevosPersonal = ordenarPersonalPorNombre(personalGlobal.map(a => a.id === id ? { ...a, nombre, usuario, password, roles } : a));
                 setPersonalGlobal(nuevosPersonal);
 
                 const nuevasBases = basesDeDatos.map(db => {
-                    const gruposActualizados = db.grupos.map(g => {
-                        if (g.asesorId === id) return { ...g, asesor: nombre };
+                    const gruposActualizados = (db.grupos || []).map(g => {
+                        const debeEstarAsignado = assignedGroupIds.includes(g.id);
+                        if (debeEstarAsignado) return { ...g, asesorId: id, asesor: nombre };
+                        if (g.asesorId === id) return { ...g, asesorId: '', asesor: '' };
                         return g;
                     });
-                    return { ...db, grupos: gruposActualizados };
+                    const currentCoordinatorIds = db.info.coordinadorIds || (db.info.coordinadorId ? [db.info.coordinadorId] : []);
+                    const nextCoordinatorIds = coordinatorCourseIds.includes(db.id)
+                        ? [...new Set([...currentCoordinatorIds, id])]
+                        : currentCoordinatorIds.filter(coordinatorId => coordinatorId !== id);
+                    return { ...db, info: { ...db.info, coordinadorIds: nextCoordinatorIds }, grupos: gruposActualizados };
                 });
                 setBasesDeDatos(nuevasBases);
 
-                setEditPersonalModal({ show: false, id: null, nombre: '', usuario: '', password: '' });
+                setEditPersonalModal({ show: false, id: null, nombre: '', usuario: '', password: '', roles: ['asesor'], assignedGroupIds: [], coordinatorCourseIds: [], selectedGroupCourseId: '' });
                 alert('Personal actualizado correctamente en todo el sistema.');
             };
 
@@ -1400,7 +1511,7 @@
                                             <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-[10px] text-slate-200">v7.6</div>
+                                        <div className="text-[10px] text-slate-200">v8.1</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -1408,7 +1519,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v7.6</div>
+                                        <div className="text-xs text-slate-200">v8.1</div>
                                     </div>
                                 )}
                             </div>
@@ -1495,7 +1606,7 @@
                         </header>
 
                         <main className="max-w-7xl mx-auto p-6 space-y-6">
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4 mb-4">
                                 <button onClick={() => setAdminSection('admin')} className={`rounded-2xl p-4 shadow-sm border ${adminSection === 'admin' ? 'border-blue-600 bg-blue-50' : 'border-gray-200 bg-white'} transition-colors hover:border-blue-500 flex items-center justify-center gap-3 min-h-[90px]`}>
                                     <div className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-100 text-blue-600 shrink-0">
                                         <i className="fa-solid fa-user-shield text-lg"></i>
@@ -1514,13 +1625,25 @@
                                     </div>
                                     <h3 className="text-sm font-bold text-gray-800 text-left">Configuración Control</h3>
                                 </button>
+                                <button onClick={() => setAdminSection('students')} className={`rounded-2xl p-4 shadow-sm border ${adminSection === 'students' ? 'border-emerald-600 bg-emerald-50' : 'border-gray-200 bg-white'} transition-colors hover:border-emerald-500 flex items-center justify-center gap-3 min-h-[90px]`}>
+                                    <div className="flex items-center justify-center w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 shrink-0">
+                                        <i className="fa-solid fa-user-magnifying-glass text-lg"></i>
+                                    </div>
+                                    <h3 className="text-sm font-bold text-gray-800 text-left">Búsqueda de Alumnos</h3>
+                                </button>
+                                <button onClick={() => setAdminSection('personal')} className={`rounded-2xl p-4 shadow-sm border ${adminSection === 'personal' ? 'border-violet-600 bg-violet-50' : 'border-gray-200 bg-white'} transition-colors hover:border-violet-500 flex items-center justify-center gap-3 min-h-[90px]`}>
+                                    <div className="flex items-center justify-center w-10 h-10 rounded-full bg-violet-100 text-violet-600 shrink-0">
+                                        <i className="fa-solid fa-users-gear text-lg"></i>
+                                    </div>
+                                    <h3 className="text-sm font-bold text-gray-800 text-left">Búsqueda de Personal</h3>
+                                </button>
                             </div>
 
                             {adminSection === 'menu' && (
                                 <div className="space-y-6">
                                     <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 text-center">
                                         <h2 className="text-2xl font-bold text-gray-900 mb-2">Bienvenido al Portal de Administración</h2>
-                                        <p className="text-gray-600 mb-4">Selecciona uno de los tres apartados para continuar: administrador, cursos o control.</p>
+                                        <p className="text-gray-600 mb-4">Selecciona uno de los apartados para continuar: administrador, cursos, control o búsqueda de alumnos.</p>
                                         <div className="text-sm text-gray-500">El apartado de control ya incluye el catálogo de cuentas Zoom y crecerá con sesiones, asistencias y evidencias.</div>
                                     </div>
 
@@ -1633,20 +1756,36 @@
                                                         <div className="col-span-2"><label className="block text-xs font-bold text-gray-600 mb-1">Nombre Completo del Curso</label><textarea className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:border-blue-500" rows="2" value={nombreCurso} onChange={e=>setNombreCurso(e.target.value)}></textarea></div>
                                                         <div className="col-span-2">
                                                             <label className="block text-xs font-bold text-purple-600 mb-1">Coordinadores del Proyecto (Opcional)</label>
-                                                            <div className="border border-purple-200 rounded-lg p-2 max-h-32 overflow-y-auto bg-purple-50/30 text-sm">
-                                                                {personalGlobal.map(p => (
-                                                                    <label key={p.id} className="flex items-center gap-2 mb-1 p-1 hover:bg-white rounded cursor-pointer">
-                                                                        <input type="checkbox" className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
-                                                                            checked={coordinadorIds.includes(p.id)}
-                                                                            onChange={(e) => {
-                                                                                if (e.target.checked) setCoordinadorIds([...coordinadorIds, p.id]);
-                                                                                else setCoordinadorIds(coordinadorIds.filter(id => id !== p.id));
-                                                                            }}
-                                                                        />
-                                                                        <span className="text-gray-700 font-semibold">{p.nombre}</span>
-                                                                    </label>
-                                                                ))}
-                                                                {personalGlobal.length === 0 && <span className="text-gray-400 italic">No hay personal registrado</span>}
+                                                            <input type="search" className="w-full mb-2 border border-purple-200 rounded-lg p-2.5 text-sm bg-white outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-100" value={coordinadorSearch} onChange={e => setCoordinadorSearch(e.target.value)} placeholder="Buscar por nombre o usuario..." aria-label="Buscar coordinador" />
+                                                            <div className="border border-purple-200 rounded-lg p-2 bg-purple-50/30 text-sm">
+                                                                {coordinadorIds.length > 0 && (
+                                                                    <div className="mb-2 border-b border-purple-100 pb-2">
+                                                                        <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-purple-600">Seleccionados ({coordinadorIds.length})</div>
+                                                                        <div className="flex flex-wrap gap-1.5">
+                                                                            {coordinadorIds.map(id => {
+                                                                                const persona = personalGlobal.find(p => p.id === id);
+                                                                                if (!persona) return null;
+                                                                                return <button key={persona.id} type="button" onClick={() => setCoordinadorIds(prev => prev.filter(selectedId => selectedId !== persona.id))} className="inline-flex items-center gap-1 rounded-full bg-purple-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-purple-700" title="Quitar coordinador">{persona.nombre}<i className="fa-solid fa-xmark text-[10px]"></i></button>;
+                                                                            })}
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+                                                                <div className="max-h-32 overflow-y-auto">
+                                                                    {personalGlobal.filter(p => !coordinadorIds.includes(p.id)).filter(p => {
+                                                                        const search = normalizeText(coordinadorSearch);
+                                                                        return !search || normalizeText(`${p.nombre} ${p.usuario || ''}`).includes(search);
+                                                                    }).map(p => (
+                                                                        <label key={p.id} className="flex items-center gap-2 mb-1 p-1 hover:bg-white rounded cursor-pointer">
+                                                                            <input type="checkbox" className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500" onChange={() => setCoordinadorIds(prev => [...prev, p.id])} />
+                                                                            <span className="text-gray-700 font-semibold">{p.nombre}<small className="ml-2 font-normal text-gray-400">{p.usuario || ''}</small></span>
+                                                                        </label>
+                                                                    ))}
+                                                                    {personalGlobal.length === 0 && <span className="text-gray-400 italic">No hay personal registrado</span>}
+                                                                    {personalGlobal.length > 0 && personalGlobal.filter(p => !coordinadorIds.includes(p.id)).filter(p => {
+                                                                        const search = normalizeText(coordinadorSearch);
+                                                                        return !search || normalizeText(`${p.nombre} ${p.usuario || ''}`).includes(search);
+                                                                    }).length === 0 && <span className="text-gray-400 italic">No hay coincidencias.</span>}
+                                                                </div>
                                                             </div>
                                                         </div>
                                                         <div className="col-span-2 border-t border-gray-100 pt-3 mt-1"><label className="block text-xs font-black text-blue-800 mb-2 uppercase tracking-wide">Estructura Seguimiento Semanal</label></div>
@@ -1808,23 +1947,24 @@
                                             <div className="p-0 flex-1 overflow-auto max-h-[600px]">
                                                 <table className="w-full text-left text-sm whitespace-nowrap">
                                                     <thead className="bg-white sticky top-0 shadow-sm z-10">
-                                                        <tr><th className="p-4 text-gray-500 font-semibold">Nombre Completo</th><th className="p-4 text-gray-500 font-semibold">Usuario</th><th className="p-4 text-gray-500 font-semibold">Contraseña Única</th><th className="p-4 text-gray-500 font-semibold text-center">Gestión</th></tr>
+                                                        <tr><th className="p-4 text-gray-500 font-semibold">Nombre Completo</th><th className="p-4 text-gray-500 font-semibold">Roles</th><th className="p-4 text-gray-500 font-semibold">Usuario</th><th className="p-4 text-gray-500 font-semibold">Contraseña Única</th><th className="p-4 text-gray-500 font-semibold text-center">Gestión</th></tr>
                                                     </thead>
                                                     <tbody>
                                                         {personalFiltrado.map(a => (
                                                             <tr key={a.id} className="border-b border-gray-50 hover:bg-indigo-50/50 transition-colors">
                                                                 <td className="p-4 font-semibold text-gray-800">{a.nombre}</td>
+                                                                <td className="p-4"><div className="flex flex-wrap gap-1">{(a.roles || ['asesor']).map(role => <span key={role} className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase ${role === 'manager' ? 'bg-amber-100 text-amber-700' : role === 'coordinador' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{role}</span>)}</div></td>
                                                                 <td className="p-4 font-mono text-xs text-gray-700 bg-indigo-50/40 px-2 rounded">{a.usuario || '-'}</td>
                                                                 <td className="p-4 font-mono text-xs text-gray-500 bg-gray-50/50 px-2 rounded">{a.password}</td>
                                                                 <td className="p-4 text-center">
                                                                     <div className="flex justify-center gap-2">
-                                                                        <button onClick={() => setEditPersonalModal({show: true, id: a.id, nombre: a.nombre, usuario: a.usuario || '', password: a.password})} className="w-8 h-8 rounded-lg text-indigo-600 hover:bg-indigo-100 flex items-center justify-center transition-colors"><i className="fa-solid fa-pen"></i></button>
+                                                                        <button onClick={() => { const coordinatorCourseIds = basesDeDatos.filter(db => (db.info.coordinadorIds || (db.info.coordinadorId ? [db.info.coordinadorId] : [])).includes(a.id)).map(db => db.id); const assignedGroupIds = basesDeDatos.flatMap(db => (db.grupos || []).filter(g => g.asesorId === a.id || g.asesor === a.nombre).map(g => g.id)); const firstAssignedCourse = basesDeDatos.find(db => (db.grupos || []).some(g => assignedGroupIds.includes(g.id)))?.id || ''; setAssignedCourseSearch(''); setEditPersonalModal({show: true, id: a.id, nombre: a.nombre, usuario: a.usuario || '', password: a.password, roles: [...new Set([...(a.roles || ['asesor']), ...(coordinatorCourseIds.length ? ['coordinador'] : [])])], assignedGroupIds, coordinatorCourseIds, selectedGroupCourseId: firstAssignedCourse})}} className="w-8 h-8 rounded-lg text-indigo-600 hover:bg-indigo-100 flex items-center justify-center transition-colors"><i className="fa-solid fa-pen"></i></button>
                                                                         <button onClick={() => eliminarPersonal(a.id)} className="w-8 h-8 rounded-lg text-gray-400 hover:bg-red-100 hover:text-red-600 flex items-center justify-center transition-colors"><i className="fa-solid fa-trash"></i></button>
                                                                     </div>
                                                                 </td>
                                                             </tr>
                                                         ))}
-                                                        {personalGlobal.length === 0 && <tr><td colSpan="4" className="text-center py-10 text-gray-400">No hay personal registrado.</td></tr>}
+                                                        {personalGlobal.length === 0 && <tr><td colSpan="5" className="text-center py-10 text-gray-400">No hay personal registrado.</td></tr>}
                                                     </tbody>
                                                 </table>
                                             </div>
@@ -1881,6 +2021,57 @@
                                                 </table>
                                             </div>
                                         </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {adminSection === 'students' && (
+                                <BusquedaGlobalAlumnos basesDeDatos={basesDeDatos} setBasesDeDatos={setBasesDeDatos} onBack={() => setAdminSection('menu')} />
+                            )}
+
+                            {adminSection === 'personal' && (
+                                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
+                                    <div className="p-5 border-b border-gray-100 bg-gray-50 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <i className="fa-solid fa-address-book text-xl text-violet-500"></i>
+                                            <h2 className="text-lg font-bold text-gray-800">Plantilla de Personal</h2>
+                                        </div>
+                                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                                            <input
+                                                type="search"
+                                                className="w-full sm:w-80 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-200"
+                                                placeholder="Buscar personal..."
+                                                value={coursesPersonalFilter}
+                                                onChange={e => setCoursesPersonalFilter(e.target.value)}
+                                            />
+                                            <button onClick={handleCrearPersonalAdmin} className="rounded-lg bg-violet-100 px-3 py-1.5 text-xs font-bold text-violet-700 transition-colors hover:bg-violet-600 hover:text-white flex items-center gap-1 shadow-sm">
+                                                <i className="fa-solid fa-plus"></i> Nuevo Registro
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div className="p-0 flex-1 overflow-auto max-h-[600px]">
+                                        <table className="w-full text-left text-sm whitespace-nowrap">
+                                            <thead className="bg-white sticky top-0 shadow-sm z-10">
+                                                <tr><th className="p-4 text-gray-500 font-semibold">Nombre Completo</th><th className="p-4 text-gray-500 font-semibold">Roles</th><th className="p-4 text-gray-500 font-semibold">Usuario</th><th className="p-4 text-gray-500 font-semibold">Contraseña Única</th><th className="p-4 text-gray-500 font-semibold text-center">Gestión</th></tr>
+                                            </thead>
+                                            <tbody>
+                                                {personalFiltrado.map(a => (
+                                                    <tr key={a.id} className="border-b border-gray-50 hover:bg-violet-50/50 transition-colors">
+                                                        <td className="p-4 font-semibold text-gray-800">{a.nombre}</td>
+                                                        <td className="p-4"><div className="flex flex-wrap gap-1">{(a.roles || ['asesor']).map(role => <span key={role} className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase ${role === 'manager' ? 'bg-amber-100 text-amber-700' : role === 'coordinador' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{role}</span>)}</div></td>
+                                                        <td className="p-4 font-mono text-xs text-gray-700 bg-violet-50/40 px-2 rounded">{a.usuario || '-'}</td>
+                                                        <td className="p-4 font-mono text-xs text-gray-500 bg-gray-50/50 px-2 rounded">{a.password}</td>
+                                                        <td className="p-4 text-center">
+                                                            <div className="flex justify-center gap-2">
+                                                                <button onClick={() => { const coordinatorCourseIds = basesDeDatos.filter(db => (db.info.coordinadorIds || (db.info.coordinadorId ? [db.info.coordinadorId] : [])).includes(a.id)).map(db => db.id); const assignedGroupIds = basesDeDatos.flatMap(db => (db.grupos || []).filter(g => g.asesorId === a.id || g.asesor === a.nombre).map(g => g.id)); const firstAssignedCourse = basesDeDatos.find(db => (db.grupos || []).some(g => assignedGroupIds.includes(g.id)))?.id || ''; setAssignedCourseSearch(''); setEditPersonalModal({show: true, id: a.id, nombre: a.nombre, usuario: a.usuario || '', password: a.password, roles: [...new Set([...(a.roles || ['asesor']), ...(coordinatorCourseIds.length ? ['coordinador'] : [])])], assignedGroupIds, coordinatorCourseIds, selectedGroupCourseId: firstAssignedCourse})}} className="w-8 h-8 rounded-lg text-violet-600 hover:bg-violet-100 flex items-center justify-center transition-colors"><i className="fa-solid fa-pen"></i></button>
+                                                                <button onClick={() => eliminarPersonal(a.id)} className="w-8 h-8 rounded-lg text-gray-400 hover:bg-red-100 hover:text-red-600 flex items-center justify-center transition-colors"><i className="fa-solid fa-trash"></i></button>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                                {personalGlobal.length === 0 && <tr><td colSpan="5" className="text-center py-10 text-gray-400">No hay personal registrado.</td></tr>}
+                                            </tbody>
+                                        </table>
                                     </div>
                                 </div>
                             )}
@@ -2020,51 +2211,48 @@
                                             <input type="search" className="mt-5 w-full rounded-xl border border-slate-200 bg-white p-3 text-sm outline-none focus:border-cyan-500" value={controlTableFilters.sessions} onChange={e => setControlTableFilters(prev => ({ ...prev, sessions: e.target.value }))} placeholder="Buscar por curso, grupo, asesor, día u horario..." aria-label="Buscar sesiones" />
                                             <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200 bg-white">
                                                 <table className="w-full min-w-full text-left text-sm"><thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="cursor-pointer p-4" onClick={() => cambiarOrdenControl('sessions', 'curso')}>Curso / grupo{indicadorOrdenControl('sessions', 'curso')}</th><th className="cursor-pointer p-4" onClick={() => cambiarOrdenControl('sessions', 'grupo')}>Asesor{indicadorOrdenControl('sessions', 'grupo')}</th><th className="cursor-pointer p-4" onClick={() => cambiarOrdenControl('sessions', 'numero')}>Sesión{indicadorOrdenControl('sessions', 'numero')}</th><th className="cursor-pointer p-4" onClick={() => cambiarOrdenControl('sessions', 'dia')}>Día / horario{indicadorOrdenControl('sessions', 'dia')}</th><th className="p-4">Usuario Zoom</th><th className="p-4"></th></tr></thead><tbody>
-                                                {controlSessionsVisible.length > 0 ? controlSessionsVisible.map(({ db, ...session }) => {
-                                                    const grupo = db.grupos.find(item => item.id === session.grupoId);
-                                                    const account = zoomAccounts.find(item => item.id === session.zoomAccountId);
-                                                    const isExpanded = expandedSessionIds.includes(session.id);
-                                                    return <>
-                                                        <tr key={session.id} className="border-t border-slate-100 hover:bg-cyan-50/30">
-                                                            <td className="p-4 font-semibold text-slate-800">
-                                                                {db.info.siglas}-{db.info.idEstado}-{db.info.anio}
-                                                                <div className="text-xs font-normal text-slate-400">{grupo?.nombre || 'Grupo no disponible'}</div>
-                                                            </td>
-                                                            <td className="p-4 text-slate-600">{grupo?.asesor || '-'}</td>
-                                                            <td className="p-4 font-bold text-cyan-700">Sesión {session.numero} · {session.dia} {session.horario}</td>
-                                                            <td className="p-4 text-slate-600">&nbsp;</td>
-                                                            <td className="p-4 font-mono text-xs text-slate-600">{account?.usuario || 'Cuenta eliminada'}</td>
-                                                            <td className="p-4 text-right">
-                                                                <div className="flex justify-end gap-2 items-center">
-                                                                    <button onClick={(e) => { e.stopPropagation(); abrirEdicionSesion(db.id, session); }} className="flex h-8 w-8 items-center justify-center rounded-lg text-cyan-600 transition-colors hover:bg-cyan-100" title="Editar sesión"><i className="fa-solid fa-pen"></i></button>
-                                                                    <button onClick={(e) => { e.stopPropagation(); eliminarSesionControl(db.id, session.id); }} className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-red-100 hover:text-red-600" title="Eliminar sesión"><i className="fa-solid fa-trash"></i></button>
-                                                                    <button onClick={(e) => { e.stopPropagation(); setExpandedSessionIds(prev => prev.includes(session.id) ? prev.filter(x => x !== session.id) : [...prev, session.id]); }} className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100" title="Mostrar detalles">{isExpanded ? <i className="fa-solid fa-chevron-up"></i> : <i className="fa-solid fa-chevron-down"></i>}</button>
-                                                                </div>
-                                                            </td>
-                                                        </tr>
-                                                        <tr className={`${isExpanded ? '' : 'hidden'}`}>
-                                                            <td colSpan="6" className="p-4 bg-slate-50 text-sm text-slate-700 border-t">
-                                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                                                    <div>
-                                                                        <div className="font-semibold">Invitación</div>
-                                                                        <div className="text-xs font-mono text-slate-600 whitespace-pre-wrap break-words">{session.invitacion || <span className="text-amber-600">Sin invitación registrada</span>}</div>
-                                                                    </div>
-                                                                    <div>
-                                                                        <div className="font-semibold">Horario</div>
-                                                                        <div className="text-sm">{session.dia} · {session.horario}</div>
-                                                                    </div>
-                                                                    <div className="text-right">
-                                                                        <div className="font-semibold">Cuenta Zoom</div>
-                                                                        <div className="text-sm">{account?.usuario || 'Cuenta eliminada'}</div>
-                                                                        <div className="mt-2 flex justify-end gap-2">
-                                                                            <button onClick={() => abrirEdicionSesion(db.id, session)} className="rounded-xl bg-cyan-700 px-3 py-1 text-white text-sm">Editar</button>
-                                                                            <button onClick={() => eliminarSesionControl(db.id, session.id)} className="rounded-xl bg-red-100 px-3 py-1 text-red-600 text-sm">Eliminar</button>
-                                                                        </div>
-                                                                    </div>
-                                                                </div>
-                                                            </td>
-                                                        </tr>
-                                                    </>;
+                                                {controlSessionsVisible.length > 0 ? controlSessionsHierarchy.flatMap(({ year, states }) => {
+                                                    const yearKey = `year-${year}`;
+                                                    const yearOpen = expandedSessionHierarchy[yearKey] !== false;
+                                                    return [
+                                                    <tr key={yearKey} className="bg-slate-900 text-white"><td colSpan="6" className="p-0"><button type="button" onClick={() => setExpandedSessionHierarchy(prev => ({ ...prev, [yearKey]: !yearOpen }))} className="flex w-full items-center gap-2 p-3 text-left text-sm font-black uppercase tracking-wide"><i className={`fa-solid fa-chevron-${yearOpen ? 'down' : 'right'} w-3 text-cyan-300`}></i><i className="fa-solid fa-calendar text-cyan-300"></i>{year}</button></td></tr>,
+                                                    ...(yearOpen ? states.flatMap(({ estado, courses }) => {
+                                                        const estadoKey = `${yearKey}-estado-${estado}`;
+                                                        const estadoOpen = expandedSessionHierarchy[estadoKey] !== false;
+                                                        return [
+                                                        <tr key={estadoKey} className="bg-slate-100"><td colSpan="6" className="p-0"><button type="button" onClick={() => setExpandedSessionHierarchy(prev => ({ ...prev, [estadoKey]: !estadoOpen }))} className="flex w-full items-center gap-2 p-3 pl-6 text-left font-black text-slate-800"><i className={`fa-solid fa-chevron-${estadoOpen ? 'down' : 'right'} w-3 text-cyan-600`}></i><i className="fa-solid fa-location-dot text-cyan-600"></i>{estado}</button></td></tr>,
+                                                        ...(estadoOpen ? courses.flatMap(({ curso, groups }) => {
+                                                            const cursoKey = `${estadoKey}-curso-${curso}`;
+                                                            const cursoOpen = expandedSessionHierarchy[cursoKey] !== false;
+                                                            return [
+                                                            <tr key={cursoKey} className="bg-cyan-50"><td colSpan="6" className="p-0"><button type="button" onClick={() => setExpandedSessionHierarchy(prev => ({ ...prev, [cursoKey]: !cursoOpen }))} className="flex w-full items-center gap-2 p-3 pl-9 text-left font-black text-cyan-900"><i className={`fa-solid fa-chevron-${cursoOpen ? 'down' : 'right'} w-3`}></i><i className="fa-solid fa-book"></i>{curso}</button></td></tr>,
+                                                            ...(cursoOpen ? groups.flatMap(({ grupo, sessions }) => {
+                                                                const grupoKey = `${cursoKey}-grupo-${grupo?.id || 'sin-grupo'}`;
+                                                                const grupoOpen = expandedSessionHierarchy[grupoKey] !== false;
+                                                                return [
+                                                                <tr key={grupoKey} className="bg-white"><td colSpan="6" className="p-0"><button type="button" onClick={() => setExpandedSessionHierarchy(prev => ({ ...prev, [grupoKey]: !grupoOpen }))} className="flex w-full items-center gap-2 p-3 pl-12 text-left font-bold text-slate-700"><i className={`fa-solid fa-chevron-${grupoOpen ? 'down' : 'right'} w-3 text-cyan-600`}></i><i className="fa-solid fa-users text-cyan-600"></i>{grupo?.nombre || 'Grupo no disponible'} <span className="ml-2 text-xs font-normal text-slate-400">{grupo?.asesor || '-'} · {sessions.length} sesiones</span></button></td></tr>,
+                                                                ...(grupoOpen ? sessions.flatMap(({ db, session }) => {
+                                                                    const account = zoomAccounts.find(item => item.id === session.zoomAccountId);
+                                                                    const isExpanded = expandedSessionIds.includes(session.id);
+                                                                    return [
+                                                                        <tr key={session.id} className="border-t border-slate-100 hover:bg-cyan-50/30">
+                                                                            <td className="p-3 pl-16 text-sm font-semibold text-slate-800">Sesión {session.numero}</td>
+                                                                            <td className="p-3 text-slate-600">{grupo?.asesor || '-'}</td>
+                                                                            <td className="p-3 font-bold text-cyan-700">{session.dia}</td>
+                                                                            <td className="p-3 text-slate-600">{session.horario}</td>
+                                                                            <td className="p-3 font-mono text-xs text-slate-600">{account?.usuario || 'Cuenta eliminada'}</td>
+                                                                            <td className="p-3 text-right"><div className="flex justify-end gap-2 items-center"><button onClick={() => abrirEdicionSesion(db.id, session)} className="flex h-8 w-8 items-center justify-center rounded-lg text-cyan-600 hover:bg-cyan-100" title="Editar sesión"><i className="fa-solid fa-pen"></i></button><button onClick={() => eliminarSesionControl(db.id, session.id)} className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-red-100 hover:text-red-600" title="Eliminar sesión"><i className="fa-solid fa-trash"></i></button><button onClick={() => setExpandedSessionIds(prev => prev.includes(session.id) ? prev.filter(x => x !== session.id) : [...prev, session.id])} className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100" title="Mostrar detalles">{isExpanded ? <i className="fa-solid fa-chevron-up"></i> : <i className="fa-solid fa-chevron-down"></i>}</button></div></td>
+                                                                        </tr>,
+                                                                        <tr key={`${session.id}-details`} className={`${isExpanded ? '' : 'hidden'}`}><td colSpan="6" className="p-4 pl-16 bg-slate-50 text-sm text-slate-700 border-t"><div className="grid grid-cols-1 md:grid-cols-3 gap-3"><div><div className="font-semibold">Invitación</div><div className="text-xs font-mono text-slate-600 whitespace-pre-wrap break-words">{session.invitacion || <span className="text-amber-600">Sin invitación registrada</span>}</div></div><div><div className="font-semibold">Horario</div><div>{session.dia} · {session.horario}</div></div><div><div className="font-semibold">Cuenta Zoom</div><div>{account?.usuario || 'Cuenta eliminada'}</div></div></div></td></tr>
+                                                                    ];
+                                                                }) : [])
+                                                                ];
+                                                            }) : [])
+                                                            ];
+                                                        }) : [])
+                                                        ];
+                                                    }) : [])
+                                                    ];
                                                 }) : (
                                                     <tr>
                                                         <td colSpan="6" className="p-10 text-center text-slate-400">
@@ -2202,6 +2390,12 @@
                                                 <label className="block text-xs font-bold text-gray-700 mb-1">Contraseña Única</label>
                                                 <input type="text" className="w-full border border-gray-300 rounded-lg p-3 text-sm font-mono focus:border-indigo-500 outline-none" value={createPersonalModal.password} onChange={e => setCreatePersonalModal(prev => ({ ...prev, password: e.target.value }))} placeholder="Ej. A1b2C3" />
                                             </div>
+                                            <div>
+                                                <label className="block text-xs font-bold text-gray-700 mb-2">Roles</label>
+                                                <div className="flex gap-4">
+                                                    {['asesor', 'coordinador', 'manager'].map(role => <label key={role} className="flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" checked={createPersonalModal.roles.includes(role)} onChange={e => setCreatePersonalModal(prev => ({ ...prev, roles: e.target.checked ? [...prev.roles, role] : prev.roles.filter(item => item !== role) }))} />{role === 'asesor' ? 'Asesor' : role === 'coordinador' ? 'Coordinador' : 'Manager'}</label>)}
+                                                </div>
+                                            </div>
                                         </div>
                                     ) : (
                                         <div className="space-y-4 mb-6">
@@ -2215,7 +2409,7 @@ María López	maria.lopez	Z9y8x7" />
                                                 <p className="font-semibold mb-1">Formato esperado:</p>
                                                 <p>Nombre Completo · Usuario · Contraseña Única</p>
                                                 <p className="mt-1 font-mono">Juan Pérez · juan.perez · A1b2C3</p>
-                                                <p className="mt-1">También acepta encabezados con los nombres: Nombre Completo, Usuario y Contraseña Única.</p>
+                                                <p className="mt-1">También acepta una cuarta columna opcional de rol: Asesor, Coordinador, Manager o Ambos.</p>
                                             </div>
                                         </div>
                                     )}
@@ -2231,29 +2425,166 @@ María López	maria.lopez	Z9y8x7" />
                         )}
 
                         {editPersonalModal.show && (
-                            <Modal show={editPersonalModal.show} onClose={() => setEditPersonalModal({ show:false, id:null, nombre:'', usuario:'', password:'' })} width="max-w-lg" ariaLabel="Editar personal">
-                                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[400px] p-6 transform transition-all">
-                                    <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><i className="fa-solid fa-user-pen text-indigo-600"></i> Editar Personal</h3>
-                                    <p className="text-xs text-gray-500 mb-4">Los cambios de nombre se verán reflejados en todos los proyectos donde coordine o asesore.</p>
-                                    
-                                    <div className="space-y-4 mb-6">
-                                        <div>
-                                            <label className="block text-xs font-bold text-gray-700 mb-1">Nombre Completo</label>
-                                            <input type="text" className="w-full border border-gray-300 rounded-lg p-3 text-sm focus:border-indigo-500 outline-none" value={editPersonalModal.nombre} onChange={e=>setEditPersonalModal({...editPersonalModal, nombre: e.target.value})} />
+                            <Modal show={editPersonalModal.show} onClose={() => setEditPersonalModal({ show:false, id:null, nombre:'', usuario:'', password:'', roles:['asesor'], assignedGroupIds: [], coordinatorCourseIds: [], selectedGroupCourseId: '' })} width="max-w-5xl" ariaLabel="Editar personal">
+                                <div className="w-full max-w-[980px] rounded-[28px] bg-slate-50 p-4 shadow-2xl ring-1 ring-slate-200 sm:p-6">
+                                    <div className="mb-5 flex flex-col gap-3 border-b border-slate-200 pb-4 sm:flex-row sm:items-center sm:justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-indigo-100 text-indigo-600 shadow-inner"><i className="fa-solid fa-user-pen"></i></div>
+                                            <div>
+                                                <h3 className="text-xl font-black text-slate-800">Editar Personal</h3>
+                                                <p className="text-xs text-slate-500">Los cambios se reflejarán en todos los proyectos donde coordine o asesore.</p>
+                                            </div>
                                         </div>
-                                        <div>
-                                            <label className="block text-xs font-bold text-gray-700 mb-1">Usuario de Portal</label>
-                                            <input type="text" className="w-full border border-gray-300 rounded-lg p-3 text-sm focus:border-indigo-500 outline-none" value={editPersonalModal.usuario} onChange={e=>setEditPersonalModal({...editPersonalModal, usuario: e.target.value})} />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-bold text-gray-700 mb-1">Contraseña de Portal Única</label>
-                                            <input type="text" className="w-full border border-gray-300 rounded-lg p-3 text-sm font-mono focus:border-indigo-500 outline-none" value={editPersonalModal.password} onChange={e=>setEditPersonalModal({...editPersonalModal, password: e.target.value})} />
-                                        </div>
+                                        <span className="inline-flex w-fit items-center rounded-full bg-indigo-600 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide text-white shadow-sm">Personal</span>
                                     </div>
 
-                                    <div className="flex justify-end gap-3">
-                                        <button onClick={()=>setEditPersonalModal({show:false, id:null, nombre:'', usuario:'', password:''})} className="px-4 py-2 text-gray-600 font-semibold hover:bg-gray-100 rounded-lg transition-colors">Cancelar</button>
-                                        <button onClick={guardarEdicionPersonal} className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 shadow-md transition-colors">Guardar Cambios</button>
+                                    <div className="space-y-5">
+                                        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                                            <div className="mb-3 flex items-center justify-between gap-3">
+                                                <div>
+                                                    <h4 className="text-sm font-black uppercase tracking-wide text-slate-700">Información</h4>
+                                                    <p className="text-[11px] text-slate-500">Datos básicos del usuario.</p>
+                                                </div>
+                                                <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold text-slate-600">1 / 3</span>
+                                            </div>
+                                            <div className="grid gap-4 md:grid-cols-2">
+                                                <div className="md:col-span-2">
+                                                    <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-600">Nombre completo</label>
+                                                    <input type="text" className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-800 outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100" value={editPersonalModal.nombre} onChange={e=>setEditPersonalModal({...editPersonalModal, nombre: e.target.value})} />
+                                                </div>
+                                                <div>
+                                                    <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-600">Usuario de portal</label>
+                                                    <input type="text" className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-800 outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100" value={editPersonalModal.usuario} onChange={e=>setEditPersonalModal({...editPersonalModal, usuario: e.target.value})} />
+                                                </div>
+                                                <div>
+                                                    <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-600">Contraseña</label>
+                                                    <input type="text" className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-mono text-slate-800 outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100" value={editPersonalModal.password} onChange={e=>setEditPersonalModal({...editPersonalModal, password: e.target.value})} />
+                                                </div>
+                                            </div>
+                                        </section>
+
+                                        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                                            <div className="mb-3 flex items-center justify-between gap-3">
+                                                <div>
+                                                    <h4 className="text-sm font-black uppercase tracking-wide text-slate-700">Roles</h4>
+                                                    <p className="text-[11px] text-slate-500">Selecciona los accesos que tendrá esta persona.</p>
+                                                </div>
+                                                <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-[10px] font-bold text-indigo-700">{editPersonalModal.roles.length} activo(s)</span>
+                                            </div>
+                                            <div className="flex flex-wrap gap-2.5">
+                                                {['asesor', 'coordinador', 'manager'].map(role => {
+                                                    const selected = editPersonalModal.roles.includes(role);
+                                                    const label = role === 'asesor' ? 'Asesor' : role === 'coordinador' ? 'Coordinador' : 'Manager';
+                                                    const theme = role === 'asesor' ? 'bg-blue-50 text-blue-700 border-blue-200' : role === 'coordinador' ? 'bg-violet-50 text-violet-700 border-violet-200' : 'bg-amber-50 text-amber-700 border-amber-200';
+                                                    return (
+                                                        <button
+                                                            key={role}
+                                                            type="button"
+                                                            onClick={() => setEditPersonalModal(prev => ({
+                                                                ...prev,
+                                                                roles: prev.roles.includes(role)
+                                                                    ? prev.roles.filter(item => item !== role)
+                                                                    : [...prev.roles, role]
+                                                            }))}
+                                                            className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-bold transition-all ${selected ? `${theme} shadow-sm ring-2 ring-offset-1 ring-indigo-100` : 'border-slate-200 bg-white text-slate-700 hover:border-indigo-200 hover:bg-indigo-50'}`}
+                                                        >
+                                                            <span className={`flex h-4 w-4 items-center justify-center rounded-[4px] border text-[10px] ${selected ? 'border-current bg-current text-white' : 'border-slate-300 bg-white text-transparent'}`}><i className="fa-solid fa-check"></i></span>
+                                                            {label}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        </section>
+
+                                        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                                            <div className="mb-3 flex items-center justify-between gap-3">
+                                                <div>
+                                                    <h4 className="text-sm font-black uppercase tracking-wide text-violet-700">Cursos como Coordinador</h4>
+                                                    <p className="text-[11px] text-slate-500">Selecciona los cursos que coordina esta persona.</p>
+                                                </div>
+                                                <span className="rounded-full bg-violet-50 px-2.5 py-1 text-[10px] font-bold text-violet-700">{editPersonalModal.coordinatorCourseIds?.length || 0} cursos</span>
+                                            </div>
+                                            <div className="grid max-h-44 gap-2 overflow-y-auto rounded-2xl border border-violet-100 bg-violet-50/40 p-2 md:grid-cols-2">
+                                                {basesDeDatos.map(db => {
+                                                    const seleccionado = editPersonalModal.coordinatorCourseIds?.includes(db.id);
+                                                    return (
+                                                        <label key={db.id} className={`flex cursor-pointer items-center gap-3 rounded-xl border p-2.5 text-sm transition-all ${seleccionado ? 'border-violet-500 bg-white shadow-sm' : 'border-transparent bg-white/70 hover:border-violet-200 hover:bg-white'}`}>
+                                                            <input type="checkbox" className="sr-only" checked={Boolean(seleccionado)} onChange={e => setEditPersonalModal(prev => ({ ...prev, roles: e.target.checked && !prev.roles.includes('coordinador') ? [...prev.roles, 'coordinador'] : !e.target.checked && (prev.coordinatorCourseIds || []).length === 1 ? prev.roles.filter(role => role !== 'coordinador') : prev.roles, coordinatorCourseIds: e.target.checked ? [...new Set([...(prev.coordinatorCourseIds || []), db.id])] : (prev.coordinatorCourseIds || []).filter(courseId => courseId !== db.id) }))} />
+                                                            <span className={`flex h-4 w-4 items-center justify-center rounded-[4px] border text-[10px] ${seleccionado ? 'border-violet-600 bg-violet-600 text-white' : 'border-slate-300 bg-white text-transparent'}`}><i className="fa-solid fa-check"></i></span>
+                                                            <span className="flex-1 min-w-0">
+                                                                <span className="block truncate font-bold text-slate-700">{db.info.siglas} · {db.info.estado} · {db.info.anio}</span>
+                                                                <span className="mt-0.5 block truncate text-[11px] text-slate-500">{db.info.nombreCurso || 'Sin nombre'}</span>
+                                                            </span>
+                                                        </label>
+                                                    );
+                                                })}
+                                                {basesDeDatos.length === 0 && <span className="text-xs italic text-slate-400 md:col-span-2">No hay ofertas educativas registradas.</span>}
+                                            </div>
+                                        </section>
+
+                                        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                                            <div className="mb-3 flex items-center justify-between gap-3">
+                                                <div>
+                                                    <h4 className="text-sm font-black uppercase tracking-wide text-blue-700">Asignación como Asesor</h4>
+                                                    <p className="text-[11px] text-slate-500">Busca un curso y luego marca los grupos que debe atender.</p>
+                                                </div>
+                                                <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-bold text-blue-700">{editPersonalModal.assignedGroupIds?.length || 0} grupos</span>
+                                            </div>
+
+                                            <div className="mb-3">
+                                                <input type="search" className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100" value={assignedCourseSearch} onChange={e => setAssignedCourseSearch(e.target.value)} placeholder="Buscar curso por siglas, estado, año o nombre..." aria-label="Buscar curso para asignar grupos" />
+                                            </div>
+
+                                            <div className="grid max-h-52 gap-2 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50 p-2 md:grid-cols-2">
+                                                {basesDeDatos.filter(db => {
+                                                    const search = normalizeText(assignedCourseSearch);
+                                                    return !search || normalizeText(`${db.info.siglas} ${db.info.estado} ${db.info.anio} ${db.info.nombreCurso}`).includes(search);
+                                                }).map(db => {
+                                                    const gruposAsignados = (db.grupos || []).filter(grupo => editPersonalModal.assignedGroupIds?.includes(grupo.id)).length;
+                                                    const selected = editPersonalModal.selectedGroupCourseId === db.id;
+                                                    return (
+                                                        <button key={db.id} type="button" onClick={() => setEditPersonalModal(prev => ({ ...prev, selectedGroupCourseId: db.id }))} className={`rounded-xl border p-3 text-left transition-all ${selected ? 'border-indigo-500 bg-indigo-50 ring-2 ring-indigo-100' : 'border-slate-200 bg-white hover:border-indigo-300 hover:bg-indigo-50/40'}`}>
+                                                            <span className="block truncate font-black text-slate-800">{db.info.siglas} · {db.info.estado} · {db.info.anio}</span>
+                                                            <span className="mt-1 block truncate text-[11px] text-slate-500">{db.info.nombreCurso || 'Sin nombre'}{gruposAsignados > 0 ? ` · ${gruposAsignados} grupo(s)` : ''}</span>
+                                                        </button>
+                                                    );
+                                                })}
+                                                {basesDeDatos.length === 0 && <p className="py-4 text-center text-xs italic text-slate-400 md:col-span-2">No hay cursos registrados.</p>}
+                                                {basesDeDatos.length > 0 && basesDeDatos.filter(db => {
+                                                    const search = normalizeText(assignedCourseSearch);
+                                                    return !search || normalizeText(`${db.info.siglas} ${db.info.estado} ${db.info.anio} ${db.info.nombreCurso}`).includes(search);
+                                                }).length === 0 && <p className="py-4 text-center text-xs italic text-slate-400 md:col-span-2">No hay cursos que coincidan.</p>}
+                                            </div>
+
+                                            {basesDeDatos.filter(db => db.id === editPersonalModal.selectedGroupCourseId).map(selectedDb => (
+                                                <div key={selectedDb.id} className="mt-3 rounded-2xl border border-blue-200 bg-blue-50/40 p-3">
+                                                    <div className="mb-2 flex items-center justify-between gap-3">
+                                                        <span className="font-black text-blue-900">Grupos de {selectedDb.info.siglas} · {selectedDb.info.estado} · {selectedDb.info.anio}</span>
+                                                        <span className="rounded-full bg-white px-2 py-1 text-[10px] font-bold text-blue-700">Marca los grupos</span>
+                                                    </div>
+                                                    <div className="space-y-2">
+                                                        {(selectedDb.grupos || []).map(grupo => {
+                                                            const asignado = editPersonalModal.assignedGroupIds?.includes(grupo.id);
+                                                            const otroAsesor = grupo.asesorId && grupo.asesorId !== editPersonalModal.id && grupo.asesor;
+                                                            return (
+                                                                <label key={grupo.id} className={`flex cursor-pointer items-center gap-3 rounded-xl border p-2.5 text-sm transition-all ${asignado ? 'border-blue-500 bg-white shadow-sm' : 'border-transparent bg-white/80 hover:border-blue-200 hover:bg-white'}`}>
+                                                                    <input type="checkbox" className="sr-only" checked={Boolean(asignado)} onChange={e => setEditPersonalModal(prev => ({ ...prev, roles: e.target.checked && !prev.roles.includes('asesor') ? [...prev.roles, 'asesor'] : !e.target.checked && (prev.assignedGroupIds || []).length === 1 ? prev.roles.filter(role => role !== 'asesor') : prev.roles, assignedGroupIds: e.target.checked ? [...new Set([...(prev.assignedGroupIds || []), grupo.id])] : (prev.assignedGroupIds || []).filter(id => id !== grupo.id) }))} />
+                                                                    <span className={`flex h-4 w-4 items-center justify-center rounded-[4px] border text-[10px] ${asignado ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white text-transparent'}`}><i className="fa-solid fa-check"></i></span>
+                                                                    <span className="flex-1 font-bold text-slate-700">{grupo.nombre}</span>
+                                                                    {otroAsesor && <span className="text-[11px] font-medium text-amber-600">Actualmente: {grupo.asesor}</span>}
+                                                                </label>
+                                                            );
+                                                        })}
+                                                        {(selectedDb.grupos || []).length === 0 && <p className="py-3 text-center text-xs italic text-slate-400">Este curso aún no tiene grupos.</p>}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </section>
+                                    </div>
+
+                                    <div className="mt-6 flex justify-end gap-3 border-t border-slate-200 pt-4">
+                                        <button onClick={()=>setEditPersonalModal({show:false, id:null, nombre:'', usuario:'', password:'', roles:['asesor'], assignedGroupIds: [], coordinatorCourseIds: []})} className="rounded-xl px-4 py-2.5 font-bold text-slate-600 transition-colors hover:bg-slate-200">Cancelar</button>
+                                        <button onClick={guardarEdicionPersonal} className="rounded-xl bg-indigo-600 px-4 py-2.5 font-bold text-white shadow-md transition-colors hover:bg-indigo-700">Guardar Cambios</button>
                                     </div>
                                 </div>
                             </Modal>
@@ -2343,6 +2674,24 @@ María López	maria.lopez	Z9y8x7" />
                             </div>
                             
                             <div className="space-y-10">
+                                {personalGlobal.find(persona => persona.id === modoPersonal.personalId)?.roles?.includes('manager') && (
+                                    <div>
+                                        <h3 className="font-black text-gray-400 uppercase tracking-widest text-sm mb-4 border-b pb-2"><i className="fa-solid fa-briefcase mr-2 text-amber-500"></i> Acceso Manager</h3>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            {basesDeDatos.map(db => (
+                                                <button key={`manager-${db.id}`} onClick={() => { setActiveDbId(db.id); setModoPersonal({...modoPersonal, roleInProject: 'manager', grupoId: null}); setAppView('workspace'); }} className="p-6 border-2 border-amber-100 rounded-2xl hover:border-amber-500 hover:shadow-lg hover:shadow-amber-500/10 text-left flex justify-between items-center transition-all group bg-white">
+                                                    <div>
+                                                        <div className="inline-block px-3 py-1 bg-amber-50 text-amber-700 rounded-full text-xs font-bold mb-3 border border-amber-100 uppercase tracking-wider">{db.info.estado} • {db.info.siglas}</div>
+                                                        <div className="font-bold text-gray-800 text-xl mb-2 group-hover:text-amber-700 transition-colors">{db.info.nombreCurso}</div>
+                                                        <div className="text-amber-600 flex items-center gap-2 font-bold text-xs"><i className="fa-solid fa-unlock mr-1"></i> ACCESO OPERATIVO COMPLETO</div>
+                                                    </div>
+                                                    <div className="bg-gray-50 w-12 h-12 rounded-full flex items-center justify-center group-hover:bg-amber-500 transition-colors"><i className="fa-solid fa-arrow-right text-xl text-gray-400 group-hover:text-white transition-colors"></i></div>
+                                                </button>
+                                            ))}
+                                            {basesDeDatos.length === 0 && <div className="text-gray-400 text-sm italic col-span-2">No hay ofertas educativas registradas.</div>}
+                                        </div>
+                                    </div>
+                                )}
                                 <div>
                                     <h3 className="font-black text-gray-400 uppercase tracking-widest text-sm mb-4 border-b pb-2"><i className="fa-solid fa-sitemap mr-2"></i> Tus asignaciones como Coordinador General</h3>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -2435,7 +2784,8 @@ María López	maria.lopez	Z9y8x7" />
             const isPersonal = modoPersonal.activo;
             const isAsesor = isPersonal && modoPersonal.roleInProject === 'asesor';
             const isCoordinador = isPersonal && modoPersonal.roleInProject === 'coordinador';
-            const isAdmin = !isPersonal;
+            const isManager = isPersonal && modoPersonal.roleInProject === 'manager';
+            const isAdmin = !isPersonal || isManager;
 
             const [tab, setTab] = useState(isAdmin || isCoordinador ? 'resumen' : 'seguimiento'); 
 
@@ -2453,6 +2803,7 @@ María López	maria.lopez	Z9y8x7" />
                                 {db.info.siglas}-{db.info.idEstado}-{db.info.anio}
                                 {isAsesor && <span className="ml-3 text-yellow-300 bg-black/20 px-2 py-0.5 rounded text-sm"><i className="fa-solid fa-user-tie"></i> ASESOR: {db.grupos.find(g=>g.id===modoPersonal.grupoId)?.nombre}</span>}
                                 {isCoordinador && <span className="ml-3 text-purple-300 bg-black/20 px-2 py-0.5 rounded text-sm"><i className="fa-solid fa-sitemap"></i> COORDINADOR GENERAL</span>}
+                                {isManager && <span className="ml-3 text-amber-300 bg-black/20 px-2 py-0.5 rounded text-sm"><i className="fa-solid fa-briefcase"></i> MANAGER</span>}
                             </h1>
                         </div>
                         <div className="flex bg-blue-800/50 rounded-xl p-1 gap-1 font-medium border border-blue-700/50 overflow-x-auto">
@@ -2470,7 +2821,7 @@ María López	maria.lopez	Z9y8x7" />
                         </div>
                     </header>
 
-                    <div className="flex-1 min-h-0 overflow-hidden flex flex-col p-3 print:p-0">
+                    <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col p-3 print:p-0">
                         {tab === 'resumen' && (isAdmin || isCoordinador) && <TabResumen db={db} />}
                         {tab === 'ajustes' && isAdmin && <TabAjustes db={db} onUpdate={onUpdate} asesoresGlobales={asesoresGlobales} />}
                         {tab === 'pegadoExcel' && isAdmin && <TabPegadoExcel db={db} onUpdate={onUpdate} textoPegado={textoPegado} setTextoPegado={setTextoPegado} participantesProcesados={participantesProcesados} setParticipantesProcesados={setParticipantesProcesados} procesarTextoPegado={procesarTextoPegado} descargarPlantillaBase={descargarPlantillaBase} />}
@@ -2560,7 +2911,7 @@ María López	maria.lopez	Z9y8x7" />
                     const f = p.funcion || 'Sin Función';
                     group.funciones[f] = (group.funciones[f] || 0) + 1;
                 });
-                if(sinGrupo.total > 0) res.push(sinGrupo);
+                if(sinGrupo.total > 0) res.unshift(sinGrupo);
                 return res;
             }, [db]);
 
@@ -2754,6 +3105,7 @@ María López	maria.lopez	Z9y8x7" />
 
         function TabAjustes({ db, onUpdate, asesoresGlobales }) {
             const [info, setInfo] = useState({ ...db.info });
+            const [coordinadorSearch, setCoordinadorSearch] = useState('');
             
             useEffect(() => {
                 if (!info.coordinadorIds) {
@@ -2781,6 +3133,7 @@ María López	maria.lopez	Z9y8x7" />
                         <div><label className="block text-xs font-bold text-gray-600 mb-1">Estado</label><select className="w-full p-3 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-blue-500" value={info.estado || ''} onChange={e=>{ const estado = ESTADOS.find(item => item.nombre === e.target.value); setInfo({...info, estado: e.target.value, idEstado: estado?.id || ''}); }}><option value="">- Seleccionar -</option>{ESTADOS.map(estado => <option key={estado.id} value={estado.nombre}>{estado.nombre}</option>)}</select></div>
                         <div><label className="block text-xs font-bold text-gray-600 mb-1">Año</label><input type="text" className="w-full p-3 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-blue-500" value={info.anio} onChange={e=>setInfo({...info, anio:e.target.value})} /></div>
                         <div><label className="block text-xs font-bold text-gray-600 mb-1">Siglas</label><input type="text" className="w-full p-3 bg-gray-50 border border-gray-200 rounded-lg uppercase outline-none focus:border-blue-500" value={info.siglas} onChange={e=>setInfo({...info, siglas:e.target.value})} /></div>
+                        <div><label className="block text-xs font-bold text-gray-600 mb-1">ID Curso</label><input type="text" className="w-full p-3 bg-gray-50 border border-gray-200 rounded-lg uppercase outline-none focus:border-blue-500" value={info.idCurso || ''} onChange={e=>setInfo({...info, idCurso:e.target.value})} /></div>
                         <div><label className="block text-xs font-bold text-gray-600 mb-1">Contraseña Moodle Predeterminada</label><input type="text" className="w-full p-3 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-blue-500" value={info.moodlePass} onChange={e=>setInfo({...info, moodlePass:e.target.value})} /></div>
                         
                         {/* V3.0 Restaurado Horas y Modalidad */}
@@ -2796,22 +3149,36 @@ María López	maria.lopez	Z9y8x7" />
 
                         <div className="col-span-2">
                             <label className="block text-xs font-bold text-purple-600 mb-1">Coordinadores del Proyecto</label>
-                            <div className="border border-purple-200 rounded-lg p-2 max-h-32 overflow-y-auto bg-purple-50/30 text-sm">
-                                {asesoresGlobales.map(p => (
+                            <input type="search" className="w-full mb-2 border border-purple-200 rounded-lg p-3 text-sm bg-white outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-100" value={coordinadorSearch} onChange={e => setCoordinadorSearch(e.target.value)} placeholder="Buscar por nombre o usuario..." aria-label="Buscar coordinador" />
+                            <div className="border border-purple-200 rounded-lg p-2 bg-purple-50/30 text-sm">
+                                {(info.coordinadorIds || []).length > 0 && (
+                                    <div className="mb-2 border-b border-purple-100 pb-2">
+                                        <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-purple-600">Seleccionados ({(info.coordinadorIds || []).length})</div>
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {(info.coordinadorIds || []).map(id => {
+                                                const persona = asesoresGlobales.find(p => p.id === id);
+                                                if (!persona) return null;
+                                                return <button key={persona.id} type="button" onClick={() => setInfo(prev => ({ ...prev, coordinadorIds: (prev.coordinadorIds || []).filter(selectedId => selectedId !== persona.id) }))} className="inline-flex items-center gap-1 rounded-full bg-purple-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-purple-700" title="Quitar coordinador">{persona.nombre}<i className="fa-solid fa-xmark text-[10px]"></i></button>;
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+                                <div className="max-h-32 overflow-y-auto">
+                                {asesoresGlobales.filter(p => !(info.coordinadorIds || []).includes(p.id)).filter(p => {
+                                    const search = normalizeText(coordinadorSearch);
+                                    return !search || normalizeText(`${p.nombre} ${p.usuario || ''}`).includes(search);
+                                }).map(p => (
                                     <label key={p.id} className="flex items-center gap-2 mb-1 p-1 hover:bg-white rounded cursor-pointer">
-                                        <input type="checkbox" className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
-                                            checked={info.coordinadorIds?.includes(p.id)}
-                                            onChange={(e) => {
-                                                const newIds = e.target.checked
-                                                    ? [...(info.coordinadorIds||[]), p.id]
-                                                    : (info.coordinadorIds||[]).filter(id => id !== p.id);
-                                                setInfo({...info, coordinadorIds: newIds});
-                                            }}
-                                        /> 
-                                        <span className="text-gray-700 font-semibold">{p.nombre}</span>
+                                        <input type="checkbox" className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500" onChange={() => setInfo(prev => ({ ...prev, coordinadorIds: [...(prev.coordinadorIds || []), p.id] }))} />
+                                        <span className="text-gray-700 font-semibold">{p.nombre}<small className="ml-2 font-normal text-gray-400">{p.usuario || ''}</small></span>
                                     </label>
                                 ))}
                                 {asesoresGlobales.length === 0 && <span className="text-gray-400 italic">No hay personal registrado</span>}
+                                {asesoresGlobales.length > 0 && asesoresGlobales.filter(p => !(info.coordinadorIds || []).includes(p.id)).filter(p => {
+                                    const search = normalizeText(coordinadorSearch);
+                                    return !search || normalizeText(`${p.nombre} ${p.usuario || ''}`).includes(search);
+                                }).length === 0 && <span className="text-gray-400 italic">No hay coincidencias.</span>}
+                                </div>
                             </div>
                         </div>
 
@@ -2839,19 +3206,42 @@ María López	maria.lopez	Z9y8x7" />
         function TabGrupos({ db, onUpdate, asesoresGlobales }) {
             const [n, setN] = useState({ nombre: '', asesorId: '', asesor: '', contacto: '', dia: '', hora: '', whatsapp: '' });
             const [bulkCount, setBulkCount] = useState('');
+            const [bulkGroupText, setBulkGroupText] = useState('');
             const [editingGroup, setEditingGroup] = useState(null);
             const [groupEditData, setGroupEditData] = useState(null);
+            const [selectedGroupIds, setSelectedGroupIds] = useState(new Set());
+            const [bulkSchedule, setBulkSchedule] = useState({ dia: '', hora: '' });
+            const [groupSort, setGroupSort] = useState({ key: 'nombre', direction: 'asc' });
+
+            const toggleGroupSort = (key) => {
+                setGroupSort(current => current.key === key
+                    ? { key, direction: current.direction === 'asc' ? 'desc' : 'asc' }
+                    : { key, direction: 'asc' }
+                );
+            };
+            const getGroupSortValue = (group, key) => {
+                const value = {
+                    nombre: group.nombre || '',
+                    asesor: group.asesor || '',
+                    dia: group.dia || '',
+                    hora: group.hora || '',
+                    whatsapp: group.whatsapp || ''
+                }[key] || '';
+                return String(value).toLowerCase();
+            };
+            const sortedGroups = [...db.grupos].sort((a, b) => {
+                const comparison = getGroupSortValue(a, groupSort.key).localeCompare(getGroupSortValue(b, groupSort.key), 'es', { sensitivity: 'base' });
+                return groupSort.direction === 'asc' ? comparison : -comparison;
+            });
 
             const add = () => { 
                 if(!n.nombre) return alert("Falta el nombre del grupo");
-                if(!n.asesorId) return alert("Debes seleccionar a una persona de la lista de Personal Global");
                 onUpdate({ ...db, grupos: [...db.grupos, {...n, id: Date.now().toString()}] }); 
                 setN({ nombre: '', asesorId: '', asesor: '', contacto: '', dia: '', hora: '', whatsapp: '' }); 
             };
             const addBulk = () => {
                 const total = parseInt(bulkCount, 10);
                 if (!total || total < 1) return alert('Indica una cantidad válida de grupos.');
-                if (!n.asesorId) return alert('Debes seleccionar a una persona de la lista de Personal Global.');
 
                 const nombresExistentes = new Set(db.grupos.map(group => String(group.nombre || '').trim().toUpperCase()));
                 const gruposNuevos = [];
@@ -2870,6 +3260,83 @@ María López	maria.lopez	Z9y8x7" />
                 setBulkCount('');
                 alert(`Se agregaron ${gruposNuevos.length} grupos correctamente.`);
             };
+            const importarGruposMasivos = () => {
+                const texto = bulkGroupText.trim();
+                if (!texto) return alert('Pega los datos del grupo para importarlos.');
+
+                const filas = texto.split(/\r?\n/).map(fila => fila.trim()).filter(Boolean);
+                if (!filas.length) return alert('No se detectaron filas válidas.');
+
+                const parseCells = (fila) => fila.split(/\t|;|\||,/).map(celda => celda.trim());
+                const headers = parseCells(filas[0]).map(celda => normalizeText(celda));
+                const tieneCabeceras = headers.some(h => h.includes('GRUPO')) || headers.some(h => h.includes('WHATS')) || headers.some(h => h.includes('ASESOR')) || headers.some(h => h.includes('DIA')) || headers.some(h => h.includes('HORA'));
+                const filasDatos = tieneCabeceras ? filas.slice(1) : filas;
+
+                const gruposNuevos = [];
+                const nombresExistentes = new Set((db.grupos || []).map(group => String(group.nombre || '').trim().toUpperCase()));
+
+                filasDatos.forEach((fila, index) => {
+                    const celdas = parseCells(fila);
+                    if (celdas.length === 0) return;
+
+                    let nombre = '', whatsapp = '', asesorNombre = '', contacto = '', dia = '', hora = '';
+                    const mapping = {
+                        grupo: headers.findIndex(h => h.includes('GRUPO')),
+                        whatsapp: headers.findIndex(h => h.includes('WHATS') || h.includes('WA')),
+                        asesor: headers.findIndex(h => h.includes('ASESOR')),
+                        contacto: headers.findIndex(h => h.includes('CONTACTO') || h.includes('TEL')),
+                        dia: headers.findIndex(h => h.includes('DIA')),
+                        hora: headers.findIndex(h => h.includes('HORA') || h.includes('TURNO'))
+                    };
+
+                    if (tieneCabeceras) {
+                        nombre = celdas[mapping.grupo] || celdas[0] || '';
+                        whatsapp = celdas[mapping.whatsapp] || '';
+                        asesorNombre = celdas[mapping.asesor] || '';
+                        contacto = celdas[mapping.contacto] || '';
+                        dia = celdas[mapping.dia] || '';
+                        hora = celdas[mapping.hora] || '';
+                    } else {
+                        if (celdas.length >= 6) {
+                            [nombre, whatsapp, asesorNombre, contacto, dia, hora] = celdas;
+                        } else if (celdas.length >= 5) {
+                            [nombre, whatsapp, asesorNombre, dia, hora] = celdas;
+                        } else if (celdas.length >= 4) {
+                            [nombre, whatsapp, asesorNombre, contacto] = celdas;
+                        } else {
+                            return;
+                        }
+                    }
+
+                    const nombreLimpio = String(nombre || '').trim();
+                    if (!nombreLimpio) return;
+
+                    const asesorEncontrado = asesoresGlobales.find(a => normalizeText(a.nombre) === normalizeText(asesorNombre));
+                    const grupoData = {
+                        id: `${Date.now()}-${index}`,
+                        nombre: nombreLimpio,
+                        asesorId: asesorEncontrado ? asesorEncontrado.id : '',
+                        asesor: asesorEncontrado ? asesorEncontrado.nombre : '',
+                        contacto: contacto ? contacto.trim() : '',
+                        dia: dia ? dia.trim() : '',
+                        hora: hora ? hora.trim() : '',
+                        whatsapp: whatsapp ? whatsapp.trim() : ''
+                    };
+
+                    if (nombresExistentes.has(normalizeText(grupoData.nombre))) {
+                        return;
+                    }
+
+                    nombresExistentes.add(normalizeText(grupoData.nombre));
+                    gruposNuevos.push(grupoData);
+                });
+
+                if (!gruposNuevos.length) return alert('No se encontraron grupos válidos para importar. Revisa el formato.');
+
+                onUpdate({ ...db, grupos: [...db.grupos, ...gruposNuevos] });
+                setBulkGroupText('');
+                alert(`Se importaron ${gruposNuevos.length} grupos correctamente.`);
+            };
             const del = (id) => onUpdate({ ...db, grupos: db.grupos.filter(g => g.id !== id), participantes: db.participantes.map(p => p.grupoId === id ? { ...p, grupoId: null } : p) });
             const openEditGroup = (group) => {
                 setEditingGroup(group.id);
@@ -2881,15 +3348,31 @@ María López	maria.lopez	Z9y8x7" />
             };
             const saveGroupChanges = () => {
                 if (!groupEditData || !groupEditData.nombre) return alert('El nombre del grupo es obligatorio.');
-                if (!groupEditData.asesorId) return alert('Selecciona un asesor para el grupo.');
-                const asesor = asesoresGlobales.find(a => a.id === groupEditData.asesorId)?.nombre || '';
+                const asesor = asesoresGlobales.find(a => a.id === groupEditData.asesorId)?.nombre || groupEditData.asesor || '';
                 const updatedGroups = db.grupos.map(g => g.id === groupEditData.id ? { ...g, ...groupEditData, asesor } : g);
                 onUpdate({ ...db, grupos: updatedGroups });
                 closeEditGroup();
             };
+            const toggleAllGroups = () => {
+                setSelectedGroupIds(selectedGroupIds.size === db.grupos.length ? new Set() : new Set(db.grupos.map(group => group.id)));
+            };
+            const aplicarHorarioMasivo = () => {
+                const dia = bulkSchedule.dia.trim();
+                const hora = bulkSchedule.hora.trim();
+                if (!selectedGroupIds.size) return alert('Selecciona al menos un grupo.');
+                if (!dia && !hora) return alert('Indica el Día, el Turno / Hora o ambos.');
+
+                const gruposActualizados = db.grupos.map(group => selectedGroupIds.has(group.id)
+                    ? { ...group, ...(dia ? { dia } : {}), ...(hora ? { hora } : {}) }
+                    : group);
+                onUpdate({ ...db, grupos: gruposActualizados });
+                setSelectedGroupIds(new Set());
+                setBulkSchedule({ dia: '', hora: '' });
+                alert('Día y turno / hora actualizados correctamente.');
+            };
             
             return (
-                <div className="bg-white rounded-2xl shadow-sm h-full flex flex-col overflow-hidden">
+                <div className="bg-white rounded-2xl shadow-sm min-h-full flex flex-col overflow-visible">
                     <div className="p-6 border-b border-gray-100 flex justify-between items-center">
                         <h2 className="font-bold text-xl text-gray-800"><i className="fa-solid fa-users text-blue-600 mr-2"></i> Gestión de Grupos de Trabajo</h2>
                         <div className="text-xs text-gray-500 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-200"><i className="fa-solid fa-info-circle mr-1"></i>Para agregar nuevo personal, ve al Panel Administrador.</div>
@@ -2919,23 +3402,41 @@ María López	maria.lopez	Z9y8x7" />
                             <button onClick={addBulk} className="bg-blue-700 text-white px-4 py-2.5 rounded-lg shadow hover:bg-blue-800 font-bold transition-colors flex items-center gap-2"><i className="fa-solid fa-layer-group"></i> Generar grupos</button>
                         </div>
                     </div>
-                    <div className="flex-1 overflow-auto">
+                    <div className="px-6 py-4 bg-indigo-50 border-b border-indigo-100">
+                        <label className="block text-xs font-bold text-indigo-900 mb-2">Importar grupos masivos</label>
+                        <p className="text-xs text-indigo-700 mb-2">Pega filas con este formato: Grupo | WhatsApp | Asesor | Contacto | Día | Hora</p>
+                        <textarea rows="6" className="w-full p-3 border border-indigo-200 bg-white rounded-xl text-xs font-mono outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" value={bulkGroupText} onChange={e => setBulkGroupText(e.target.value)} placeholder={'GRUPO 01\thttps://wa.me/521234567890\tJuan Pérez\t5551234567\tLunes\t18:00'} ></textarea>
+                        <div className="mt-3 flex justify-end">
+                            <button onClick={importarGruposMasivos} className="bg-indigo-600 text-white px-4 py-2.5 rounded-lg shadow hover:bg-indigo-700 font-bold transition-colors flex items-center gap-2"><i className="fa-solid fa-file-import"></i> Importar grupos</button>
+                        </div>
+                    </div>
+                    <div className="px-6 py-4 bg-emerald-50 border-b border-emerald-100 flex flex-col gap-3 md:flex-row md:items-end">
+                        <div>
+                            <label className="block text-xs font-bold text-emerald-900 mb-1">Actualizar grupos existentes</label>
+                            <p className="text-xs text-emerald-700">Selecciona grupos en la tabla y asigna el Día y/o Turno / Hora.</p>
+                        </div>
+                        <input type="text" className="w-full md:w-40 p-2.5 border border-emerald-200 bg-white rounded-lg text-sm uppercase focus:border-emerald-500 outline-none" placeholder="Día" value={bulkSchedule.dia} onChange={e => setBulkSchedule({ ...bulkSchedule, dia: e.target.value })} aria-label="Día para grupos seleccionados" />
+                        <input type="text" className="w-full md:w-40 p-2.5 border border-emerald-200 bg-white rounded-lg text-sm uppercase focus:border-emerald-500 outline-none" placeholder="Turno / Hora" value={bulkSchedule.hora} onChange={e => setBulkSchedule({ ...bulkSchedule, hora: e.target.value })} aria-label="Turno u hora para grupos seleccionados" />
+                        <button onClick={aplicarHorarioMasivo} className="bg-emerald-600 text-white px-4 py-2.5 rounded-lg shadow hover:bg-emerald-700 font-bold transition-colors flex items-center justify-center gap-2"><i className="fa-solid fa-calendar-check"></i> Aplicar a {selectedGroupIds.size || 'grupos seleccionados'}</button>
+                    </div>
+                    <div className="flex-none overflow-x-auto overflow-y-visible">
                         <table className="w-full text-sm text-left whitespace-nowrap">
-                            <thead className="bg-white sticky top-0 shadow-sm z-10"><tr><th className="p-4 text-gray-500">Grupo</th><th className="p-4 text-gray-500">Asesor</th><th className="p-4 text-gray-500">Día / Hora</th><th className="p-4 text-gray-500">WhatsApp</th><th className="p-4 text-gray-500 text-center">Acción</th></tr></thead>
+                            <thead className="bg-white sticky top-0 shadow-sm z-10"><tr><th className="p-4 text-gray-500 text-center"><input type="checkbox" checked={db.grupos.length > 0 && selectedGroupIds.size === db.grupos.length} onChange={toggleAllGroups} aria-label="Seleccionar todos los grupos" /></th><th className="p-4 text-gray-500"><button type="button" onClick={() => toggleGroupSort('nombre')} className="inline-flex items-center gap-1 font-bold hover:text-blue-700 transition-colors">Grupo {groupSort.key === 'nombre' ? (groupSort.direction === 'asc' ? '↑' : '↓') : '↕'}</button></th><th className="p-4 text-gray-500"><button type="button" onClick={() => toggleGroupSort('asesor')} className="inline-flex items-center gap-1 font-bold hover:text-blue-700 transition-colors">Asesor {groupSort.key === 'asesor' ? (groupSort.direction === 'asc' ? '↑' : '↓') : '↕'}</button></th><th className="p-4 text-gray-500"><button type="button" onClick={() => toggleGroupSort('dia')} className="inline-flex items-center gap-1 font-bold hover:text-blue-700 transition-colors">Día / Hora {groupSort.key === 'dia' ? (groupSort.direction === 'asc' ? '↑' : '↓') : '↕'}</button></th><th className="p-4 text-gray-500"><button type="button" onClick={() => toggleGroupSort('whatsapp')} className="inline-flex items-center gap-1 font-bold hover:text-blue-700 transition-colors">WhatsApp {groupSort.key === 'whatsapp' ? (groupSort.direction === 'asc' ? '↑' : '↓') : '↕'}</button></th><th className="p-4 text-gray-500 text-center">Acción</th></tr></thead>
                             <tbody>
-                                {db.grupos.map(g => (
+                                {sortedGroups.map(g => (
                                     <tr key={g.id} className="border-b border-gray-50 hover:bg-blue-50/50 transition-colors">
+                                        <td className="p-4 text-center"><input type="checkbox" checked={selectedGroupIds.has(g.id)} onChange={() => setSelectedGroupIds(previous => { const next = new Set(previous); if (next.has(g.id)) next.delete(g.id); else next.add(g.id); return next; })} aria-label={`Seleccionar ${g.nombre}`} /></td>
                                         <td className="p-4 font-bold text-gray-800">{g.nombre}</td>
                                         <td className="p-4 text-blue-700 font-semibold">{g.asesor}</td>
                                         <td className="p-4 text-gray-600">{g.dia} - {g.hora}</td>
-                                        <td className="p-4 text-blue-500 truncate max-w-xs">{g.whatsapp}</td>
+                                        <td className="p-4 text-blue-500 truncate max-w-xs">{/^https?:\/\//i.test(String(g.whatsapp || '').trim()) ? <a href={String(g.whatsapp).trim()} target="_blank" rel="noopener noreferrer" className="hover:underline" title="Abrir enlace">{g.whatsapp}</a> : (g.whatsapp || '')}</td>
                                         <td className="p-4 text-center flex items-center justify-center gap-2">
                                             <button onClick={() => openEditGroup(g)} className="text-gray-400 hover:text-blue-600 w-8 h-8 rounded-lg hover:bg-blue-50 transition-colors"><i className="fa-solid fa-pen"></i></button>
                                             <button onClick={()=>del(g.id)} className="text-gray-400 hover:text-red-500 w-8 h-8 rounded-lg hover:bg-red-50 transition-colors"><i className="fa-solid fa-trash"></i></button>
                                         </td>
                                     </tr>
                                 ))}
-                                {db.grupos.length === 0 && <tr><td colSpan="5" className="text-center py-10 text-gray-400">No hay grupos creados para este proyecto.</td></tr>}
+                                {db.grupos.length === 0 && <tr><td colSpan="6" className="text-center py-10 text-gray-400">No hay grupos creados para este proyecto.</td></tr>}
                             </tbody>
                         </table>
                     </div>
@@ -2957,13 +3458,14 @@ María López	maria.lopez	Z9y8x7" />
                                     </div>
                                     <div>
                                         <label className="block text-xs font-semibold text-gray-600 mb-1">Asesor Titular</label>
-                                        <select className="w-full p-3 border border-gray-200 rounded-xl text-sm outline-none focus:border-blue-500" value={groupEditData.asesorId || ''} onChange={e => {
-                                            const selected = asesoresGlobales.find(a => a.id === e.target.value);
-                                            setGroupEditData({ ...groupEditData, asesorId: selected?.id || '', asesor: selected?.nombre || '' });
-                                        }}>
-                                            <option value="">-- Seleccionar Asesor --</option>
-                                            {asesoresGlobales.map(a => <option key={a.id} value={a.id}>{a.nombre}</option>)}
-                                        </select>
+                                        <input list="asesores-editar-grupo" className="w-full p-3 border border-gray-200 rounded-xl text-sm outline-none focus:border-blue-500" value={groupEditData.asesor || ''} placeholder="Escribe para buscar un asesor" onChange={e => {
+                                            const asesorNombre = e.target.value;
+                                            const selected = asesoresGlobales.find(a => normalizeText(a.nombre) === normalizeText(asesorNombre));
+                                            setGroupEditData({ ...groupEditData, asesorId: selected?.id || '', asesor: asesorNombre });
+                                        }} />
+                                        <datalist id="asesores-editar-grupo">
+                                            {asesoresGlobales.map(a => <option key={a.id} value={a.nombre} />)}
+                                        </datalist>
                                     </div>
                                     <div>
                                         <label className="block text-xs font-semibold text-gray-600 mb-1">Día</label>
@@ -2989,13 +3491,126 @@ María López	maria.lopez	Z9y8x7" />
             );
         }
 
+        function BusquedaGlobalAlumnos({ basesDeDatos, setBasesDeDatos, onBack }) {
+            const [search, setSearch] = useState('');
+            const [editingStudent, setEditingStudent] = useState(null);
+            const [editData, setEditData] = useState(null);
+
+            const resultados = useMemo(() => {
+                const query = normalizeText(search.trim());
+                if (!query) return [];
+
+                return basesDeDatos.flatMap(db => (db.participantes || []).map(participant => {
+                    const group = (db.grupos || []).find(item => item.id === participant.grupoId);
+                    const searchable = [
+                        participant.completo, participant.nombre, participant.paterno, participant.materno,
+                        participant.curp, participant.correo, participant.telefono, participant.celular,
+                        group?.nombre, db.info?.nombreCurso, db.info?.siglas, db.info?.idCurso
+                    ].map(value => normalizeText(value || '')).join(' ');
+
+                    return searchable.includes(query) ? { db, participant, group } : null;
+                }).filter(Boolean)).sort((a, b) => normalizeText(a.participant.completo || '').localeCompare(normalizeText(b.participant.completo || ''), 'es', { sensitivity: 'base' }));
+            }, [basesDeDatos, search]);
+
+            const openEdit = result => {
+                setEditingStudent({ dbId: result.db.id, participantId: result.participant.id });
+                setEditData({ ...result.participant, grupoId: result.participant.grupoId || '' });
+            };
+
+            const closeEdit = () => {
+                setEditingStudent(null);
+                setEditData(null);
+            };
+
+            const saveEdit = () => {
+                if (!editData || !editData.id) return;
+                const updatedBases = basesDeDatos.map(db => db.id !== editingStudent.dbId ? db : {
+                    ...db,
+                    participantes: (db.participantes || []).map(participant => participant.id === editData.id
+                        ? { ...participant, ...editData, completo: `${editData.paterno || ''} ${editData.materno || ''} ${editData.nombre || ''}`.trim() }
+                        : participant)
+                });
+                setBasesDeDatos(updatedBases);
+                closeEdit();
+            };
+
+            return (
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+                    <div className="p-6 border-b border-gray-100 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                        <div>
+                            <h2 className="text-xl font-bold text-gray-900"><i className="fa-solid fa-user-magnifying-glass text-emerald-600 mr-2"></i>Búsqueda Global de Alumnos</h2>
+                            <p className="text-sm text-gray-600 mt-1">Busca en todos los cursos por nombre, CURP, correo, teléfono, grupo o curso.</p>
+                        </div>
+                        <button onClick={onBack} className="self-start md:self-auto bg-gray-100 text-gray-700 px-4 py-2 rounded-xl hover:bg-gray-200 transition-colors"><i className="fa-solid fa-arrow-left mr-2"></i>Volver al menú</button>
+                    </div>
+
+                    <div className="p-6 bg-emerald-50 border-b border-emerald-100">
+                        <label className="block text-xs font-bold uppercase tracking-wide text-emerald-900 mb-2">Buscar alumno</label>
+                        <div className="relative max-w-3xl">
+                            <i className="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-emerald-500"></i>
+                            <input type="search" autoFocus className="w-full rounded-xl border border-emerald-200 bg-white py-3 pl-11 pr-4 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200" value={search} onChange={e => setSearch(e.target.value)} placeholder="Ej. América, CURP, teléfono o correo..." />
+                        </div>
+                    </div>
+
+                    <div className="p-6">
+                        {!search.trim() ? (
+                            <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center text-sm text-gray-500">Escribe un dato del alumno para comenzar la búsqueda.</div>
+                        ) : resultados.length === 0 ? (
+                            <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center text-sm text-gray-500">No se encontraron alumnos con ese criterio.</div>
+                        ) : (
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left text-sm">
+                                    <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+                                        <tr><th className="p-3">Alumno</th><th className="p-3">CURP / Contacto</th><th className="p-3">Curso</th><th className="p-3">Grupo</th><th className="p-3 text-center">Acción</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        {resultados.map(result => (
+                                            <tr key={`${result.db.id}-${result.participant.id}`} className="border-b border-gray-100 hover:bg-emerald-50/50">
+                                                <td className="p-3 font-semibold text-gray-800">{result.participant.completo || `${result.participant.nombre || ''} ${result.participant.paterno || ''}`.trim() || 'Sin nombre'}</td>
+                                                <td className="p-3 text-xs text-gray-600"><div>{result.participant.curp || 'Sin CURP'}</div><div>{result.participant.telefono || result.participant.celular || result.participant.correo || '-'}</div></td>
+                                                <td className="p-3 text-gray-700"><div className="font-semibold">{result.db.info?.siglas || 'Sin sigla'}</div><div className="text-xs text-gray-500">{result.db.info?.nombreCurso || 'Curso sin nombre'}</div></td>
+                                                <td className="p-3 text-gray-600">{result.group?.nombre || 'Sin grupo'}</td>
+                                                <td className="p-3 text-center"><button onClick={() => openEdit(result)} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-700 transition-colors"><i className="fa-solid fa-pen mr-1"></i>Editar</button></td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </div>
+
+                    {editingStudent && editData && (
+                        <Modal show={Boolean(editingStudent && editData)} onClose={closeEdit} width="max-w-3xl" ariaLabel="Editar alumno desde búsqueda global">
+                            <div className="bg-white rounded-3xl shadow-2xl w-full p-6 overflow-auto max-h-[90vh]">
+                                <div className="flex items-center justify-between mb-4">
+                                    <div><h3 className="text-xl font-bold text-gray-900">Editar Alumno</h3><p className="text-sm text-gray-500">Corrige los datos y guarda los cambios.</p></div>
+                                    <button onClick={closeEdit} className="text-gray-500 hover:text-gray-900" aria-label="Cerrar edición"><i className="fa-solid fa-xmark text-lg"></i></button>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {[
+                                        ['curp', 'CURP'], ['correo', 'Correo'], ['nombre', 'Nombre'], ['paterno', 'Apellido Paterno'],
+                                        ['materno', 'Apellido Materno'], ['telefono', 'Teléfono'], ['municipio', 'Municipio'], ['funcion', 'Función'], ['nivel', 'Nivel']
+                                    ].map(([key, label]) => <div key={key}><label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label><input className="w-full p-3 border border-gray-200 rounded-xl text-sm outline-none focus:border-emerald-500" value={editData[key] || ''} onChange={e => setEditData({ ...editData, [key]: e.target.value })} /></div>)}
+                                    <div className="md:col-span-2"><label className="block text-xs font-semibold text-gray-600 mb-1">Grupo asignado</label><select className="w-full p-3 border border-gray-200 rounded-xl text-sm outline-none focus:border-emerald-500" value={editData.grupoId || ''} onChange={e => setEditData({ ...editData, grupoId: e.target.value })}><option value="">-- Sin grupo --</option>{(basesDeDatos.find(db => db.id === editingStudent.dbId)?.grupos || []).map(group => <option key={group.id} value={group.id}>{group.nombre}</option>)}</select></div>
+                                </div>
+                                <div className="mt-6 flex justify-end gap-3"><button onClick={closeEdit} className="px-5 py-3 bg-gray-100 text-gray-700 rounded-xl font-semibold hover:bg-gray-200">Cancelar</button><button onClick={saveEdit} className="px-5 py-3 bg-emerald-600 text-white rounded-xl font-semibold hover:bg-emerald-700">Guardar cambios</button></div>
+                            </div>
+                        </Modal>
+                    )}
+                </div>
+            );
+        }
+
         function TabDatos({ db, onUpdate }) {
-            const [filtros, setFiltros] = useState({ municipio: '', funcion: '', nivel: '', grupo: 'ALL' });
+            const [filtros, setFiltros] = useState({ municipio: [], funcion: [], nivel: [], grupo: [] });
             const [selectedIds, setSelectedIds] = useState(new Set());
             const [grupoAsignar, setGrupoAsignar] = useState('');
             const [duplicateGroups, setDuplicateGroups] = useState([]);
             const [editingParticipant, setEditingParticipant] = useState(null);
             const [editData, setEditData] = useState(null);
+            const [reparticionAbierta, setReparticionAbierta] = useState(false);
+            const [reparticionModo, setReparticionModo] = useState('todos');
+            const [gruposReparticion, setGruposReparticion] = useState([]);
 
             const municipiosUnicos = useMemo(() => [...new Set(db.participantes.map(p => p.municipio).filter(Boolean))].sort(), [db.participantes]);
 
@@ -3055,14 +3670,27 @@ María López	maria.lopez	Z9y8x7" />
 
             const participantesFiltrados = useMemo(() => {
                 return db.participantes.filter(p => {
-                    if (filtros.municipio && p.municipio !== filtros.municipio) return false;
-                    if (filtros.funcion && p.funcion !== filtros.funcion) return false;
-                    if (filtros.nivel && p.nivel !== filtros.nivel) return false;
-                    if (filtros.grupo === 'NONE' && p.grupoId) return false;
-                    if (filtros.grupo !== 'ALL' && filtros.grupo !== 'NONE' && p.grupoId !== filtros.grupo) return false;
+                    if (filtros.municipio.length > 0 && !filtros.municipio.includes(p.municipio)) return false;
+                    if (filtros.funcion.length > 0 && !filtros.funcion.includes(p.funcion)) return false;
+                    if (filtros.nivel.length > 0 && !filtros.nivel.includes(p.nivel)) return false;
+                    if (filtros.grupo.length > 0 && !filtros.grupo.includes(p.grupoId || 'NONE')) return false;
                     return true;
                 });
             }, [db.participantes, filtros]);
+
+            const participantesPendientes = useMemo(() => {
+                return db.participantes.filter(p => {
+                    if (p.grupoId) return false;
+                    if (filtros.municipio.length > 0 && !filtros.municipio.includes(p.municipio)) return false;
+                    if (filtros.funcion.length > 0 && !filtros.funcion.includes(p.funcion)) return false;
+                    if (filtros.nivel.length > 0 && !filtros.nivel.includes(p.nivel)) return false;
+                    return true;
+                });
+            }, [db.participantes, filtros.municipio, filtros.funcion, filtros.nivel]);
+
+            const actualizarFiltroMultiple = (campo, event) => {
+                setFiltros(prev => ({ ...prev, [campo]: Array.from(event.target.selectedOptions, option => option.value) }));
+            };
 
             const toggleSelectAll = () => {
                 if (selectedIds.size === participantesFiltrados.length && participantesFiltrados.length > 0) setSelectedIds(new Set());
@@ -3098,30 +3726,60 @@ María López	maria.lopez	Z9y8x7" />
                 setSelectedIds(new Set());
                 setGrupoAsignar('');
             };
+            const abrirReparticion = () => {
+                setReparticionModo('todos');
+                setGruposReparticion(db.grupos.map(group => group.id));
+                setReparticionAbierta(true);
+            };
+            const actualizarGruposReparticion = event => {
+                setGruposReparticion(Array.from(event.target.selectedOptions, option => option.value));
+            };
+            const ejecutarReparticion = () => {
+                const gruposDestino = reparticionModo === 'todos'
+                    ? db.grupos
+                    : db.grupos.filter(group => gruposReparticion.includes(group.id));
+
+                if (!gruposDestino.length) return alert('Selecciona al menos un grupo destino.');
+                if (!participantesPendientes.length) return alert('No hay participantes SIN ASIGNAR que coincidan con los filtros actuales.');
+
+                const asignaciones = new Map();
+                participantesPendientes.forEach((participant, index) => {
+                    asignaciones.set(participant.id, gruposDestino[index % gruposDestino.length].id);
+                });
+                const nuevosParticipantes = db.participantes.map(participant => asignaciones.has(participant.id)
+                    ? { ...participant, grupoId: asignaciones.get(participant.id) }
+                    : participant);
+
+                onUpdate({ ...db, participantes: nuevosParticipantes });
+                setReparticionAbierta(false);
+                setGruposReparticion([]);
+                alert(`Se repartieron ${participantesPendientes.length} participantes en ${gruposDestino.length} grupos.`);
+            };
 
             return (
                 <div className="bg-white rounded-2xl shadow-sm h-full min-h-0 flex flex-col overflow-hidden">
                     <div className="sticky top-0 z-30 p-4 border-b border-gray-100 bg-white shadow-sm flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
                         <div className="font-bold text-gray-800 flex items-center gap-2"><i className="fa-solid fa-filter text-blue-500"></i> Filtros:</div>
-                        <select className="p-2 border border-gray-200 bg-gray-50 rounded-lg text-sm w-full md:w-48 focus:border-blue-500 outline-none" value={filtros.grupo} onChange={e=>setFiltros({...filtros, grupo: e.target.value})}>
-                            <option value="ALL">Todos los Grupos</option>
-                            <option value="NONE" className="font-bold text-red-500">-- SIN ASIGNAR --</option>
+                        <select multiple size="1" className="p-2 border border-gray-200 bg-gray-50 rounded-lg text-sm w-full md:w-48 focus:border-blue-500 outline-none" value={filtros.grupo} onChange={e=>actualizarFiltroMultiple('grupo', e)} aria-label="Filtrar por varios grupos">
+                            <option value="" disabled>Todos los Grupos</option>
+                            <option value="NONE" className="font-bold text-red-500">Sin asignar</option>
                             {db.grupos.map(g => <option key={g.id} value={g.id}>{g.nombre}</option>)}
                         </select>
-                        <select className="p-2 border border-gray-200 bg-gray-50 rounded-lg text-sm w-full md:w-48 focus:border-blue-500 outline-none" value={filtros.municipio} onChange={e=>setFiltros({...filtros, municipio: e.target.value})}>
-                            <option value="">Todos (Municipios)</option>
+                        <select multiple size="1" className="p-2 border border-gray-200 bg-gray-50 rounded-lg text-sm w-full md:w-48 focus:border-blue-500 outline-none" value={filtros.municipio} onChange={e=>actualizarFiltroMultiple('municipio', e)} aria-label="Filtrar por varios municipios">
+                            <option value="" disabled>Todos (Municipios)</option>
                             {municipiosUnicos.map(m => <option key={m} value={m}>{m}</option>)}
                         </select>
-                        <select className="p-2 border border-gray-200 bg-gray-50 rounded-lg text-sm w-full md:w-48 focus:border-blue-500 outline-none" value={filtros.funcion} onChange={e=>setFiltros({...filtros, funcion: e.target.value})}>
-                            <option value="">Todas (Funciones)</option>
+                        <select multiple size="1" className="p-2 border border-gray-200 bg-gray-50 rounded-lg text-sm w-full md:w-48 focus:border-blue-500 outline-none" value={filtros.funcion} onChange={e=>actualizarFiltroMultiple('funcion', e)} aria-label="Filtrar por varias funciones">
+                            <option value="" disabled>Todas (Funciones)</option>
                             {funcionesUnicas.map(f => <option key={f} value={f}>{f}</option>)}
                         </select>
-                        <select className="p-2 border border-gray-200 bg-gray-50 rounded-lg text-sm w-full md:w-48 focus:border-blue-500 outline-none" value={filtros.nivel} onChange={e=>setFiltros({...filtros, nivel: e.target.value})}>
-                            <option value="">Todos (Niveles)</option>
+                        <select multiple size="1" className="p-2 border border-gray-200 bg-gray-50 rounded-lg text-sm w-full md:w-48 focus:border-blue-500 outline-none" value={filtros.nivel} onChange={e=>actualizarFiltroMultiple('nivel', e)} aria-label="Filtrar por varios niveles">
+                            <option value="" disabled>Todos (Niveles)</option>
                             {nivelesUnicos.map(n => <option key={n} value={n}>{n}</option>)}
                         </select>
-                        <button onClick={() => setFiltros({municipio:'', funcion:'', nivel:'', grupo:'ALL'})} className="text-sm text-blue-600 hover:text-blue-800 font-semibold px-2">Limpiar Filtros</button>
+                        <button onClick={() => setFiltros({municipio:[], funcion:[], nivel:[], grupo:[]})} className="text-sm text-blue-600 hover:text-blue-800 font-semibold px-2">Limpiar Filtros</button>
                         <button onClick={detectDuplicates} className="text-sm text-yellow-700 bg-yellow-100 border border-yellow-200 rounded-lg px-3 py-1.5 font-bold hover:bg-yellow-200 transition-colors">Detectar duplicados</button>
+                        <button onClick={abrirReparticion} className="text-sm text-white bg-indigo-600 border border-indigo-600 rounded-lg px-3 py-1.5 font-bold hover:bg-indigo-700 transition-colors"><i className="fa-solid fa-scale-balanced mr-1"></i> Repartir equitativamente</button>
                         {duplicateGroups.length > 0 && <button onClick={() => setDuplicateGroups([])} className="text-sm text-gray-600 bg-white border border-gray-200 rounded-lg px-3 py-1.5 font-semibold hover:bg-gray-100 transition-colors">Limpiar duplicados</button>}
                     </div>
 
@@ -3182,6 +3840,47 @@ María López	maria.lopez	Z9y8x7" />
                     <div className="p-3 bg-white border-t border-gray-200 text-xs text-gray-500 text-center font-medium shadow-inner">
                         Mostrando {participantesFiltrados.length} registros de {db.participantes.length} en total.
                     </div>
+
+                    {reparticionAbierta && (
+                        <Modal show={reparticionAbierta} onClose={() => setReparticionAbierta(false)} width="max-w-xl" ariaLabel="Repartición equitativa">
+                            <div className="bg-white rounded-2xl shadow-2xl w-full p-6">
+                                <div className="flex items-center justify-between mb-2">
+                                    <div>
+                                        <h3 className="text-xl font-bold text-gray-900"><i className="fa-solid fa-scale-balanced text-indigo-600 mr-2"></i>Repartición equitativa</h3>
+                                        <p className="text-sm text-gray-500 mt-1">Solo se repartirán participantes SIN ASIGNAR que coincidan con los filtros de municipio, función y nivel.</p>
+                                    </div>
+                                    <button onClick={() => setReparticionAbierta(false)} className="text-gray-500 hover:text-gray-900" aria-label="Cerrar repartición"><i className="fa-solid fa-xmark text-lg"></i></button>
+                                </div>
+
+                                <div className="mt-5 space-y-3">
+                                    <label className="flex items-start gap-3 rounded-xl border border-indigo-200 bg-indigo-50 p-4 cursor-pointer">
+                                        <input type="radio" name="reparticion-modo" value="todos" checked={reparticionModo === 'todos'} onChange={() => setReparticionModo('todos')} className="mt-1" />
+                                        <span><strong className="block text-indigo-900">Todos los grupos</strong><small className="text-indigo-700">Usar los {db.grupos.length} grupos existentes del curso.</small></span>
+                                    </label>
+                                    <label className="flex items-start gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4 cursor-pointer">
+                                        <input type="radio" name="reparticion-modo" value="seleccionados" checked={reparticionModo === 'seleccionados'} onChange={() => setReparticionModo('seleccionados')} className="mt-1" />
+                                        <span><strong className="block text-gray-800">Seleccionar grupos</strong><small className="text-gray-500">Elegir manualmente los grupos destino.</small></span>
+                                    </label>
+                                </div>
+
+                                {reparticionModo === 'seleccionados' && (
+                                    <select multiple size="5" className="mt-3 w-full rounded-xl border border-gray-300 bg-white p-3 text-sm outline-none focus:border-indigo-500" value={gruposReparticion} onChange={actualizarGruposReparticion} aria-label="Grupos destino para repartir">
+                                        {db.grupos.map(group => <option key={group.id} value={group.id}>{group.nombre} ({group.asesor})</option>)}
+                                    </select>
+                                )}
+
+                                <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+                                    <strong>{participantesPendientes.length} participantes</strong> pendientes para repartir.
+                                    <span className="block mt-1">Se distribuirán en partes lo más iguales posible, sin modificar participantes ya asignados.</span>
+                                </div>
+
+                                <div className="mt-6 flex justify-end gap-3">
+                                    <button onClick={() => setReparticionAbierta(false)} className="px-5 py-2.5 bg-gray-100 text-gray-700 rounded-xl font-semibold hover:bg-gray-200 transition-colors">Cancelar</button>
+                                    <button onClick={ejecutarReparticion} className="px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-colors"><i className="fa-solid fa-check mr-2"></i>Repartir ahora</button>
+                                </div>
+                            </div>
+                        </Modal>
+                    )}
 
                     {duplicateGroups.length > 0 && (
                         <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-2xl space-y-4">
@@ -4801,6 +5500,20 @@ María López	maria.lopez	Z9y8x7" />
                 onUpdate({ ...db, semanasSeguimiento: newSemanas });
             };
 
+            const moveSeguimientoCheckboxFocus = (event) => {
+                const navigationKeys = ['ArrowDown', 'ArrowUp', 'ArrowRight', 'ArrowLeft'];
+                if (!navigationKeys.includes(event.key)) return;
+
+                const checkboxes = Array.from(document.querySelectorAll('.seguimiento-checkbox:not(:disabled)'));
+                const currentIndex = checkboxes.indexOf(event.currentTarget);
+                const direction = event.key === 'ArrowDown' || event.key === 'ArrowRight' ? 1 : -1;
+                const nextCheckbox = checkboxes[currentIndex + direction];
+                if (!nextCheckbox) return;
+
+                event.preventDefault();
+                nextCheckbox.focus();
+            };
+
             const procesarImportacion = () => {
                 if(!activeSem || !importText.trim()) return;
                 
@@ -5102,9 +5815,9 @@ María López	maria.lopez	Z9y8x7" />
                                                     
                                                     <td className="text-[10px]">{p.correo}</td><td className="text-[10px]">{g.asesor}</td><td className="font-bold text-[10px]">{g.nombre}</td>
                                                     
-                                                    <td><input type="checkbox" disabled={!canEditCore} checked={d.conf} onChange={e=>updatePData(p.id, 'conf', e.target.checked)} className={`w-4 h-4 ${!canEditCore?'opacity-50':''}`} /></td>
+                                                    <td><input type="checkbox" disabled={!canEditCore} checked={d.conf} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>updatePData(p.id, 'conf', e.target.checked)} className={`seguimiento-checkbox w-4 h-4 ${!canEditCore?'opacity-50':''}`} /></td>
                                                     
-                                                    {aSes.map(i => <td key={`as-${i}`}><input type="checkbox" disabled={!canEditCore} checked={!!getEffectiveAsis(p.id)[i]} onChange={e=>updatePData(p.id, 'asis', e.target.checked, i)} className={`w-4 h-4 ${!canEditCore?'opacity-50':''}`}/></td>)}
+                                                    {aSes.map(i => <td key={`as-${i}`}><input type="checkbox" disabled={!canEditCore} checked={!!getEffectiveAsis(p.id)[i]} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>updatePData(p.id, 'asis', e.target.checked, i)} className={`seguimiento-checkbox w-4 h-4 ${!canEditCore?'opacity-50':''}`}/></td>)}
                                                     
                                                     <td className="font-bold text-center bg-cyan-100 text-cyan-900">{db.info.numSesiones > 0 ? formatPercent((Object.keys(getEffectiveAsis(p.id)).length / db.info.numSesiones * 100).toFixed(2)) : '0%'}</td>
                                                     
@@ -5128,7 +5841,7 @@ María López	maria.lopez	Z9y8x7" />
                                                                 <input type="number" disabled={!canEditCore} className={`w-full h-full min-h-[30px] text-center outline-none bg-transparent font-bold text-gray-700 transition-colors ${canEditCore?'focus:bg-white focus:ring-2 focus:ring-blue-500':'opacity-80 cursor-not-allowed'}`} value={d.paCal[i]!==undefined?d.paCal[i]:''} onBlur={e=>updatePData(p.id, 'paCal', parseFloatSafe(e.target.value), i)} onChange={e=>updatePData(p.id, 'paCal', e.target.value, i)} />
                                                             </td>
                                                             <td className="text-center p-0">
-                                                                <input type="checkbox" disabled={!canEditManual} checked={!!(d.paRem && d.paRem[i])} onChange={e=>updatePData(p.id, 'paRem', e.target.checked, i)} className={`w-4 h-4 cursor-pointer ${!canEditManual?'opacity-50 cursor-not-allowed':''}`}/>
+                                                                <input type="checkbox" disabled={!canEditManual} checked={!!(d.paRem && d.paRem[i])} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>updatePData(p.id, 'paRem', e.target.checked, i)} className={`seguimiento-checkbox w-4 h-4 cursor-pointer ${!canEditManual?'opacity-50 cursor-not-allowed':''}`}/>
                                                             </td>
                                                         </React.Fragment>
                                                     ))}
@@ -5153,7 +5866,7 @@ María López	maria.lopez	Z9y8x7" />
                                                                 <input type="number" disabled={!canEditCore} className={`w-full h-full min-h-[30px] text-center outline-none bg-transparent font-bold text-gray-700 transition-colors ${canEditCore?'focus:bg-white focus:ring-2 focus:ring-blue-500':'opacity-80 cursor-not-allowed'}`} value={d.actCal[i]!==undefined?d.actCal[i]:''} onBlur={e=>updatePData(p.id, 'actCal', parseFloatSafe(e.target.value), i)} onChange={e=>updatePData(p.id, 'actCal', e.target.value, i)} />
                                                             </td>
                                                             <td className="text-center p-0">
-                                                                <input type="checkbox" disabled={!canEditManual} checked={!!(d.actRem && d.actRem[i])} onChange={e=>updatePData(p.id, 'actRem', e.target.checked, i)} className={`w-4 h-4 cursor-pointer ${!canEditManual?'opacity-50 cursor-not-allowed':''}`}/>
+                                                                <input type="checkbox" disabled={!canEditManual} checked={!!(d.actRem && d.actRem[i])} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>updatePData(p.id, 'actRem', e.target.checked, i)} className={`seguimiento-checkbox w-4 h-4 cursor-pointer ${!canEditManual?'opacity-50 cursor-not-allowed':''}`}/>
                                                             </td>
                                                         </React.Fragment>
                                                     ))}
@@ -5161,12 +5874,12 @@ María López	maria.lopez	Z9y8x7" />
                                                     <td className="font-black bg-blue-50 text-blue-900 text-sm">{calFinal}</td>
                                                     <td className={`font-black text-[10px] bg-gray-50 uppercase tracking-widest ${status==='ACREDITADO'?'text-green-600':'text-red-500'}`}>{status}</td>
                                                     
-                                                    <td><input type="checkbox" disabled={!canEditCore} checked={d.encEst} onChange={e=>updatePData(p.id, 'encEst', e.target.checked)} className={`w-4 h-4 ${!canEditCore?'opacity-50':''}`}/></td>
-                                                    <td><input type="checkbox" disabled={!canEditCore} checked={d.encInst} onChange={e=>updatePData(p.id, 'encInst', e.target.checked)} className={`w-4 h-4 ${!canEditCore?'opacity-50':''}`}/></td>
+                                                    <td><input type="checkbox" disabled={!canEditCore} checked={d.encEst} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>updatePData(p.id, 'encEst', e.target.checked)} className={`seguimiento-checkbox w-4 h-4 ${!canEditCore?'opacity-50':''}`}/></td>
+                                                    <td><input type="checkbox" disabled={!canEditCore} checked={d.encInst} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>updatePData(p.id, 'encInst', e.target.checked)} className={`seguimiento-checkbox w-4 h-4 ${!canEditCore?'opacity-50':''}`}/></td>
 
-                                                    <td className="bg-yellow-50"><input type="checkbox" disabled={!canEditManual} checked={d.msgGrp} onChange={e=>updatePData(p.id, 'msgGrp', e.target.checked)} className={`w-4 h-4 ${!canEditManual?'opacity-50 cursor-not-allowed':''}`}/></td>
-                                                    <td className="bg-yellow-50"><input type="checkbox" disabled={!canEditManual} checked={d.msgPer} onChange={e=>updatePData(p.id, 'msgPer', e.target.checked)} className={`w-4 h-4 ${!canEditManual?'opacity-50 cursor-not-allowed':''}`}/></td>
-                                                    <td className="bg-yellow-50"><input type="checkbox" disabled={!canEditManual} checked={d.llam} onChange={e=>updatePData(p.id, 'llam', e.target.checked)} className={`w-4 h-4 ${!canEditManual?'opacity-50 cursor-not-allowed':''}`}/></td>
+                                                    <td className="bg-yellow-50"><input type="checkbox" disabled={!canEditManual} checked={d.msgGrp} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>updatePData(p.id, 'msgGrp', e.target.checked)} className={`seguimiento-checkbox w-4 h-4 ${!canEditManual?'opacity-50 cursor-not-allowed':''}`}/></td>
+                                                    <td className="bg-yellow-50"><input type="checkbox" disabled={!canEditManual} checked={d.msgPer} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>updatePData(p.id, 'msgPer', e.target.checked)} className={`seguimiento-checkbox w-4 h-4 ${!canEditManual?'opacity-50 cursor-not-allowed':''}`}/></td>
+                                                    <td className="bg-yellow-50"><input type="checkbox" disabled={!canEditManual} checked={d.llam} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>updatePData(p.id, 'llam', e.target.checked)} className={`seguimiento-checkbox w-4 h-4 ${!canEditManual?'opacity-50 cursor-not-allowed':''}`}/></td>
                                                     <td className="bg-yellow-50 p-0">
                                                         <input type="text" disabled={!canEditManual} className={`w-full h-full min-h-[30px] px-3 text-xs outline-none bg-transparent border-none transition-colors ${canEditManual?'focus:bg-white focus:ring-2 focus:ring-yellow-500':'opacity-50 bg-gray-50 cursor-not-allowed'}`} placeholder={canEditManual?"Escribir observación...":"Bloqueado..."} value={d.obs} onChange={e=>updatePData(p.id, 'obs', e.target.value)} />
                                                     </td>
