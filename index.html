@@ -1511,7 +1511,7 @@
                                             <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-[10px] text-slate-200">v8.3</div>
+                                        <div className="text-[10px] text-slate-200">v8.4</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -1519,7 +1519,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v8.3</div>
+                                        <div className="text-xs text-slate-200">v8.4</div>
                                     </div>
                                 )}
                             </div>
@@ -3613,6 +3613,7 @@ María López	maria.lopez	Z9y8x7" />
         function TabDatos({ db, onUpdate }) {
             const [filtros, setFiltros] = useState({ municipio: [], funcion: [], nivel: [], grupo: [] });
             const [selectedIds, setSelectedIds] = useState(new Set());
+            const [bulkSelectionText, setBulkSelectionText] = useState('');
             const [grupoAsignar, setGrupoAsignar] = useState('');
             const [duplicateGroups, setDuplicateGroups] = useState([]);
             const [editingParticipant, setEditingParticipant] = useState(null);
@@ -3723,6 +3724,48 @@ María López	maria.lopez	Z9y8x7" />
                 checkboxes[nextIndex].focus();
             };
 
+            const seleccionarPorLista = () => {
+                const candidatos = (bulkSelectionText || '')
+                    .split(/[\n,;\t|]+/)
+                    .map(item => item.trim())
+                    .filter(Boolean);
+
+                if (!candidatos.length) {
+                    alert('Pega al menos un CURP, correo o usuario para seleccionar participantes.');
+                    return;
+                }
+
+                const matchSet = new Set();
+                candidatos.forEach(candidato => {
+                    const normalized = normalizeText(candidato);
+                    const emailValue = candidato.trim().toLowerCase();
+
+                    db.participantes.forEach(participant => {
+                        const curpValue = normalizeText(participant.curp || '');
+                        const correoValue = (participant.correo || '').trim().toLowerCase();
+                        const usuarioValue = normalizeText(participant.usuario || getMoodleUsername(participant.curp) || '');
+
+                        if (
+                            normalized && (
+                                curpValue === normalized ||
+                                correoValue === emailValue ||
+                                usuarioValue === normalized
+                            )
+                        ) {
+                            matchSet.add(participant.id);
+                        }
+                    });
+                });
+
+                if (!matchSet.size) {
+                    alert('No se encontraron coincidencias con los CURP, correos o usuarios pegados.');
+                    return;
+                }
+
+                setSelectedIds(prev => new Set([...prev, ...matchSet]));
+                setBulkSelectionText('');
+            };
+
             const aplicarGrupoMasivo = () => {
                 if (!grupoAsignar) return alert("Selecciona un grupo primero");
                 const nuevosParticipantes = db.participantes.map(p => selectedIds.has(p.id) ? { ...p, grupoId: grupoAsignar } : p);
@@ -3790,6 +3833,25 @@ María López	maria.lopez	Z9y8x7" />
                         <button onClick={detectDuplicates} className="text-sm text-yellow-700 bg-yellow-100 border border-yellow-200 rounded-lg px-3 py-1.5 font-bold hover:bg-yellow-200 transition-colors">Detectar duplicados</button>
                         <button onClick={abrirReparticion} className="text-sm text-white bg-indigo-600 border border-indigo-600 rounded-lg px-3 py-1.5 font-bold hover:bg-indigo-700 transition-colors"><i className="fa-solid fa-scale-balanced mr-1"></i> Repartir equitativamente</button>
                         {duplicateGroups.length > 0 && <button onClick={() => setDuplicateGroups([])} className="text-sm text-gray-600 bg-white border border-gray-200 rounded-lg px-3 py-1.5 font-semibold hover:bg-gray-100 transition-colors">Limpiar duplicados</button>}
+                    </div>
+
+                    <div className="shrink-0 border-b border-gray-200 bg-white p-3">
+                        <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1.4fr_0.9fr]">
+                            <div>
+                                <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-blue-700">Selección masiva por CURP / Correo / Usuario</label>
+                                <textarea
+                                    rows="2"
+                                    value={bulkSelectionText}
+                                    onChange={e => setBulkSelectionText(e.target.value)}
+                                    placeholder="Pega aquí varios CURP, correos o usuarios separados por enter, coma, punto y coma o tabulador. Ejemplo:&#10;ABCD123456...&#10;correo@x.com&#10;juan.perez" 
+                                    className="w-full resize-none rounded-xl border border-blue-200 bg-blue-50 p-2.5 text-xs font-mono text-gray-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                                />
+                            </div>
+                            <div className="flex items-end gap-2">
+                                <button onClick={seleccionarPorLista} className="h-[42px] rounded-xl bg-blue-600 px-4 text-sm font-bold text-white hover:bg-blue-700 transition-colors">Seleccionar coincidencias</button>
+                                <button onClick={() => setBulkSelectionText('')} className="h-[42px] rounded-xl border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-600 hover:bg-gray-100 transition-colors">Limpiar</button>
+                            </div>
+                        </div>
                     </div>
 
                     {selectedIds.size > 0 && (
@@ -4224,7 +4286,7 @@ María López	maria.lopez	Z9y8x7" />
                 downloadCSV(`Moodle_${db.info.siglas}.csv`, [head.join(','), ...rows].join('\n'));
             };
 
-            const expGoogleCSV = () => {
+            const getGoogleContactsCsvData = () => {
                 const headers = ['First Name', 'Last Name', 'Name Prefix', 'Name Suffix', 'Organization Name', 'Organization Title', 'Labels', 'E-mail 1 - Label', 'E-mail 1 - Value', 'Phone 1 - Label', 'Phone 1 - Value'];
                 const orgName = `${db.info.siglas} ${db.info.idEstado} ${db.info.anio.slice(-2)}`;
                 const rows = db.participantes.map(p => {
@@ -4233,9 +4295,17 @@ María López	maria.lopez	Z9y8x7" />
                     const labels = `${orgName} ::: ${orgName} ${orgTitle}`;
                     return [
                         p.nombre, `${p.paterno} ${p.materno}`.trim(), db.info.tipoFormacion, db.info.idEstado, orgName, orgTitle, labels, '*', p.correo, 'Mobile', p.telefono
-                    ].map(v => `"${(v||'').toString().replace(/"/g, '""')}"`).join(',');
+                    ];
                 });
-                downloadCSV(`Google_Contacts_${db.info.siglas}.csv`, [headers.join(','), ...rows].join('\n'));
+                const csvContent = [headers.join(','), ...rows.map(row => row.map(v => `"${(v || '').toString().replace(/"/g, '""')}"`).join(','))].join('\n');
+                return { headers, rows, csvContent };
+            };
+
+            const googleContactsPreviewRows = useMemo(() => getGoogleContactsCsvData().rows.slice(0, 8), [db.participantes, db.grupos, db.info]);
+
+            const expGoogleCSV = () => {
+                const { csvContent } = getGoogleContactsCsvData();
+                downloadCSV(`Google_Contacts_${db.info.siglas}.csv`, csvContent);
             };
 
             const expCorreosTSV = () => {
@@ -4280,10 +4350,45 @@ María López	maria.lopez	Z9y8x7" />
                                 </div>
                             )}
                             {subTab === 'google' && !isCoordinador && !isAsesor && (
-                                <div className="no-print max-w-2xl">
-                                    <div className="flex items-center gap-4 mb-6 text-blue-900"><div className="w-12 h-12 bg-red-100 text-red-600 rounded-xl flex items-center justify-center"><i className="fa-brands fa-google text-2xl"></i></div><h2 className="text-3xl font-bold">Google Contacts</h2></div>
-                                    <p className="text-gray-600 mb-8 leading-relaxed">Genera un CSV directo para importar en Google Contacts. Crea automáticamente las etiquetas necesarias basadas en los grupos y estado del curso para segmentar tus envíos desde Gmail.</p>
-                                    <button onClick={expGoogleCSV} className="bg-blue-600 text-white px-8 py-4 rounded-xl shadow-lg shadow-blue-500/30 flex items-center gap-3 hover:bg-blue-700 font-bold text-lg transition-transform active:scale-95"><i className="fa-solid fa-file-csv"></i> Descargar archivo CSV</button>
+                                <div className="no-print max-w-5xl space-y-6">
+                                    <div className="flex items-center gap-4 text-blue-900"><div className="w-12 h-12 bg-red-100 text-red-600 rounded-xl flex items-center justify-center"><i className="fa-brands fa-google text-2xl"></i></div><h2 className="text-3xl font-bold">Google Contacts</h2></div>
+                                    <p className="text-gray-600 leading-relaxed">Genera un CSV directo para importar en Google Contacts. Crea automáticamente las etiquetas necesarias basadas en los grupos y estado del curso para segmentar tus envíos desde Gmail.</p>
+                                    <div className="flex flex-wrap gap-3">
+                                        <button onClick={expGoogleCSV} className="bg-blue-600 text-white px-8 py-4 rounded-xl shadow-lg shadow-blue-500/30 flex items-center gap-3 hover:bg-blue-700 font-bold text-lg transition-transform active:scale-95"><i className="fa-solid fa-file-csv"></i> Descargar archivo CSV</button>
+                                    </div>
+
+                                    <div className="rounded-2xl border border-gray-200 bg-gray-50 overflow-hidden shadow-sm">
+                                        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-white">
+                                            <h3 className="font-bold text-gray-700 text-sm uppercase tracking-wide">Vista previa del CSV</h3>
+                                            <span className="text-xs text-gray-500">Mostrando {googleContactsPreviewRows.length} de {db.participantes.length} registros</span>
+                                        </div>
+                                        <div className="overflow-x-auto max-h-[420px]">
+                                            <table className="min-w-full text-left text-xs border-collapse">
+                                                <thead className="bg-gray-100 text-gray-700 sticky top-0 z-10">
+                                                    <tr>
+                                                        {getGoogleContactsCsvData().headers.map((header, idx) => (
+                                                            <th key={idx} className="px-3 py-2 border-b border-r border-gray-200 whitespace-nowrap font-bold">{header}</th>
+                                                        ))}
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {googleContactsPreviewRows.length === 0 ? (
+                                                        <tr>
+                                                            <td colSpan={getGoogleContactsCsvData().headers.length} className="px-3 py-6 text-center text-gray-400">No hay participantes para exportar.</td>
+                                                        </tr>
+                                                    ) : (
+                                                        googleContactsPreviewRows.map((row, rowIndex) => (
+                                                            <tr key={rowIndex} className="border-b border-gray-200 hover:bg-white">
+                                                                {row.map((cell, colIndex) => (
+                                                                    <td key={`${rowIndex}-${colIndex}`} className="px-3 py-2 border-r border-gray-200 align-top max-w-[180px] truncate" title={cell || ''}>{cell || '-'}</td>
+                                                                ))}
+                                                            </tr>
+                                                        ))
+                                                    )}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
                                 </div>
                             )}
                             {subTab === 'correos' && !isCoordinador && !isAsesor && (
