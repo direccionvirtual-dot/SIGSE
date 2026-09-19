@@ -711,15 +711,15 @@
             const [anio, setAnio] = useState(new Date().getFullYear().toString());
             const [estadoSeleccionado, setEstadoSeleccionado] = useState('');
             const [idEstado, setIdEstado] = useState('');
-            const [sectorFormativoTipo, setSectorFormativoTipo] = useState('Educación Continua');
+            const [sectorFormativoTipo, setSectorFormativoTipo] = useState('');
             const [sectorFormativoOtro, setSectorFormativoOtro] = useState('');
-            const [tipoFormacion, setTipoFormacion] = useState('Curso');
+            const [tipoFormacion, setTipoFormacion] = useState('');
             const [siglas, setSiglas] = useState('');
             const [idCurso, setIdCurso] = useState('');
             const [nombreCurso, setNombreCurso] = useState('');
             const [coordinadorIds, setCoordinadorIds] = useState([]); 
             const [horas, setHoras] = useState('40'); // RESTAURADO
-            const [modalidad, setModalidad] = useState('A distancia'); // RESTAURADO
+            const [modalidad, setModalidad] = useState('');
             const [moodlePass, setMoodlePass] = useState(`Epos.${new Date().getFullYear()}`);
             
             const [numSesiones, setNumSesiones] = useState(6);
@@ -872,7 +872,7 @@
             }, [personalGlobal, coursesPersonalFilter]);
 
             const guardarBaseDeDatos = () => {
-                if (!estadoSeleccionado || !siglas) { showToast("Faltan datos mínimos del curso (estado o siglas).", 'error'); return; }
+                if (!sectorFormativoTipo || !tipoFormacion || !modalidad || !estadoSeleccionado || !siglas) { showToast("Selecciona el sector formativo, tipo de formación, modalidad, estado y siglas.", 'error'); return; }
                 const sectorFormativoFinal = sectorFormativoTipo === 'Otros' ? (sectorFormativoOtro.trim() || 'Otros') : sectorFormativoTipo;
                 const nuevaBD = {
                     id: Date.now().toString(),
@@ -889,7 +889,7 @@
                 trackRecentOffer(nuevaBD.id);
                 setAppView('workspace');
                 setIdCurso(''); setSiglas(''); setNombreCurso(''); setTextoPegado(''); setParticipantesProcesados([]); setCoordinadorIds([]);
-                setSectorFormativoTipo('Educación Continua'); setSectorFormativoOtro('');
+                setSectorFormativoTipo(''); setSectorFormativoOtro(''); setTipoFormacion(''); setModalidad('');
                 showToast(participantesProcesados.length > 0 ? 'Curso creado correctamente.' : 'Curso creado sin participantes; puedes incorporarlos después.', 'success');
             };
 
@@ -1511,7 +1511,7 @@
                                             <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-[10px] text-slate-200">v8.2</div>
+                                        <div className="text-[10px] text-slate-200">v8.3</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -1519,7 +1519,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v8.2</div>
+                                        <div className="text-xs text-slate-200">v8.3</div>
                                     </div>
                                 )}
                             </div>
@@ -1722,6 +1722,7 @@
                                                         <div>
                                                             <label className="block text-xs font-bold text-gray-600 mb-1">Sector Formativo</label>
                                                             <select className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:border-blue-500" value={sectorFormativoTipo} onChange={e => setSectorFormativoTipo(e.target.value)}>
+                                                                <option value="">- Seleccionar -</option>
                                                                 {SECTORES_FORMATIVOS.map(op => <option key={op} value={op}>{op}</option>)}
                                                             </select>
                                                         </div>
@@ -1733,7 +1734,7 @@
                                                         )}
                                                         <div className="col-span-2">
                                                             <label className="block text-xs font-bold text-gray-600 mb-1">Tipo de Formación</label>
-                                                            <select className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:border-blue-500" value={tipoFormacion} onChange={e=>setTipoFormacion(e.target.value)}>{TIPOS_FORMACION.map(t=><option key={t} value={t}>{t}</option>)}</select>
+                                                            <select className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:border-blue-500" value={tipoFormacion} onChange={e=>setTipoFormacion(e.target.value)}><option value="">- Seleccionar -</option>{TIPOS_FORMACION.map(t=><option key={t} value={t}>{t}</option>)}</select>
                                                         </div>
                                                         <div><label className="block text-xs font-bold text-gray-600 mb-1">Año</label><input type="text" className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:border-blue-500" value={anio} onChange={e=>setAnio(e.target.value)}/></div>
                                                         <div>
@@ -1748,6 +1749,7 @@
                                                         <div>
                                                             <label className="block text-xs font-bold text-gray-600 mb-1">Modalidad</label>
                                                             <select className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:border-blue-500" value={modalidad} onChange={e=>setModalidad(e.target.value)}>
+                                                                <option value="">- Seleccionar -</option>
                                                                 <option value="A distancia">A distancia</option>
                                                                 <option value="Mixta">Mixta</option>
                                                                 <option value="Presencial">Presencial</option>
@@ -2817,7 +2819,7 @@ María López	maria.lopez	Z9y8x7" />
                             <button onClick={()=>setTab('seguimiento')} className={`px-4 py-1.5 rounded-lg transition-colors whitespace-nowrap ${tab==='seguimiento'?'bg-yellow-400 text-blue-900 font-bold shadow':'hover:bg-blue-700 text-blue-100'}`}><i className="fa-solid fa-list-check"></i> Seguimiento</button>
                             {isPersonal && <button onClick={()=>setTab('control')} className={`px-4 py-1.5 rounded-lg transition-colors whitespace-nowrap ${tab==='control'?'bg-white text-blue-900 shadow':'hover:bg-blue-700 text-blue-100'}`}><i className="fa-solid fa-calendar-days"></i> Control</button>}
                             
-                            {(isAdmin || isCoordinador) && <button onClick={()=>setTab('exportar')} className={`px-4 py-1.5 rounded-lg transition-colors whitespace-nowrap ${tab==='exportar'?'bg-white text-blue-900 shadow':'hover:bg-blue-700 text-blue-100'}`}><i className="fa-solid fa-download"></i> Exportar</button>}
+                            {(isAdmin || isCoordinador || isAsesor) && <button onClick={()=>setTab('exportar')} className={`px-4 py-1.5 rounded-lg transition-colors whitespace-nowrap ${tab==='exportar'?'bg-white text-blue-900 shadow':'hover:bg-blue-700 text-blue-100'}`}><i className="fa-solid fa-download"></i> Exportar</button>}
                         </div>
                     </header>
 
@@ -2827,7 +2829,7 @@ María López	maria.lopez	Z9y8x7" />
                         {tab === 'pegadoExcel' && isAdmin && <TabPegadoExcel db={db} onUpdate={onUpdate} textoPegado={textoPegado} setTextoPegado={setTextoPegado} participantesProcesados={participantesProcesados} setParticipantesProcesados={setParticipantesProcesados} procesarTextoPegado={procesarTextoPegado} descargarPlantillaBase={descargarPlantillaBase} />}
                         {tab === 'grupos' && isAdmin && <TabGrupos db={db} onUpdate={onUpdate} asesoresGlobales={asesoresGlobales} />}
                         {tab === 'datos' && isAdmin && <TabDatos db={db} onUpdate={onUpdate} />}
-                        {tab === 'exportar' && (isAdmin || isCoordinador) && <TabExportar db={db} onUpdate={onUpdate} isAdmin={isAdmin} isCoordinador={isCoordinador} />}
+                        {tab === 'exportar' && (isAdmin || isCoordinador || isAsesor) && <TabExportar db={db} onUpdate={onUpdate} isAdmin={isAdmin} isCoordinador={isCoordinador} isAsesor={isAsesor} asesorGrupoId={modoPersonal.grupoId} />}
                         {tab === 'seguimiento' && <TabSeguimiento db={db} onUpdate={onUpdate} isAsesor={isAsesor} isCoordinador={isCoordinador} isAdmin={isAdmin} asesorGrupoId={modoPersonal.grupoId} />}
                         {tab === 'control' && isPersonal && <ControlConsulta db={db} zoomAccounts={zoomAccounts} isAsesor={isAsesor} grupoId={modoPersonal.grupoId} />}
                     </div>
@@ -3974,8 +3976,8 @@ María López	maria.lopez	Z9y8x7" />
             );
         }
 
-        function TabExportar({ db, onUpdate, isAdmin, isCoordinador }) {
-            const [subTab, setSubTab] = useState(isCoordinador ? 'asistencia' : 'moodle');
+        function TabExportar({ db, onUpdate, isAdmin, isCoordinador, isAsesor, asesorGrupoId }) {
+            const [subTab, setSubTab] = useState(isCoordinador || isAsesor ? 'asistencia' : 'moodle');
 
             const [consultaUrl, setConsultaUrl] = useState(db.info.consultaUrl || 'https://escueladeposgrados.edu.mx/consulta/index.html?Folio=');
             const [firmadoPor, setFirmadoPor] = useState(db.info.firmadoPor || 'RIGOBERTO RODRIGUEZ BUENO');
@@ -4252,7 +4254,7 @@ María López	maria.lopez	Z9y8x7" />
                     <div className="flex flex-1 overflow-hidden">
                         <div className="w-72 bg-gray-50 border-r border-gray-100 p-6 space-y-3 no-print flex-shrink-0 overflow-y-auto">
                             <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-6 border-b border-gray-200 pb-3">Formatos Disponibles</h3>
-                            {!isCoordinador && (
+                            {!isCoordinador && !isAsesor && (
                                 <>
                                     <button onClick={()=>setSubTab('moodle')} className={`w-full text-left px-4 py-3.5 rounded-xl text-sm flex items-center gap-3 transition-colors ${subTab==='moodle'?'bg-blue-600 text-white font-bold shadow-md':'text-gray-600 hover:bg-white hover:shadow-sm'}`}><i className="fa-solid fa-graduation-cap w-5 text-center"></i> Moodle LMS</button>
                                     <button onClick={()=>setSubTab('google')} className={`w-full text-left px-4 py-3.5 rounded-xl text-sm flex items-center gap-3 transition-colors ${subTab==='google'?'bg-blue-600 text-white font-bold shadow-md':'text-gray-600 hover:bg-white hover:shadow-sm'}`}><i className="fa-brands fa-google w-5 text-center"></i> Google Contacts</button>
@@ -4260,7 +4262,7 @@ María López	maria.lopez	Z9y8x7" />
                                 </>
                             )}
                             <button onClick={()=>setSubTab('asistencia')} className={`w-full text-left px-4 py-3.5 rounded-xl text-sm flex items-center gap-3 transition-colors ${subTab==='asistencia'?'bg-blue-600 text-white font-bold shadow-md':'text-gray-600 hover:bg-white hover:shadow-sm'}`}><i className="fa-solid fa-list-check w-5 text-center"></i> Relación Alumnos PDF</button>
-                            {!isCoordinador && (
+                            {!isCoordinador && !isAsesor && (
                                 <>
                                     <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest pt-4 pb-2 border-b border-gray-200">Constancias (4.0)</h3>
                                     <button onClick={()=>setSubTab('constancias_alumnos')} className={`w-full text-left px-4 py-3.5 rounded-xl text-sm flex items-center gap-3 transition-colors ${subTab==='constancias_alumnos'?'bg-blue-600 text-white font-bold shadow-md':'text-gray-600 hover:bg-white hover:shadow-sm'}`}><i className="fa-solid fa-certificate w-5 text-center"></i> Constancias Alumnos</button>
@@ -4270,28 +4272,28 @@ María López	maria.lopez	Z9y8x7" />
                         </div>
                         
                         <div className="flex-1 p-10 overflow-auto bg-white print-only-container">
-                            {subTab === 'moodle' && !isCoordinador && (
+                            {subTab === 'moodle' && !isCoordinador && !isAsesor && (
                                 <div className="no-print max-w-2xl">
                                     <div className="flex items-center gap-4 mb-6 text-blue-900"><div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center"><i className="fa-solid fa-graduation-cap text-2xl"></i></div><h2 className="text-3xl font-bold">Exportar para Moodle</h2></div>
                                     <p className="text-gray-600 mb-8 leading-relaxed">Genera un archivo CSV compatible para subir usuarios a Moodle masivamente. Incluye minúsculas forzadas en username y concatenación de siglas de curso automáticas.</p>
                                     <button onClick={expMoodle} className="bg-blue-600 text-white px-8 py-4 rounded-xl shadow-lg shadow-blue-500/30 flex items-center gap-3 hover:bg-blue-700 font-bold text-lg transition-transform active:scale-95"><i className="fa-solid fa-download"></i> Descargar archivo CSV</button>
                                 </div>
                             )}
-                            {subTab === 'google' && !isCoordinador && (
+                            {subTab === 'google' && !isCoordinador && !isAsesor && (
                                 <div className="no-print max-w-2xl">
                                     <div className="flex items-center gap-4 mb-6 text-blue-900"><div className="w-12 h-12 bg-red-100 text-red-600 rounded-xl flex items-center justify-center"><i className="fa-brands fa-google text-2xl"></i></div><h2 className="text-3xl font-bold">Google Contacts</h2></div>
                                     <p className="text-gray-600 mb-8 leading-relaxed">Genera un CSV directo para importar en Google Contacts. Crea automáticamente las etiquetas necesarias basadas en los grupos y estado del curso para segmentar tus envíos desde Gmail.</p>
                                     <button onClick={expGoogleCSV} className="bg-blue-600 text-white px-8 py-4 rounded-xl shadow-lg shadow-blue-500/30 flex items-center gap-3 hover:bg-blue-700 font-bold text-lg transition-transform active:scale-95"><i className="fa-solid fa-file-csv"></i> Descargar archivo CSV</button>
                                 </div>
                             )}
-                            {subTab === 'correos' && !isCoordinador && (
+                            {subTab === 'correos' && !isCoordinador && !isAsesor && (
                                 <div className="no-print max-w-2xl">
                                     <div className="flex items-center gap-4 mb-6 text-blue-900"><div className="w-12 h-12 bg-green-100 text-green-600 rounded-xl flex items-center justify-center"><i className="fa-solid fa-envelope text-2xl"></i></div><h2 className="text-3xl font-bold">Plantilla Mail Merge</h2></div>
                                     <p className="text-gray-600 mb-8 leading-relaxed">Copia la información combinada de base de datos y grupos al portapapeles, formateada con tabulaciones para pegar directamente en tu plantilla de Google Sheets para envíos masivos.</p>
                                     <button onClick={expCorreosTSV} className="bg-blue-600 text-white px-8 py-4 rounded-xl shadow-lg shadow-blue-500/30 flex items-center gap-3 hover:bg-blue-700 font-bold text-lg transition-transform active:scale-95"><i className="fa-solid fa-copy"></i> Copiar Datos (TSV)</button>
                                 </div>
                             )}
-                            {subTab === 'asistencia' && <SubTabAsistencia db={db} />}
+                            {subTab === 'asistencia' && <SubTabAsistencia db={db} isAsesor={isAsesor} grupoId={asesorGrupoId} />}
 
                             {subTab === 'constancias_alumnos' && !isCoordinador && (
                                 <div className="space-y-6">
@@ -4447,17 +4449,18 @@ María López	maria.lopez	Z9y8x7" />
             );
         }
 
-        function SubTabAsistencia({ db }) {
+        function SubTabAsistencia({ db, isAsesor, grupoId }) {
             const [filtroGrupo, setFiltroGrupo] = useState('ALL');
+            const grupoFiltro = isAsesor ? grupoId : filtroGrupo;
             const lista = useMemo(() => {
                 return db.participantes
-                    .filter(p => filtroGrupo === 'ALL' || p.grupoId === filtroGrupo)
+                    .filter(p => grupoFiltro === 'ALL' || p.grupoId === grupoFiltro)
                     .map(p => {
                         const g = db.grupos.find(x => x.id === p.grupoId) || {};
                         return { asesor: g.asesor||'-', grupo: g.nombre||'Sin Grupo', completo: p.completo, usuario: getMoodleUsername(p.curp), celular: p.telefono };
                     })
                     .sort((a,b) => a.grupo.localeCompare(b.grupo) || a.completo.localeCompare(b.completo));
-            }, [db, filtroGrupo]);
+            }, [db, grupoFiltro]);
 
             return (
                 <div className="w-full">
@@ -4465,11 +4468,17 @@ María López	maria.lopez	Z9y8x7" />
                         <div>
                             <div className="flex items-center gap-4 mb-3 text-blue-900"><div className="w-12 h-12 bg-purple-100 text-purple-600 rounded-xl flex items-center justify-center"><i className="fa-solid fa-list-check text-2xl"></i></div><h2 className="text-3xl font-bold">Relación Alumnos PDF</h2></div>
                             <div className="mt-4 flex items-center gap-3">
-                                <label className="text-sm font-bold text-gray-500 uppercase tracking-wider">Filtrar para impresión:</label>
-                                <select className="border border-gray-300 rounded-lg p-2.5 text-sm bg-gray-50 shadow-sm outline-none focus:border-blue-500 min-w-[200px]" value={filtroGrupo} onChange={e=>setFiltroGrupo(e.target.value)}>
-                                    <option value="ALL">Todos los Grupos</option>
-                                    {db.grupos.map(g => <option key={g.id} value={g.id}>{g.nombre} ({g.asesor})</option>)}
-                                </select>
+                                {isAsesor ? (
+                                    <span className="text-sm font-bold text-gray-500 uppercase tracking-wider">Grupo: {(db.grupos.find(g=>g.id===grupoFiltro)||{}).nombre || 'Sin grupo asignado'}</span>
+                                ) : (
+                                    <>
+                                        <label className="text-sm font-bold text-gray-500 uppercase tracking-wider">Filtrar para impresión:</label>
+                                        <select className="border border-gray-300 rounded-lg p-2.5 text-sm bg-gray-50 shadow-sm outline-none focus:border-blue-500 min-w-[200px]" value={filtroGrupo} onChange={e=>setFiltroGrupo(e.target.value)}>
+                                            <option value="ALL">Todos los Grupos</option>
+                                            {db.grupos.map(g => <option key={g.id} value={g.id}>{g.nombre} ({g.asesor})</option>)}
+                                        </select>
+                                    </>
+                                )}
                             </div>
                         </div>
                         <button onClick={()=>window.print()} className="bg-gray-950 text-white px-8 py-4 rounded-xl shadow-lg flex items-center gap-3 hover:bg-black font-bold text-lg transition-transform active:scale-95"><i className="fa-solid fa-print"></i> Generar PDF</button>
@@ -4478,7 +4487,7 @@ María López	maria.lopez	Z9y8x7" />
                     <div className="print-only w-full">
                         <div className="text-center mb-6 hidden print:block">
                             <h2 className="font-bold text-xl uppercase tracking-wide">{db.info.nombreCurso}</h2>
-                            <p className="text-sm mt-1 text-gray-600">Estado: <strong>{db.info.estado}</strong> | {filtroGrupo !== 'ALL' ? `Grupo: ${(db.grupos.find(g=>g.id===filtroGrupo)||{}).nombre}` : 'Todos los Grupos'}</p>
+                            <p className="text-sm mt-1 text-gray-600">Estado: <strong>{db.info.estado}</strong> | {grupoFiltro !== 'ALL' ? `Grupo: ${(db.grupos.find(g=>g.id===grupoFiltro)||{}).nombre}` : 'Todos los Grupos'}</p>
                         </div>
                         <table className="print-table w-full text-left whitespace-nowrap text-xs border-collapse">
                             <thead>
