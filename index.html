@@ -1511,7 +1511,7 @@
                                             <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-[10px] text-slate-200">v8.1</div>
+                                        <div className="text-[10px] text-slate-200">v8.2</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -1519,7 +1519,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v8.1</div>
+                                        <div className="text-xs text-slate-200">v8.2</div>
                                     </div>
                                 )}
                             </div>
@@ -2822,7 +2822,7 @@ María López	maria.lopez	Z9y8x7" />
                     </header>
 
                     <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col p-3 print:p-0">
-                        {tab === 'resumen' && (isAdmin || isCoordinador) && <TabResumen db={db} />}
+                        {tab === 'resumen' && (isAdmin || isCoordinador) && <TabResumen db={db} asesoresGlobales={asesoresGlobales} />}
                         {tab === 'ajustes' && isAdmin && <TabAjustes db={db} onUpdate={onUpdate} asesoresGlobales={asesoresGlobales} />}
                         {tab === 'pegadoExcel' && isAdmin && <TabPegadoExcel db={db} onUpdate={onUpdate} textoPegado={textoPegado} setTextoPegado={setTextoPegado} participantesProcesados={participantesProcesados} setParticipantesProcesados={setParticipantesProcesados} procesarTextoPegado={procesarTextoPegado} descargarPlantillaBase={descargarPlantillaBase} />}
                         {tab === 'grupos' && isAdmin && <TabGrupos db={db} onUpdate={onUpdate} asesoresGlobales={asesoresGlobales} />}
@@ -2901,7 +2901,11 @@ María López	maria.lopez	Z9y8x7" />
         }
 
         // --- PESTAÑAS RESUMEN Y AJUSTES ---
-        function TabResumen({ db }) {
+        function TabResumen({ db, asesoresGlobales }) {
+            const coordinadorIds = db.info.coordinadorIds || (db.info.coordinadorId ? [db.info.coordinadorId] : []);
+            const coordinadores = coordinadorIds
+                .map(id => asesoresGlobales.find(persona => persona.id === id)?.nombre)
+                .filter(Boolean);
             const statsPorGrupo = useMemo(() => {
                 const res = db.grupos.map(g => ({ ...g, total: 0, funciones: {} }));
                 const sinGrupo = { id: 'NONE', nombre: 'Sin Asignar', asesor: '-', total: 0, funciones: {} };
@@ -2917,7 +2921,10 @@ María López	maria.lopez	Z9y8x7" />
 
             return (
                 <div className="bg-white rounded-2xl shadow-sm h-full flex flex-col overflow-auto p-8">
-                    <h2 className="font-bold text-2xl text-gray-800 mb-6 border-b pb-4"><i className="fa-solid fa-chart-pie text-blue-600"></i> Resumen de la Oferta</h2>
+                    <div className="mb-6 border-b pb-4">
+                        <h2 className="font-bold text-2xl text-gray-800"><i className="fa-solid fa-chart-pie text-blue-600"></i> Resumen de la Oferta</h2>
+                        <p className="mt-2 text-sm text-gray-500"><i className="fa-solid fa-user-tie mr-2 text-purple-600"></i><span className="font-bold text-gray-700">Coordinador a cargo:</span> {coordinadores.length ? coordinadores.join(', ') : 'Sin coordinador asignado'}</p>
+                    </div>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                         <div className="bg-blue-50 p-6 rounded-2xl border border-blue-100 flex items-center gap-5 shadow-sm">
                             <div className="bg-blue-600 text-white w-14 h-14 rounded-xl flex items-center justify-center"><i className="fa-solid fa-users text-2xl"></i></div>
