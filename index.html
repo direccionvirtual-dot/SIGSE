@@ -1511,7 +1511,7 @@
                                             <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-[10px] text-slate-200">v8.4</div>
+                                        <div className="text-[10px] text-slate-200">v8.5</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -1519,7 +1519,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v8.4</div>
+                                        <div className="text-xs text-slate-200">v8.5</div>
                                     </div>
                                 )}
                             </div>
@@ -2829,7 +2829,7 @@ María López	maria.lopez	Z9y8x7" />
                         {tab === 'pegadoExcel' && isAdmin && <TabPegadoExcel db={db} onUpdate={onUpdate} textoPegado={textoPegado} setTextoPegado={setTextoPegado} participantesProcesados={participantesProcesados} setParticipantesProcesados={setParticipantesProcesados} procesarTextoPegado={procesarTextoPegado} descargarPlantillaBase={descargarPlantillaBase} />}
                         {tab === 'grupos' && isAdmin && <TabGrupos db={db} onUpdate={onUpdate} asesoresGlobales={asesoresGlobales} />}
                         {tab === 'datos' && isAdmin && <TabDatos db={db} onUpdate={onUpdate} />}
-                        {tab === 'exportar' && (isAdmin || isCoordinador || isAsesor) && <TabExportar db={db} onUpdate={onUpdate} isAdmin={isAdmin} isCoordinador={isCoordinador} isAsesor={isAsesor} asesorGrupoId={modoPersonal.grupoId} />}
+                        {tab === 'exportar' && (isAdmin || isCoordinador || isAsesor) && <TabExportar db={db} onUpdate={onUpdate} isAdmin={isAdmin} isCoordinador={isCoordinador} isAsesor={isAsesor} asesorGrupoId={modoPersonal.grupoId} asesoresGlobales={asesoresGlobales} />}
                         {tab === 'seguimiento' && <TabSeguimiento db={db} onUpdate={onUpdate} isAsesor={isAsesor} isCoordinador={isCoordinador} isAdmin={isAdmin} asesorGrupoId={modoPersonal.grupoId} />}
                         {tab === 'control' && isPersonal && <ControlConsulta db={db} zoomAccounts={zoomAccounts} isAsesor={isAsesor} grupoId={modoPersonal.grupoId} />}
                     </div>
@@ -4038,7 +4038,7 @@ María López	maria.lopez	Z9y8x7" />
             );
         }
 
-        function TabExportar({ db, onUpdate, isAdmin, isCoordinador, isAsesor, asesorGrupoId }) {
+        function TabExportar({ db, onUpdate, isAdmin, isCoordinador, isAsesor, asesorGrupoId, asesoresGlobales = [] }) {
             const [subTab, setSubTab] = useState(isCoordinador || isAsesor ? 'asistencia' : 'moodle');
 
             const [consultaUrl, setConsultaUrl] = useState(db.info.consultaUrl || 'https://escueladeposgrados.edu.mx/consulta/index.html?Folio=');
@@ -4319,6 +4319,90 @@ María López	maria.lopez	Z9y8x7" />
                 copyToClipboard([headers.join('\t'), ...rows].join('\n'));
             };
 
+            const relacionAsesores = useMemo(() => {
+                return (db.grupos || [])
+                    .filter(grupo => grupo.asesor || grupo.asesorId)
+                    .map(grupo => {
+                        const asesor = asesoresGlobales.find(persona => persona.id === grupo.asesorId) || null;
+                        return {
+                            asesor: grupo.asesor || asesor?.nombre || 'Sin asesor',
+                            usuario: asesor?.usuario || '-',
+                            password: asesor?.password || '-',
+                            grupo: grupo.nombre || '-' 
+                        };
+                    })
+                    .sort((a, b) => a.asesor.localeCompare(b.asesor, 'es', { sensitivity: 'base' }) || a.grupo.localeCompare(b.grupo, 'es', { sensitivity: 'base' }));
+            }, [db.grupos, asesoresGlobales]);
+
+            const exportarRelacionAsesoresPdf = () => {
+                if (!window.jspdf) return alert('La exportación a PDF no está disponible en este navegador.');
+
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF('p', 'mm', 'a4');
+                const pageWidth = doc.internal.pageSize.getWidth();
+                const pageHeight = doc.internal.pageSize.getHeight();
+                const margin = 14;
+                const colWidths = [50, 35, 35, 70];
+                const headers = ['ASESOR', 'USUARIO', 'CONTRASEÑA', 'GRUPO'];
+                let y = 20;
+
+                doc.setFillColor(12, 25, 51);
+                doc.rect(0, 0, pageWidth, 18, 'F');
+                doc.setTextColor(255, 255, 255);
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(14);
+                doc.text('Relación de Asesores', margin, 12);
+
+                doc.setTextColor(0, 0, 0);
+                doc.setFontSize(8);
+                doc.setFont('helvetica', 'bold');
+
+                const startX = margin;
+                let rowY = y + 10;
+
+                let currentX = startX;
+                headers.forEach((header, index) => {
+                    doc.setFillColor(229, 236, 255);
+                    doc.rect(currentX, y, colWidths[index], 8, 'F');
+                    doc.text(header, currentX + 2, y + 6);
+                    currentX += colWidths[index];
+                });
+
+                y += 10;
+                doc.setFont('helvetica', 'normal');
+
+                relacionAsesores.forEach((row, index) => {
+                    const values = [row.asesor, row.usuario, row.password, row.grupo];
+                    const rowHeight = 8;
+
+                    if (y + rowHeight > pageHeight - 12) {
+                        doc.addPage();
+                        y = 20;
+                        currentX = margin;
+                        headers.forEach((header, idx) => {
+                            doc.setFillColor(229, 236, 255);
+                            doc.rect(currentX, y, colWidths[idx], 8, 'F');
+                            doc.text(header, currentX + 2, y + 6);
+                            currentX += colWidths[idx];
+                        });
+                        y += 10;
+                    }
+
+                    currentX = margin;
+                    values.forEach((value, idx) => {
+                        const text = String(value || '-');
+                        doc.rect(currentX, y, colWidths[idx], rowHeight);
+                        const lines = doc.splitTextToSize(text, colWidths[idx] - 3);
+                        doc.text(lines, currentX + 2, y + 5);
+                        currentX += colWidths[idx];
+                    });
+                    y += rowHeight;
+                });
+
+                const fileName = `Relacion_Asesores_${db.info?.siglas || 'curso'}.pdf`;
+                doc.save(fileName);
+            };
+
             return (
                 <div className="bg-white rounded-2xl shadow-sm h-full flex flex-col overflow-hidden">
                     <div className="flex flex-1 overflow-hidden">
@@ -4332,6 +4416,7 @@ María López	maria.lopez	Z9y8x7" />
                                 </>
                             )}
                             <button onClick={()=>setSubTab('asistencia')} className={`w-full text-left px-4 py-3.5 rounded-xl text-sm flex items-center gap-3 transition-colors ${subTab==='asistencia'?'bg-blue-600 text-white font-bold shadow-md':'text-gray-600 hover:bg-white hover:shadow-sm'}`}><i className="fa-solid fa-list-check w-5 text-center"></i> Relación Alumnos PDF</button>
+                            {(isAdmin || isCoordinador) && <button onClick={()=>setSubTab('asesores')} className={`w-full text-left px-4 py-3.5 rounded-xl text-sm flex items-center gap-3 transition-colors ${subTab==='asesores'?'bg-blue-600 text-white font-bold shadow-md':'text-gray-600 hover:bg-white hover:shadow-sm'}`}><i className="fa-solid fa-user-tie w-5 text-center"></i> Relación Asesores</button>}
                             {!isCoordinador && !isAsesor && (
                                 <>
                                     <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest pt-4 pb-2 border-b border-gray-200">Constancias (4.0)</h3>
@@ -4399,6 +4484,47 @@ María López	maria.lopez	Z9y8x7" />
                                 </div>
                             )}
                             {subTab === 'asistencia' && <SubTabAsistencia db={db} isAsesor={isAsesor} grupoId={asesorGrupoId} />}
+                            {subTab === 'asesores' && (isAdmin || isCoordinador) && (
+                                <div className="space-y-6">
+                                    <div className="flex items-center gap-4 text-blue-900 border-b border-gray-100 pb-4">
+                                        <div className="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-xl flex items-center justify-center"><i className="fa-solid fa-user-tie text-2xl"></i></div>
+                                        <div>
+                                            <h2 className="text-2xl font-bold">Relación Asesores</h2>
+                                            <p className="text-sm text-gray-500 mt-1">Listado de asesores con usuario, contraseña y grupo asignado.</p>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex gap-3">
+                                        <button onClick={exportarRelacionAsesoresPdf} className="bg-indigo-600 text-white px-6 py-2.5 rounded-lg shadow font-bold hover:bg-indigo-700 transition-colors flex items-center gap-2"><i className="fa-solid fa-file-pdf"></i> Descargar PDF</button>
+                                    </div>
+
+                                    <div className="overflow-x-auto border border-gray-200 rounded-xl shadow-sm max-h-[520px]">
+                                        <table className="w-full text-xs text-left whitespace-nowrap">
+                                            <thead className="bg-gray-50 text-gray-600 sticky top-0 shadow-sm z-10">
+                                                <tr>
+                                                    <th className="p-3 border-b">ASESOR</th>
+                                                    <th className="p-3 border-b">USUARIO</th>
+                                                    <th className="p-3 border-b">CONTRASEÑA</th>
+                                                    <th className="p-3 border-b">GRUPO</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {relacionAsesores.map((row, index) => (
+                                                    <tr key={`${row.asesor}-${row.grupo}-${index}`} className="border-b border-gray-100 hover:bg-gray-50">
+                                                        <td className="p-3 font-semibold text-gray-800">{row.asesor}</td>
+                                                        <td className="p-3 font-mono text-gray-700">{row.usuario}</td>
+                                                        <td className="p-3 font-mono text-gray-700">{row.password}</td>
+                                                        <td className="p-3 text-gray-700">{row.grupo}</td>
+                                                    </tr>
+                                                ))}
+                                                {relacionAsesores.length === 0 && (
+                                                    <tr><td colSpan="4" className="p-10 text-center text-gray-400 font-bold">No hay asesores asignados registrados.</td></tr>
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
 
                             {subTab === 'constancias_alumnos' && !isCoordinador && (
                                 <div className="space-y-6">
@@ -4564,8 +4690,101 @@ María López	maria.lopez	Z9y8x7" />
                         const g = db.grupos.find(x => x.id === p.grupoId) || {};
                         return { asesor: g.asesor||'-', grupo: g.nombre||'Sin Grupo', completo: p.completo, usuario: getMoodleUsername(p.curp), celular: p.telefono };
                     })
-                    .sort((a,b) => a.grupo.localeCompare(b.grupo) || a.completo.localeCompare(b.completo));
+                    .sort((a,b) => a.grupo.localeCompare(b.grupo) || a.completo.localeCompare(b.completo))
+                    .reduce((rows, row) => {
+                        const previous = rows[rows.length - 1];
+                        rows.push({ ...row, consecutivo: previous && previous.grupo === row.grupo ? previous.consecutivo + 1 : 1 });
+                        return rows;
+                    }, []);
             }, [db, grupoFiltro]);
+
+            const descargarRelacionAlumnosPdf = () => {
+                if (!window.jspdf) return alert('La exportación a PDF no está disponible en este navegador.');
+
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF('l', 'mm', 'a4');
+                const pageWidth = doc.internal.pageSize.getWidth();
+                const pageHeight = doc.internal.pageSize.getHeight();
+                const margin = 8;
+                const contentWidth = pageWidth - (margin * 2);
+                const headers = ['NO.', 'ASESOR', 'GRUPO', 'NOMBRE COMPLETO', 'USUARIO', 'CONTRASEÑA', 'CELULAR', 'S1', 'S2', 'S3', 'S4', 'S5', 'S6'];
+                const colWidths = [12, 28, 31, 45, 27, 25, 25, 13, 13, 13, 13, 13, 13];
+                const rowPadding = 2;
+                const lineHeight = 3.5;
+                const headerHeight = 9;
+                const title = String(db.info?.nombreCurso || db.info?.siglas || 'Relación Alumnos').trim();
+                const groupTitle = grupoFiltro !== 'ALL'
+                    ? `Grupo: ${(db.grupos.find(g => g.id === grupoFiltro) || {}).nombre || 'Sin grupo'}`
+                    : 'Todos los Grupos';
+
+                const drawHeader = () => {
+                    doc.setFillColor(0, 25, 51);
+                    doc.rect(0, 0, pageWidth, 15, 'F');
+                    doc.setTextColor(255, 255, 255);
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(11);
+                    doc.text(title, margin, 7);
+                    doc.setFont('helvetica', 'normal');
+                    doc.setFontSize(7);
+                    doc.text(`Relación Alumnos · ${groupTitle}`, margin, 12);
+
+                    let x = margin;
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(6.5);
+                    headers.forEach((header, index) => {
+                        doc.setFillColor(229, 236, 255);
+                        doc.setTextColor(0, 25, 51);
+                        doc.rect(x, 18, colWidths[index], headerHeight, 'F');
+                        doc.rect(x, 18, colWidths[index], headerHeight);
+                        doc.text(header, x + 1.5, 23.5, { maxWidth: colWidths[index] - 3 });
+                        x += colWidths[index];
+                    });
+                    return 18 + headerHeight;
+                };
+
+                const drawRow = (row, y) => {
+                    const values = [row.consecutivo, row.asesor, row.grupo, row.completo, row.usuario, db.info.moodlePass, row.celular, '', '', '', '', '', ''];
+                    const lines = values.map((value, index) => doc.splitTextToSize(String(value || '-'), colWidths[index] - (rowPadding * 2)));
+                    const rowHeight = Math.max(7, ...lines.map(cellLines => cellLines.length * lineHeight + (rowPadding * 2)));
+                    let x = margin;
+                    doc.setFont('helvetica', 'normal');
+                    doc.setFontSize(6.5);
+                    doc.setTextColor(0, 0, 0);
+                    values.forEach((value, index) => {
+                        doc.rect(x, y, colWidths[index], rowHeight);
+                        const cellLines = lines[index];
+                        const textY = y + rowPadding + lineHeight - 0.5;
+                        doc.text(cellLines, x + rowPadding, textY, { maxWidth: colWidths[index] - (rowPadding * 2) });
+                        x += colWidths[index];
+                    });
+                    return rowHeight;
+                };
+
+                let y = drawHeader() + 2;
+                if (lista.length === 0) {
+                    doc.setFont('helvetica', 'normal');
+                    doc.setFontSize(9);
+                    doc.setTextColor(80, 80, 80);
+                    doc.text('No hay participantes para el filtro seleccionado.', margin, y + 8);
+                } else {
+                    lista.forEach(row => {
+                        doc.setFont('helvetica', 'normal');
+                        doc.setFontSize(6.5);
+                        const previewLines = [row.consecutivo, row.asesor, row.grupo, row.completo, row.usuario, db.info.moodlePass, row.celular, '', '', '', '', '', '']
+                            .map((value, index) => doc.splitTextToSize(String(value || '-'), colWidths[index] - (rowPadding * 2)));
+                        const rowHeight = Math.max(7, ...previewLines.map(cellLines => cellLines.length * lineHeight + (rowPadding * 2)));
+
+                        if (y + rowHeight > pageHeight - margin) {
+                            doc.addPage();
+                            y = drawHeader() + 2;
+                        }
+                        y += drawRow(row, y);
+                    });
+                }
+
+                const fileName = `Relacion_Alumnos_${db.info?.siglas || 'curso'}.pdf`;
+                doc.save(fileName);
+            };
 
             return (
                 <div className="w-full">
@@ -4586,7 +4805,7 @@ María López	maria.lopez	Z9y8x7" />
                                 )}
                             </div>
                         </div>
-                        <button onClick={()=>window.print()} className="bg-gray-950 text-white px-8 py-4 rounded-xl shadow-lg flex items-center gap-3 hover:bg-black font-bold text-lg transition-transform active:scale-95"><i className="fa-solid fa-print"></i> Generar PDF</button>
+                        <button onClick={descargarRelacionAlumnosPdf} className="bg-gray-950 text-white px-8 py-4 rounded-xl shadow-lg flex items-center gap-3 hover:bg-black font-bold text-lg transition-transform active:scale-95"><i className="fa-solid fa-file-pdf"></i> Descargar PDF</button>
                     </div>
 
                     <div className="print-only w-full">
@@ -4597,7 +4816,7 @@ María López	maria.lopez	Z9y8x7" />
                         <table className="print-table w-full text-left whitespace-nowrap text-xs border-collapse">
                             <thead>
                                 <tr>
-                                    <th className="border p-2">ASESOR</th><th className="border p-2">GRUPO</th><th className="border p-2">NOMBRE COMPLETO</th>
+                                    <th className="border p-2">NO.</th><th className="border p-2">ASESOR</th><th className="border p-2">GRUPO</th><th className="border p-2">NOMBRE COMPLETO</th>
                                     <th className="border p-2">USUARIO</th><th className="border p-2">CONTRASEÑA</th><th className="border p-2">CELULAR</th>
                                     <th className="border p-2 w-8 text-center bg-gray-50">S1</th><th className="border p-2 w-8 text-center bg-gray-50">S2</th><th className="border p-2 w-8 text-center bg-gray-50">S3</th>
                                     <th className="border p-2 w-8 text-center bg-gray-50">S4</th><th className="border p-2 w-8 text-center bg-gray-50">S5</th><th className="border p-2 w-8 text-center bg-gray-50">S6</th>
@@ -4606,7 +4825,7 @@ María López	maria.lopez	Z9y8x7" />
                             <tbody>
                                 {lista.map((row, i) => (
                                     <tr key={i}>
-                                        <td className="border p-2 text-[10px]">{row.asesor}</td><td className="border p-2 font-bold">{row.grupo}</td><td className="border p-2 truncate" style={{maxWidth:'180px'}}>{row.completo}</td>
+                                        <td className="border p-2 text-center font-bold">{row.consecutivo}</td><td className="border p-2 text-[10px]">{row.asesor}</td><td className="border p-2 font-bold">{row.grupo}</td><td className="border p-2 truncate" style={{maxWidth:'180px'}}>{row.completo}</td>
                                         <td className="border p-2 text-gray-600 font-mono text-[10px]">{row.usuario}</td><td className="border p-2 text-gray-600 text-[10px]">{db.info.moodlePass}</td><td className="border p-2 text-[10px]">{row.celular}</td>
                                         <td className="border p-2"></td><td className="border p-2"></td><td className="border p-2"></td>
                                         <td className="border p-2"></td><td className="border p-2"></td><td className="border p-2"></td>
