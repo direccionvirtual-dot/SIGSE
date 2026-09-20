@@ -309,6 +309,7 @@
 
         // --- FUNCIONES AUXILIARES ---
         const normalizeText = (text) => text ? text.toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim() : '';
+        const formatImportedText = (text) => text ? text.toString().toUpperCase().trim() : '';
         const getMoodleUsername = (curp) => curp ? curp.substring(0, 10).toLowerCase() : '';
         const copyToClipboard = (text) => {
             const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select();
@@ -810,9 +811,9 @@
                 const parsedData = filas.slice(1).map((fila, index) => {
                     const celdas = fila.split('\t');
                     const getVal = (idx) => idx !== -1 && celdas[idx] ? celdas[idx].trim() : '';
-                    const pNombre = normalizeText(getVal(mapIndices.nombre));
-                    const pPaterno = normalizeText(getVal(mapIndices.paterno));
-                    const pMaterno = normalizeText(getVal(mapIndices.materno));
+                    const pNombre = formatImportedText(getVal(mapIndices.nombre));
+                    const pPaterno = formatImportedText(getVal(mapIndices.paterno));
+                    const pMaterno = formatImportedText(getVal(mapIndices.materno));
 
                     if (!pNombre && !getVal(mapIndices.curp)) return null;
 
