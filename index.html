@@ -151,6 +151,10 @@
                 overflow: hidden;
             }
 
+            .workspace-content.group-workspace-content {
+                overflow: visible !important;
+            }
+
             .seguimiento-panel {
                 min-height: 0;
             }
@@ -714,6 +718,7 @@
             const [editEvidenceModal, setEditEvidenceModal] = useState({ show: false, dbId: null, id: null, carpetaUrl: '' });
             const [controlTableFilters, setControlTableFilters] = useState({ zoom: '', sessions: '', attendances: '', evidences: '' });
             const [controlSessionFilters, setControlSessionFilters] = useState({ year: '', estado: '', curso: '', grupo: '' });
+            const [controlExportCourseId, setControlExportCourseId] = useState('ALL');
             const [controlAttendanceFilters, setControlAttendanceFilters] = useState({ year: '', estado: '', curso: '' });
             const [controlEvidenceFilters, setControlEvidenceFilters] = useState({ year: '', estado: '', curso: '', grupo: '' });
             const [controlTableSort, setControlTableSort] = useState({ table: 'sessions', key: 'numero', direction: 'asc' });
@@ -1179,6 +1184,44 @@
                     }))
                 }));
             }, [controlSessionsVisible]);
+
+            const descargarControlSesionesXLSX = () => {
+                if (typeof XLSX === 'undefined') return alert('Librería de Excel cargando... Intenta nuevamente en un segundo.');
+
+                const headers = ['AÑO', 'ESTADO', 'CURSO', 'NOMBRE DEL CURSO', 'GRUPO', 'ASESOR', 'SESIÓN', 'DÍA', 'HORARIO', 'USUARIO ZOOM', 'ESTADO CUENTA ZOOM', 'INVITACIÓN'];
+                const sessionsToExport = controlExportCourseId === 'ALL'
+                    ? controlSessionsVisible
+                    : controlSessionsVisible.filter(({ db }) => db.id === controlExportCourseId);
+                const rows = sessionsToExport.map(({ db, ...session }) => {
+                    const grupo = (db.grupos || []).find(item => item.id === session.grupoId) || {};
+                    const cuenta = zoomAccounts.find(account => account.id === session.zoomAccountId) || {};
+                    return [
+                        db.info.anio || '',
+                        db.info.estado || db.info.idEstado || '',
+                        db.info.siglas || '',
+                        db.info.nombreCurso || '',
+                        grupo.nombre || 'Sin grupo',
+                        grupo.asesor || 'Sin asesor',
+                        session.numero || '',
+                        session.dia || '',
+                        session.horario || '',
+                        cuenta.usuario || 'Sin cuenta',
+                        cuenta.estado || '',
+                        session.invitacion || ''
+                    ];
+                });
+
+                if (!rows.length) return alert('No hay sesiones que coincidan con los filtros actuales.');
+                const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+                ws['!cols'] = headers.map((header, index) => ({ wch: index === 3 || index === 11 ? 34 : index === 5 ? 26 : 18 }));
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, 'Control Sesiones');
+                const courseSuffix = controlExportCourseId === 'ALL'
+                    ? 'Todos_los_cursos'
+                    : String(basesDeDatos.find(db => db.id === controlExportCourseId)?.info?.siglas || 'Curso').replace(/\s+/g, '_');
+                XLSX.writeFile(wb, `Control_Sesiones_${courseSuffix}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+            };
+
             const controlAttendancesVisible = useMemo(() => {
                 const search = controlTableFilters.attendances.trim().toLowerCase();
                 const rows = basesDeDatos.flatMap(db => (db.controlAsistencias || []).map(row => ({ ...row, db }))).filter(row => {
@@ -1638,7 +1681,7 @@
                                             <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-[10px] text-slate-200">v8.9</div>
+                                        <div className="text-[10px] text-slate-200">v9.0</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -1646,7 +1689,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v8.9</div>
+                                        <div className="text-xs text-slate-200">v9.0</div>
                                     </div>
                                 )}
                             </div>
@@ -2327,8 +2370,12 @@
                                                 <input type="text" className="rounded-xl border border-slate-200 bg-white p-3 text-sm uppercase outline-none focus:border-cyan-500" value={newSessionTime} onChange={e => setNewSessionTime(e.target.value)} placeholder="Horario: 05:00 PM" />
                                                 <textarea rows="5" className="rounded-xl border border-slate-200 bg-white p-3 text-sm font-mono outline-none focus:border-cyan-500 md:col-span-2" value={newSessionInvite} onChange={e => setNewSessionInvite(e.target.value)} placeholder="Pega aquí la invitación completa de Zoom (opcional). Presiona Enter para separar en líneas." />
                                             </div>
-                                            <div className="mt-4 flex flex-wrap gap-3"><button onClick={agregarSesionControl} className="rounded-xl bg-slate-900 px-5 py-3 font-bold text-white transition-colors hover:bg-cyan-700"><i className="fa-solid fa-plus mr-2"></i>Registrar sesión</button><button onClick={generarSesionesControl} className="rounded-xl bg-cyan-700 px-5 py-3 font-bold text-white transition-colors hover:bg-cyan-800"><i className="fa-solid fa-wand-magic-sparkles mr-2"></i>Generar sesiones faltantes</button></div>
+                                            <div className="mt-4 flex flex-wrap gap-3"><button onClick={agregarSesionControl} className="rounded-xl bg-slate-900 px-5 py-3 font-bold text-white transition-colors hover:bg-cyan-700"><i className="fa-solid fa-plus mr-2"></i>Registrar sesión</button><button onClick={generarSesionesControl} className="rounded-xl bg-cyan-700 px-5 py-3 font-bold text-white transition-colors hover:bg-cyan-800"><i className="fa-solid fa-wand-magic-sparkles mr-2"></i>Generar sesiones faltantes</button><button onClick={descargarControlSesionesXLSX} className="rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-3 font-bold text-emerald-800 transition-colors hover:bg-emerald-100"><i className="fa-solid fa-file-excel mr-2"></i>Descargar Excel</button></div>
                                             <div className="grid gap-3 md:grid-cols-4">
+                                                <select className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold outline-none focus:border-emerald-500 md:col-span-2" value={controlExportCourseId} onChange={e => setControlExportCourseId(e.target.value)} aria-label="Curso para exportar a Excel">
+                                                    <option value="ALL">Exportar: todos los cursos</option>
+                                                    {basesDeDatos.map(db => <option key={db.id} value={db.id}>{db.info.siglas || 'Sin sigla'} · {db.info.idEstado || db.info.estado || 'Sin estado'} · {db.info.anio || 'Sin año'}</option>)}
+                                                </select>
                                                 <select className="rounded-xl border border-slate-200 bg-white p-3 text-sm outline-none focus:border-cyan-500" value={controlSessionFilters.year} onChange={e => setControlSessionFilters(prev => ({ ...prev, year: e.target.value }))}>
                                                     <option value="">Todos los años</option>
                                                     {controlSessionYearOptions.map(year => <option key={year} value={year}>{year}</option>)}
@@ -2957,7 +3004,7 @@ María López	maria.lopez	Z9y8x7" />
             };
 
             return (
-                <div className="h-screen max-h-screen overflow-hidden bg-gray-100 flex flex-col font-sans text-sm">
+                <div className={`${tab === 'grupos' ? 'min-h-screen overflow-visible' : 'h-screen max-h-screen overflow-hidden'} bg-gray-100 flex flex-col font-sans text-sm`}>
                     <header className="bg-blue-900 text-white px-4 py-2 flex justify-between items-center shadow-md no-print">
                         <div className="flex items-center gap-4">
                             <button onClick={handleVolver} className="hover:text-gray-300 text-sm bg-blue-800 px-3 py-1.5 rounded-lg border border-blue-700 transition-colors shadow-inner flex items-center gap-2"><i className="fa-solid fa-arrow-left"></i> Volver al Panel</button>
@@ -2983,7 +3030,7 @@ María López	maria.lopez	Z9y8x7" />
                         </div>
                     </header>
 
-                    <div className="workspace-content flex-1 min-h-0 min-w-0 overflow-hidden flex flex-col p-3 print:p-0">
+                    <div className={`workspace-content ${tab === 'grupos' ? 'group-workspace-content overflow-visible' : 'flex-1 min-h-0 overflow-hidden'} min-w-0 flex flex-col p-3 print:p-0`}>
                         {tab === 'resumen' && (isAdmin || isCoordinador) && <TabResumen db={db} asesoresGlobales={asesoresGlobales} />}
                         {tab === 'ajustes' && isAdmin && <TabAjustes db={db} onUpdate={onUpdate} asesoresGlobales={asesoresGlobales} />}
                         {tab === 'pegadoExcel' && isAdmin && <TabPegadoExcel db={db} onUpdate={onUpdate} textoPegado={textoPegado} setTextoPegado={setTextoPegado} participantesProcesados={participantesProcesados} setParticipantesProcesados={setParticipantesProcesados} procesarTextoPegado={procesarTextoPegado} descargarPlantillaBase={descargarPlantillaBase} />}
@@ -3456,6 +3503,7 @@ María López	maria.lopez	Z9y8x7" />
                 const filasDatos = tieneCabeceras ? filas.slice(1) : filas;
 
                 const gruposNuevos = [];
+                const gruposDuplicados = [];
                 const nombresExistentes = new Set((db.grupos || []).map(group => String(group.nombre || '').trim().toUpperCase()));
 
                 filasDatos.forEach((fila, index) => {
@@ -3506,19 +3554,37 @@ María López	maria.lopez	Z9y8x7" />
                         whatsapp: whatsapp ? whatsapp.trim() : ''
                     };
 
-                    if (nombresExistentes.has(normalizeText(grupoData.nombre))) {
+                    const grupoExistente = (db.grupos || []).find(group => normalizeText(group.nombre) === normalizeText(grupoData.nombre));
+                    if (grupoExistente) {
+                        gruposDuplicados.push({ existente: grupoExistente, importado: grupoData });
                         return;
                     }
+
+                    if (nombresExistentes.has(normalizeText(grupoData.nombre))) return;
 
                     nombresExistentes.add(normalizeText(grupoData.nombre));
                     gruposNuevos.push(grupoData);
                 });
 
-                if (!gruposNuevos.length) return alert('No se encontraron grupos válidos para importar. Revisa el formato.');
+                if (!gruposNuevos.length && !gruposDuplicados.length) return alert('No se encontraron grupos válidos para importar. Revisa el formato.');
 
-                onUpdate({ ...db, grupos: [...db.grupos, ...gruposNuevos] });
+                let reemplazarDuplicados = false;
+                if (gruposDuplicados.length > 0) {
+                    const nombresDuplicados = gruposDuplicados.map(({ existente }) => existente.nombre).join(', ');
+                    reemplazarDuplicados = confirm(`Se encontraron ${gruposDuplicados.length} grupo(s) que ya existen: ${nombresDuplicados}.\n\nAceptar = reemplazar sus datos (asesor, contacto, día, hora y WhatsApp).\nCancelar = omitir los grupos repetidos.`);
+                }
+
+                const gruposActualizados = reemplazarDuplicados
+                    ? db.grupos.map(grupo => {
+                        const duplicado = gruposDuplicados.find(item => item.existente.id === grupo.id);
+                        return duplicado ? { ...grupo, ...duplicado.importado, id: grupo.id } : grupo;
+                    })
+                    : db.grupos;
+
+                onUpdate({ ...db, grupos: [...gruposActualizados, ...gruposNuevos] });
                 setBulkGroupText('');
-                alert(`Se importaron ${gruposNuevos.length} grupos correctamente.`);
+                const gruposReemplazados = reemplazarDuplicados ? gruposDuplicados.length : 0;
+                alert(`Importación terminada: ${gruposNuevos.length} grupo(s) nuevo(s)${gruposReemplazados ? ` y ${gruposReemplazados} grupo(s) actualizado(s)` : ''}.`);
             };
             const del = (id) => onUpdate({ ...db, grupos: db.grupos.filter(g => g.id !== id), participantes: db.participantes.map(p => p.grupoId === id ? { ...p, grupoId: null } : p) });
             const openEditGroup = (group) => {
@@ -3552,6 +3618,21 @@ María López	maria.lopez	Z9y8x7" />
                 setSelectedGroupIds(new Set());
                 setBulkSchedule({ dia: '', hora: '' });
                 alert('Día y turno / hora actualizados correctamente.');
+            };
+
+            const eliminarGruposMasivos = () => {
+                if (!selectedGroupIds.size) return alert('Selecciona al menos un grupo.');
+                const gruposSeleccionados = db.grupos.filter(group => selectedGroupIds.has(group.id));
+                const confirmacion = confirm(`¿Eliminar ${gruposSeleccionados.length} grupo(s) seleccionado(s)?\n\nLos participantes quedarán como SIN ASIGNAR y esta acción no se puede deshacer.`);
+                if (!confirmacion) return;
+
+                const gruposRestantes = db.grupos.filter(group => !selectedGroupIds.has(group.id));
+                const participantesActualizados = db.participantes.map(participant => selectedGroupIds.has(participant.grupoId)
+                    ? { ...participant, grupoId: null }
+                    : participant
+                );
+                onUpdate({ ...db, grupos: gruposRestantes, participantes: participantesActualizados });
+                setSelectedGroupIds(new Set());
             };
             
             return (
@@ -3601,8 +3682,9 @@ María López	maria.lopez	Z9y8x7" />
                         <input type="text" className="w-full md:w-40 p-2.5 border border-emerald-200 bg-white rounded-lg text-sm uppercase focus:border-emerald-500 outline-none" placeholder="Día" value={bulkSchedule.dia} onChange={e => setBulkSchedule({ ...bulkSchedule, dia: e.target.value })} aria-label="Día para grupos seleccionados" />
                         <input type="text" className="w-full md:w-40 p-2.5 border border-emerald-200 bg-white rounded-lg text-sm uppercase focus:border-emerald-500 outline-none" placeholder="Turno / Hora" value={bulkSchedule.hora} onChange={e => setBulkSchedule({ ...bulkSchedule, hora: e.target.value })} aria-label="Turno u hora para grupos seleccionados" />
                         <button onClick={aplicarHorarioMasivo} className="bg-emerald-600 text-white px-4 py-2.5 rounded-lg shadow hover:bg-emerald-700 font-bold transition-colors flex items-center justify-center gap-2"><i className="fa-solid fa-calendar-check"></i> Aplicar a {selectedGroupIds.size || 'grupos seleccionados'}</button>
+                        <button onClick={eliminarGruposMasivos} className="bg-red-600 text-white px-4 py-2.5 rounded-lg shadow hover:bg-red-700 font-bold transition-colors flex items-center justify-center gap-2"><i className="fa-solid fa-trash"></i> Eliminar seleccionados</button>
                     </div>
-                    <div className="flex-none overflow-x-auto overflow-y-visible">
+                    <div className="group-table-scroll overflow-x-auto overflow-y-visible rounded-b-xl" style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}>
                         <table className="w-full text-sm text-left whitespace-nowrap">
                             <thead className="bg-white sticky top-0 shadow-sm z-10"><tr><th className="p-4 text-gray-500 text-center"><input type="checkbox" checked={db.grupos.length > 0 && selectedGroupIds.size === db.grupos.length} onChange={toggleAllGroups} aria-label="Seleccionar todos los grupos" /></th><th className="p-4 text-gray-500"><button type="button" onClick={() => toggleGroupSort('nombre')} className="inline-flex items-center gap-1 font-bold hover:text-blue-700 transition-colors">Grupo {groupSort.key === 'nombre' ? (groupSort.direction === 'asc' ? '↑' : '↓') : '↕'}</button></th><th className="p-4 text-gray-500"><button type="button" onClick={() => toggleGroupSort('asesor')} className="inline-flex items-center gap-1 font-bold hover:text-blue-700 transition-colors">Asesor {groupSort.key === 'asesor' ? (groupSort.direction === 'asc' ? '↑' : '↓') : '↕'}</button></th><th className="p-4 text-gray-500"><button type="button" onClick={() => toggleGroupSort('dia')} className="inline-flex items-center gap-1 font-bold hover:text-blue-700 transition-colors">Día / Hora {groupSort.key === 'dia' ? (groupSort.direction === 'asc' ? '↑' : '↓') : '↕'}</button></th><th className="p-4 text-gray-500"><button type="button" onClick={() => toggleGroupSort('whatsapp')} className="inline-flex items-center gap-1 font-bold hover:text-blue-700 transition-colors">WhatsApp {groupSort.key === 'whatsapp' ? (groupSort.direction === 'asc' ? '↑' : '↓') : '↕'}</button></th><th className="p-4 text-gray-500 text-center">Acción</th></tr></thead>
                             <tbody>
