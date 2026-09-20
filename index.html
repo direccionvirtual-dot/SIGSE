@@ -63,6 +63,108 @@
         /* Sistema de columnas ancladas */
         .seguimiento-table .col-sticky { position: sticky; background-color: #fff; z-index: 11; text-align: left; }
         .seguimiento-table th.col-sticky { z-index: 14 !important; background-color: #f3f4f6; }
+        .seguimiento-scroll {
+            min-width: 0;
+            min-height: 0;
+            max-width: 100%;
+            overflow: auto;
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior: contain;
+            touch-action: pan-x pan-y;
+        }
+        .seguimiento-scroll > .seguimiento-table-container {
+            width: max-content;
+            min-width: 100%;
+        }
+        .seguimiento-scroll .seguimiento-table {
+            width: max-content;
+            min-width: 100%;
+        }
+
+        @media (max-width: 768px) {
+            .seguimiento-scroll {
+                height: calc(100vh - 260px);
+                max-height: calc(100vh - 260px);
+                flex: 1 1 auto;
+            }
+
+            .seguimiento-scroll .seguimiento-table .col-sticky,
+            .seguimiento-scroll .seguimiento-table th.col-sticky {
+                position: static !important;
+                left: auto !important;
+                width: auto !important;
+                min-width: 0 !important;
+                max-width: none !important;
+                box-shadow: none !important;
+            }
+
+            .seguimiento-scroll .seguimiento-table th {
+                position: sticky;
+                top: 0;
+            }
+
+            .seguimiento-scroll .seguimiento-table thead tr:nth-child(2) th {
+                top: 38px;
+            }
+        }
+
+        @media (orientation: landscape) and (max-height: 700px) {
+            .workspace-content {
+                font-size: 0.82rem;
+            }
+
+            .workspace-content .seguimiento-panel > .bg-gray-800 {
+                padding: 0.45rem 0.7rem;
+            }
+
+            .workspace-content .seguimiento-panel > .bg-gray-800 select,
+            .workspace-content .seguimiento-panel > .bg-gray-800 button {
+                padding-top: 0.35rem;
+                padding-bottom: 0.35rem;
+            }
+
+            .workspace-content .seguimiento-panel > .flex.flex-col.no-print > div {
+                padding-top: 0.4rem;
+                padding-bottom: 0.4rem;
+            }
+
+            .workspace-content .seguimiento-table th,
+            .workspace-content .seguimiento-table td {
+                padding: 2px 5px;
+                font-size: 0.62rem;
+            }
+
+            .workspace-content .seguimiento-table input,
+            .workspace-content .seguimiento-table select {
+                font-size: 0.62rem;
+                min-height: 24px;
+            }
+
+            .workspace-content .seguimiento-table .col-sticky[style*="350px"] {
+                width: 260px !important;
+                min-width: 260px !important;
+                max-width: 260px !important;
+            }
+
+            .workspace-content {
+                min-height: 0;
+                overflow: hidden;
+            }
+
+            .seguimiento-panel {
+                min-height: 0;
+            }
+
+            .seguimiento-scroll {
+                height: auto;
+                max-height: none;
+                min-height: 140px;
+                flex: 1 1 0 !important;
+                overflow-y: scroll;
+                overflow-x: auto;
+                display: block;
+            }
+        }
         
         @media print {
             body { background-color: white !important; }
@@ -1536,7 +1638,7 @@
                                             <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-[10px] text-slate-200">v8.8</div>
+                                        <div className="text-[10px] text-slate-200">v8.9</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -1544,7 +1646,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v8.8</div>
+                                        <div className="text-xs text-slate-200">v8.9</div>
                                     </div>
                                 )}
                             </div>
@@ -2881,7 +2983,7 @@ María López	maria.lopez	Z9y8x7" />
                         </div>
                     </header>
 
-                    <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col p-3 print:p-0">
+                    <div className="workspace-content flex-1 min-h-0 min-w-0 overflow-hidden flex flex-col p-3 print:p-0">
                         {tab === 'resumen' && (isAdmin || isCoordinador) && <TabResumen db={db} asesoresGlobales={asesoresGlobales} />}
                         {tab === 'ajustes' && isAdmin && <TabAjustes db={db} onUpdate={onUpdate} asesoresGlobales={asesoresGlobales} />}
                         {tab === 'pegadoExcel' && isAdmin && <TabPegadoExcel db={db} onUpdate={onUpdate} textoPegado={textoPegado} setTextoPegado={setTextoPegado} participantesProcesados={participantesProcesados} setParticipantesProcesados={setParticipantesProcesados} procesarTextoPegado={procesarTextoPegado} descargarPlantillaBase={descargarPlantillaBase} />}
@@ -6193,7 +6295,7 @@ María López	maria.lopez	Z9y8x7" />
 
             if (subView === 'eficiencia' && (isAdmin || isCoordinador)) {
                 return (
-                <div className="flex flex-col h-full bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-100">
+                <div className="seguimiento-panel flex flex-col h-full min-h-0 min-w-0 bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-100">
                         <div className="bg-gray-800 text-white p-4 flex justify-between items-center no-print">
                             <div className="flex items-center gap-2">
                                 <span className="font-bold text-gray-300 uppercase tracking-wider text-xs mr-2">Ciclo Operativo:</span>
@@ -6214,7 +6316,7 @@ María López	maria.lopez	Z9y8x7" />
             }
 
             return (
-                <div className="flex flex-col h-full bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-100">
+                <div className="flex flex-col h-full min-h-0 min-w-0 bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-100">
                     <div className="bg-gray-800 text-white p-4 flex justify-between items-center no-print">
                         <div className="flex items-center gap-2">
                             <span className="font-bold text-gray-300 uppercase tracking-wider text-xs mr-2">Ciclo Operativo:</span>
@@ -6267,8 +6369,8 @@ María López	maria.lopez	Z9y8x7" />
                     )}
 
                     {subView === 'matriz' && (
-                        <div className="flex-1 overflow-auto bg-gray-50 relative">
-                            <div className="bg-white inline-block min-w-full shadow-sm">
+                        <div className="seguimiento-scroll flex-1 bg-gray-50 relative">
+                            <div className="seguimiento-table-container bg-white shadow-sm">
                                 <table className="seguimiento-table w-full whitespace-nowrap">
                                     <thead className="bg-white sticky top-0 z-20">
                                         <tr>
