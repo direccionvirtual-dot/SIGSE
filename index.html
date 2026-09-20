@@ -1511,7 +1511,7 @@
                                             <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-[10px] text-slate-200">v8.5</div>
+                                        <div className="text-[10px] text-slate-200">v8.6</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -1519,7 +1519,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v8.5</div>
+                                        <div className="text-xs text-slate-200">v8.6</div>
                                     </div>
                                 )}
                             </div>
@@ -4706,27 +4706,45 @@ María López	maria.lopez	Z9y8x7" />
                 const pageWidth = doc.internal.pageSize.getWidth();
                 const pageHeight = doc.internal.pageSize.getHeight();
                 const margin = 8;
-                const contentWidth = pageWidth - (margin * 2);
-                const headers = ['NO.', 'ASESOR', 'GRUPO', 'NOMBRE COMPLETO', 'USUARIO', 'CONTRASEÑA', 'CELULAR', 'S1', 'S2', 'S3', 'S4', 'S5', 'S6'];
-                const colWidths = [12, 28, 31, 45, 27, 25, 25, 13, 13, 13, 13, 13, 13];
+                const sessionHeaders = Array.from({ length: Number(db.info?.numSesiones || 0) }, (_, index) => `S${index + 1}`);
+                const paHeaders = Array.from({ length: Number(db.info?.numPA || 0) }, (_, index) => `PA${index + 1}`);
+                const actHeaders = Array.from({ length: Number(db.info?.numAct || 0) }, (_, index) => `ACT${index + 1}`);
+                const headers = ['NO.', 'ASESOR', 'GRUPO', 'NOMBRE COMPLETO', 'USUARIO', 'CONTRASEÑA', 'CELULAR', ...sessionHeaders, ...paHeaders, ...actHeaders];
+                const colWidths = [10, 20, 27, 40, 22, 22, 22, ...sessionHeaders.map(() => 9), ...paHeaders.map(() => 10), ...actHeaders.map(() => 10)];
                 const rowPadding = 2;
                 const lineHeight = 3.5;
                 const headerHeight = 9;
-                const title = String(db.info?.nombreCurso || db.info?.siglas || 'Relación Alumnos').trim();
+                const courseName = String(db.info?.nombreCurso || 'Curso sin nombre').trim();
+                const courseAcronym = String(db.info?.siglas || 'CURSO').trim().toUpperCase();
+                const stateYear = `${String(db.info?.estado || db.info?.idEstado || 'Estado').trim()} ${String(db.info?.anio || new Date().getFullYear()).trim()}`;
                 const groupTitle = grupoFiltro !== 'ALL'
-                    ? `Grupo: ${(db.grupos.find(g => g.id === grupoFiltro) || {}).nombre || 'Sin grupo'}`
-                    : 'Todos los Grupos';
+                    ? String((db.grupos.find(g => g.id === grupoFiltro) || {}).nombre || 'Sin Grupo').trim().toUpperCase()
+                    : 'TODOS LOS GRUPOS';
+                const safeFilePart = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+                const courseLines = doc.splitTextToSize(courseName, pageWidth - (margin * 2));
+                const courseLineHeight = 3.5;
+                const courseY = 13.5;
+                const acronymY = courseY + (courseLines.length * courseLineHeight);
+                const groupY = acronymY + courseLineHeight;
+                const headerBottom = Math.max(29, groupY + 3);
+                const tableHeaderY = headerBottom + 3;
 
                 const drawHeader = () => {
                     doc.setFillColor(0, 25, 51);
-                    doc.rect(0, 0, pageWidth, 15, 'F');
+                    doc.rect(0, 0, pageWidth, headerBottom, 'F');
                     doc.setTextColor(255, 255, 255);
                     doc.setFont('helvetica', 'bold');
-                    doc.setFontSize(11);
-                    doc.text(title, margin, 7);
+                    doc.setFontSize(10);
+                    doc.text('Relación Alumnos', margin, 6);
+                    doc.setFontSize(7.5);
                     doc.setFont('helvetica', 'normal');
-                    doc.setFontSize(7);
-                    doc.text(`Relación Alumnos · ${groupTitle}`, margin, 12);
+                    doc.text(stateYear, margin, 11);
+                    doc.setFont('helvetica', 'bold');
+                    doc.text(courseLines, margin, courseY);
+                    doc.setFont('helvetica', 'normal');
+                    doc.text(courseAcronym, margin, acronymY);
+                    doc.setFont('helvetica', 'bold');
+                    doc.text(groupTitle, margin, groupY);
 
                     let x = margin;
                     doc.setFont('helvetica', 'bold');
@@ -4734,26 +4752,27 @@ María López	maria.lopez	Z9y8x7" />
                     headers.forEach((header, index) => {
                         doc.setFillColor(229, 236, 255);
                         doc.setTextColor(0, 25, 51);
-                        doc.rect(x, 18, colWidths[index], headerHeight, 'F');
-                        doc.rect(x, 18, colWidths[index], headerHeight);
-                        doc.text(header, x + 1.5, 23.5, { maxWidth: colWidths[index] - 3 });
+                        doc.rect(x, tableHeaderY, colWidths[index], headerHeight, 'F');
+                        doc.rect(x, tableHeaderY, colWidths[index], headerHeight);
+                        doc.text(header, x + 1.5, tableHeaderY + 5.5, { maxWidth: colWidths[index] - 3 });
                         x += colWidths[index];
                     });
-                    return 18 + headerHeight;
+                    return tableHeaderY + headerHeight;
                 };
 
                 const drawRow = (row, y) => {
-                    const values = [row.consecutivo, row.asesor, row.grupo, row.completo, row.usuario, db.info.moodlePass, row.celular, '', '', '', '', '', ''];
+                    const values = [row.consecutivo, row.asesor, row.grupo, row.completo, row.usuario, db.info.moodlePass, row.celular, ...sessionHeaders.map(() => ''), ...paHeaders.map(() => ''), ...actHeaders.map(() => '')];
                     const lines = values.map((value, index) => doc.splitTextToSize(String(value || '-'), colWidths[index] - (rowPadding * 2)));
                     const rowHeight = Math.max(7, ...lines.map(cellLines => cellLines.length * lineHeight + (rowPadding * 2)));
                     let x = margin;
                     doc.setFont('helvetica', 'normal');
-                    doc.setFontSize(6.5);
+                    doc.setFontSize(5.8);
                     doc.setTextColor(0, 0, 0);
                     values.forEach((value, index) => {
                         doc.rect(x, y, colWidths[index], rowHeight);
                         const cellLines = lines[index];
                         const textY = y + rowPadding + lineHeight - 0.5;
+                        doc.setFontSize(index === 1 ? 5 : 5.8);
                         doc.text(cellLines, x + rowPadding, textY, { maxWidth: colWidths[index] - (rowPadding * 2) });
                         x += colWidths[index];
                     });
@@ -4769,8 +4788,8 @@ María López	maria.lopez	Z9y8x7" />
                 } else {
                     lista.forEach(row => {
                         doc.setFont('helvetica', 'normal');
-                        doc.setFontSize(6.5);
-                        const previewLines = [row.consecutivo, row.asesor, row.grupo, row.completo, row.usuario, db.info.moodlePass, row.celular, '', '', '', '', '', '']
+                        doc.setFontSize(5.8);
+                        const previewLines = [row.consecutivo, row.asesor, row.grupo, row.completo, row.usuario, db.info.moodlePass, row.celular, ...sessionHeaders.map(() => ''), ...paHeaders.map(() => ''), ...actHeaders.map(() => '')]
                             .map((value, index) => doc.splitTextToSize(String(value || '-'), colWidths[index] - (rowPadding * 2)));
                         const rowHeight = Math.max(7, ...previewLines.map(cellLines => cellLines.length * lineHeight + (rowPadding * 2)));
 
@@ -4782,7 +4801,7 @@ María López	maria.lopez	Z9y8x7" />
                     });
                 }
 
-                const fileName = `Relacion_Alumnos_${db.info?.siglas || 'curso'}.pdf`;
+                const fileName = `Relacion_Alumnos_${safeFilePart(courseAcronym)}_${safeFilePart(groupTitle)}.pdf`;
                 doc.save(fileName);
             };
 
@@ -5513,6 +5532,7 @@ María López	maria.lopez	Z9y8x7" />
                 if(activeSemId) {
                     const activeData = activeSem?.data;
                     if(activeData) newSem.data = JSON.parse(JSON.stringify(activeData));
+                    if (activeSem?.msgGrpGroups) newSem.msgGrpGroups = JSON.parse(JSON.stringify(activeSem.msgGrpGroups));
                 }
                 onUpdate({ ...db, semanasSeguimiento: [...semanas, newSem] });
                 setActiveSemId(newSem.id);
@@ -5605,6 +5625,15 @@ María López	maria.lopez	Z9y8x7" />
                 return calcularCalificacionFinal(d, db.info);
             }, [db.info, getPData]);
 
+            const getGroupMsgStatus = useCallback((groupId) => {
+                const groupKey = groupId || 'NONE';
+                const groupStatuses = activeSem?.msgGrpGroups || {};
+                if (Object.prototype.hasOwnProperty.call(groupStatuses, groupKey)) return !!groupStatuses[groupKey];
+
+                const groupParticipants = db.participantes.filter(p => (p.grupoId || 'NONE') === groupKey);
+                return groupParticipants.length > 0 && groupParticipants.every(p => !!activeSem?.data?.[p.id]?.msgGrp);
+            }, [activeSem, db.participantes]);
+
             const getColumnValue = useCallback((p, key) => {
                 const d = getPData(p.id);
                 const g = db.grupos.find(x => x.id === p.grupoId) || {};
@@ -5651,12 +5680,12 @@ María López	maria.lopez	Z9y8x7" />
                 if (key === 'estatus') return status;
                 if (key === 'estatal') return d.encEst ? 'SI' : 'NO';
                 if (key === 'institucion') return d.encInst ? 'SI' : 'NO';
-                if (key === 'msgGrp') return d.msgGrp ? 'SI' : 'NO';
+                if (key === 'msgGrp') return getGroupMsgStatus(p.grupoId) ? 'SI' : 'NO';
                 if (key === 'msgPer') return d.msgPer ? 'SI' : 'NO';
                 if (key === 'llamada') return d.llam ? 'SI' : 'NO';
                 if (key === 'obs') return d.obs || '';
                 return '';
-            }, [db, getPData, getEffectiveAsis, calcFinal, umbralAcreditacion]);
+            }, [db, getPData, getEffectiveAsis, getGroupMsgStatus, calcFinal, umbralAcreditacion]);
 
             const matchesColumnFilters = useCallback((p) => {
                 return Object.entries(columnFilters).every(([filterKey, filterValue]) => {
@@ -5837,6 +5866,17 @@ María López	maria.lopez	Z9y8x7" />
                 else newData[pId][field] = value;
                 
                 const newSemanas = semanas.map(s => s.id === activeSem.id ? { ...s, data: newData } : s);
+                onUpdate({ ...db, semanasSeguimiento: newSemanas });
+            };
+
+            const toggleVisibleMessageGroups = () => {
+                if (!activeSem || !canEditManual || listParticipantes.length === 0) return;
+                const groupIds = [...new Set(listParticipantes.map(p => p.grupoId || 'NONE'))];
+                const allMarked = groupIds.every(groupId => getGroupMsgStatus(groupId));
+                const nextValue = !allMarked;
+                const msgGrpGroups = { ...(activeSem.msgGrpGroups || {}) };
+                groupIds.forEach(groupId => { msgGrpGroups[groupId] = nextValue; });
+                const newSemanas = semanas.map(s => s.id === activeSem.id ? { ...s, msgGrpGroups } : s);
                 onUpdate({ ...db, semanasSeguimiento: newSemanas });
             };
 
@@ -6134,7 +6174,14 @@ María López	maria.lopez	Z9y8x7" />
                                             <th><select className="w-full text-[10px] p-1 border border-gray-200 rounded" value={columnFilters.estatus} onChange={e => setColumnFilters(prev => ({ ...prev, estatus: e.target.value }))}><option value="ALL">Todos</option><option value="ACREDITADO">ACREDITADO</option><option value="NO ACREDITADO">NO ACREDITADO</option></select></th>
                                             <th><select className="w-full text-[10px] p-1 border border-gray-200 rounded" value={columnFilters.estatal} onChange={e => setColumnFilters(prev => ({ ...prev, estatal: e.target.value }))}><option value="ALL">Todos</option><option value="SI">SI</option><option value="NO">NO</option></select></th>
                                             <th><select className="w-full text-[10px] p-1 border border-gray-200 rounded" value={columnFilters.institucion} onChange={e => setColumnFilters(prev => ({ ...prev, institucion: e.target.value }))}><option value="ALL">Todos</option><option value="SI">SI</option><option value="NO">NO</option></select></th>
-                                            <th><select className="w-full text-[10px] p-1 border border-gray-200 rounded" value={columnFilters.msgGrp} onChange={e => setColumnFilters(prev => ({ ...prev, msgGrp: e.target.value }))}><option value="ALL">Todos</option><option value="SI">SI</option><option value="NO">NO</option></select></th>
+                                            <th>
+                                                <select className="w-full text-[10px] p-1 border border-gray-200 rounded" value={columnFilters.msgGrp} onChange={e => setColumnFilters(prev => ({ ...prev, msgGrp: e.target.value }))}>
+                                                    <option value="ALL">Todos</option><option value="SI">SI</option><option value="NO">NO</option>
+                                                </select>
+                                                <button type="button" disabled={!canEditManual || listParticipantes.length === 0} onClick={toggleVisibleMessageGroups} className={`mt-1 block w-full whitespace-normal rounded border px-1 py-1 text-[9px] font-bold leading-tight ${canEditManual && listParticipantes.length > 0 ? 'border-yellow-300 bg-yellow-100 text-yellow-900 hover:bg-yellow-200' : 'cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400'}`} title="Marca o desmarca todos los grupos visibles con una sola actualización">
+                                                    <i className="fa-solid fa-layer-group mr-1"></i>{listParticipantes.length > 0 && listParticipantes.every(p => getGroupMsgStatus(p.grupoId)) ? 'Desmarcar grupos' : 'Marcar grupos'}
+                                                </button>
+                                            </th>
                                             <th><select className="w-full text-[10px] p-1 border border-gray-200 rounded" value={columnFilters.msgPer} onChange={e => setColumnFilters(prev => ({ ...prev, msgPer: e.target.value }))}><option value="ALL">Todos</option><option value="SI">SI</option><option value="NO">NO</option></select></th>
                                             <th><select className="w-full text-[10px] p-1 border border-gray-200 rounded" value={columnFilters.llamada} onChange={e => setColumnFilters(prev => ({ ...prev, llamada: e.target.value }))}><option value="ALL">Todos</option><option value="SI">SI</option><option value="NO">NO</option></select></th>
                                             <th><input type="text" className="w-full text-[10px] p-1 border border-gray-200 rounded" placeholder="Buscar obs" value={columnFilters.obs} onChange={e => setColumnFilters(prev => ({ ...prev, obs: e.target.value }))} /></th>
@@ -6217,7 +6264,7 @@ María López	maria.lopez	Z9y8x7" />
                                                     <td><input type="checkbox" disabled={!canEditCore} checked={d.encEst} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>updatePData(p.id, 'encEst', e.target.checked)} className={`seguimiento-checkbox w-4 h-4 ${!canEditCore?'opacity-50':''}`}/></td>
                                                     <td><input type="checkbox" disabled={!canEditCore} checked={d.encInst} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>updatePData(p.id, 'encInst', e.target.checked)} className={`seguimiento-checkbox w-4 h-4 ${!canEditCore?'opacity-50':''}`}/></td>
 
-                                                    <td className="bg-yellow-50"><input type="checkbox" disabled={!canEditManual} checked={d.msgGrp} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>updatePData(p.id, 'msgGrp', e.target.checked)} className={`seguimiento-checkbox w-4 h-4 ${!canEditManual?'opacity-50 cursor-not-allowed':''}`}/></td>
+                                                    <td className="bg-yellow-50" title="MSJ GRUPO se controla por grupo"><input type="checkbox" disabled checked={getGroupMsgStatus(p.grupoId)} className="seguimiento-checkbox w-4 h-4 cursor-not-allowed opacity-70" /></td>
                                                     <td className="bg-yellow-50"><input type="checkbox" disabled={!canEditManual} checked={d.msgPer} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>updatePData(p.id, 'msgPer', e.target.checked)} className={`seguimiento-checkbox w-4 h-4 ${!canEditManual?'opacity-50 cursor-not-allowed':''}`}/></td>
                                                     <td className="bg-yellow-50"><input type="checkbox" disabled={!canEditManual} checked={d.llam} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>updatePData(p.id, 'llam', e.target.checked)} className={`seguimiento-checkbox w-4 h-4 ${!canEditManual?'opacity-50 cursor-not-allowed':''}`}/></td>
                                                     <td className="bg-yellow-50 p-0">
