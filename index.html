@@ -901,12 +901,13 @@
 
             // Respaldo
             const descargarRespaldo = () => {
-                const data = { basesDeDatos, personalGlobal };
+                const data = { basesDeDatos, personalGlobal, adminUsers, zoomAccounts };
                 const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
                 const link = document.createElement("a");
                 link.href = URL.createObjectURL(blob);
                 link.download = `Respaldo_SIGSE_${new Date().toISOString().slice(0,10)}.json`;
                 link.click();
+                URL.revokeObjectURL(link.href);
             };
 
             const cargarRespaldo = (e) => {
@@ -920,6 +921,8 @@
                             if(confirm("¿Estás seguro de restaurar este respaldo? Reemplazará los datos actuales en esta pantalla.")) {
                                 setBasesDeDatos(data.basesDeDatos);
                                 setPersonalGlobal(data.personalGlobal || data.asesoresGlobales);
+                                if (Array.isArray(data.adminUsers)) setAdminUsers(data.adminUsers);
+                                if (Array.isArray(data.zoomAccounts)) setZoomAccounts(data.zoomAccounts);
                                 showToast("¡Sistema restaurado con éxito! Tus cursos y gráficas han vuelto.", 'success');
                             }
                         } else {
@@ -1325,6 +1328,27 @@
                 setCreatePersonalModal({ show: true, mode: 'individual', nombre: '', usuario: '', password: '', roles: ['asesor'], bulkText: '' });
             };
 
+            const abrirEdicionPersonalAdmin = (persona) => {
+                const coordinatorCourseIds = basesDeDatos
+                    .filter(db => (db.info.coordinadorIds || (db.info.coordinadorId ? [db.info.coordinadorId] : [])).includes(persona.id))
+                    .map(db => db.id);
+                const assignedGroupIds = basesDeDatos
+                    .flatMap(db => (db.grupos || []).filter(grupo => grupo.asesorId === persona.id || grupo.asesor === persona.nombre).map(grupo => grupo.id));
+                const firstAssignedCourse = basesDeDatos.find(db => (db.grupos || []).some(grupo => assignedGroupIds.includes(grupo.id)))?.id || '';
+                setAssignedCourseSearch('');
+                setEditPersonalModal({
+                    show: true,
+                    id: persona.id,
+                    nombre: persona.nombre,
+                    usuario: persona.usuario || '',
+                    password: persona.password,
+                    roles: [...new Set([...(persona.roles || ['asesor']), ...(coordinatorCourseIds.length ? ['coordinador'] : [])])],
+                    assignedGroupIds,
+                    coordinatorCourseIds,
+                    selectedGroupCourseId: firstAssignedCourse
+                });
+            };
+
             const registrarPersonalDesdeModal = () => {
                 if (createPersonalModal.mode === 'individual') {
                     const nombre = createPersonalModal.nombre.trim();
@@ -1512,7 +1536,7 @@
                                             <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-[10px] text-slate-200">v8.6</div>
+                                        <div className="text-[10px] text-slate-200">v8.8</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -1520,7 +1544,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v8.6</div>
+                                        <div className="text-xs text-slate-200">v8.8</div>
                                     </div>
                                 )}
                             </div>
@@ -1955,7 +1979,7 @@
                                                     <tbody>
                                                         {personalFiltrado.map(a => (
                                                             <tr key={a.id} className="border-b border-gray-50 hover:bg-indigo-50/50 transition-colors">
-                                                                <td className="p-4 font-semibold text-gray-800">{a.nombre}</td>
+                                                                <td className="p-4 font-semibold text-gray-800"><button type="button" onClick={() => abrirEdicionPersonalAdmin(a)} className="text-left text-gray-800 hover:text-gray-900" title="Editar datos del personal">{a.nombre}</button></td>
                                                                 <td className="p-4"><div className="flex flex-wrap gap-1">{(a.roles || ['asesor']).map(role => <span key={role} className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase ${role === 'manager' ? 'bg-amber-100 text-amber-700' : role === 'coordinador' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{role}</span>)}</div></td>
                                                                 <td className="p-4 font-mono text-xs text-gray-700 bg-indigo-50/40 px-2 rounded">{a.usuario || '-'}</td>
                                                                 <td className="p-4 font-mono text-xs text-gray-500 bg-gray-50/50 px-2 rounded">{a.password}</td>
@@ -1983,7 +2007,16 @@
                                             <h2 className="text-xl font-bold text-gray-900">Configuración Administrador</h2>
                                             <p className="text-gray-600">Modifica contraseñas y administra las cuentas de acceso de administrador.</p>
                                         </div>
-                                        <button onClick={() => setAdminSection('menu')} className="self-start md:self-auto bg-gray-100 text-gray-700 px-4 py-2 rounded-xl hover:bg-gray-200 transition-colors">Volver al menú</button>
+                                        <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
+                                            <button type="button" onClick={descargarRespaldo} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700" title="Descargar respaldo en formato JSON">
+                                                <i className="fa-solid fa-download mr-1.5"></i>Respaldar JSON
+                                            </button>
+                                            <label className="cursor-pointer rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition-colors hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700" title="Cargar respaldo en formato JSON">
+                                                <i className="fa-solid fa-upload mr-1.5"></i>Cargar JSON
+                                                <input type="file" accept=".json,application/json" className="hidden" onChange={cargarRespaldo} />
+                                            </label>
+                                            <button onClick={() => setAdminSection('menu')} className="bg-gray-100 text-gray-700 px-4 py-2 rounded-xl hover:bg-gray-200 transition-colors">Volver al menú</button>
+                                        </div>
                                     </div>
 
                                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -2060,7 +2093,7 @@
                                             <tbody>
                                                 {personalFiltrado.map(a => (
                                                     <tr key={a.id} className="border-b border-gray-50 hover:bg-violet-50/50 transition-colors">
-                                                        <td className="p-4 font-semibold text-gray-800">{a.nombre}</td>
+                                                        <td className="p-4 font-semibold text-gray-800"><button type="button" onClick={() => abrirEdicionPersonalAdmin(a)} className="text-left text-gray-800 hover:text-gray-900" title="Editar datos del personal">{a.nombre}</button></td>
                                                         <td className="p-4"><div className="flex flex-wrap gap-1">{(a.roles || ['asesor']).map(role => <span key={role} className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase ${role === 'manager' ? 'bg-amber-100 text-amber-700' : role === 'coordinador' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{role}</span>)}</div></td>
                                                         <td className="p-4 font-mono text-xs text-gray-700 bg-violet-50/40 px-2 rounded">{a.usuario || '-'}</td>
                                                         <td className="p-4 font-mono text-xs text-gray-500 bg-gray-50/50 px-2 rounded">{a.password}</td>
@@ -2771,6 +2804,7 @@ María López	maria.lopez	Z9y8x7" />
                             setParticipantesProcesados={setParticipantesProcesados}
                             procesarTextoPegado={procesarTextoPegado}
                             descargarPlantillaBase={descargarPlantillaBase}
+                            onEditPersonal={abrirEdicionPersonalAdmin}
                         />
                         {renderToast()}
                     </>
@@ -2783,18 +2817,41 @@ María López	maria.lopez	Z9y8x7" />
         // ==========================================
         // COMPONENTE WORKSPACE (4.0 LÓGICA DE PERMISOS)
         // ==========================================
-        function Workspace({ db, appView, setAppView, asesoresGlobales, setAsesoresGlobales, zoomAccounts, onUpdate, modoPersonal, textoPegado, setTextoPegado, participantesProcesados, setParticipantesProcesados, procesarTextoPegado, descargarPlantillaBase }) {
+        function Workspace({ db, appView, setAppView, asesoresGlobales, setAsesoresGlobales, zoomAccounts, onUpdate, modoPersonal, textoPegado, setTextoPegado, participantesProcesados, setParticipantesProcesados, procesarTextoPegado, descargarPlantillaBase, onEditPersonal }) {
             const isPersonal = modoPersonal.activo;
             const isAsesor = isPersonal && modoPersonal.roleInProject === 'asesor';
             const isCoordinador = isPersonal && modoPersonal.roleInProject === 'coordinador';
             const isManager = isPersonal && modoPersonal.roleInProject === 'manager';
             const isAdmin = !isPersonal || isManager;
+            const canEditStaff = !isPersonal;
 
             const [tab, setTab] = useState(isAdmin || isCoordinador ? 'resumen' : 'seguimiento'); 
+            const [editingWorkspacePersonal, setEditingWorkspacePersonal] = useState(null);
+            const [workspacePersonalData, setWorkspacePersonalData] = useState(null);
 
             const handleVolver = () => {
                 if (isPersonal) setAppView('personal_dashboard');
                 else setAppView('admin_dashboard');
+            };
+
+            const abrirEdicionPersonalWorkspace = persona => {
+                if (!canEditStaff || !persona?.id) return;
+                setEditingWorkspacePersonal(persona);
+                setWorkspacePersonalData({ id: persona.id, nombre: persona.nombre || '', usuario: persona.usuario || '', password: persona.password || '' });
+            };
+
+            const cerrarEdicionPersonalWorkspace = () => {
+                setEditingWorkspacePersonal(null);
+                setWorkspacePersonalData(null);
+            };
+
+            const guardarEdicionPersonalWorkspace = () => {
+                if (!workspacePersonalData?.nombre.trim() || !workspacePersonalData.usuario.trim() || !workspacePersonalData.password.trim()) return alert('El nombre, usuario y contraseña son obligatorios.');
+                const nombreAnterior = editingWorkspacePersonal.nombre;
+                const nombreNuevo = workspacePersonalData.nombre.trim();
+                setAsesoresGlobales(asesoresGlobales.map(persona => persona.id === workspacePersonalData.id ? { ...persona, ...workspacePersonalData, nombre: nombreNuevo, usuario: workspacePersonalData.usuario.trim(), password: workspacePersonalData.password.trim() } : persona));
+                onUpdate({ ...db, grupos: (db.grupos || []).map(grupo => grupo.asesorId === workspacePersonalData.id || grupo.asesor === nombreAnterior ? { ...grupo, asesor: nombreNuevo, asesorId: workspacePersonalData.id } : grupo) });
+                cerrarEdicionPersonalWorkspace();
             };
 
             return (
@@ -2828,12 +2885,26 @@ María López	maria.lopez	Z9y8x7" />
                         {tab === 'resumen' && (isAdmin || isCoordinador) && <TabResumen db={db} asesoresGlobales={asesoresGlobales} />}
                         {tab === 'ajustes' && isAdmin && <TabAjustes db={db} onUpdate={onUpdate} asesoresGlobales={asesoresGlobales} />}
                         {tab === 'pegadoExcel' && isAdmin && <TabPegadoExcel db={db} onUpdate={onUpdate} textoPegado={textoPegado} setTextoPegado={setTextoPegado} participantesProcesados={participantesProcesados} setParticipantesProcesados={setParticipantesProcesados} procesarTextoPegado={procesarTextoPegado} descargarPlantillaBase={descargarPlantillaBase} />}
-                        {tab === 'grupos' && isAdmin && <TabGrupos db={db} onUpdate={onUpdate} asesoresGlobales={asesoresGlobales} />}
+                        {tab === 'grupos' && isAdmin && <TabGrupos db={db} onUpdate={onUpdate} asesoresGlobales={asesoresGlobales} onEditPersonal={canEditStaff ? abrirEdicionPersonalWorkspace : null} />}
                         {tab === 'datos' && isAdmin && <TabDatos db={db} onUpdate={onUpdate} />}
                         {tab === 'exportar' && (isAdmin || isCoordinador || isAsesor) && <TabExportar db={db} onUpdate={onUpdate} isAdmin={isAdmin} isCoordinador={isCoordinador} isAsesor={isAsesor} asesorGrupoId={modoPersonal.grupoId} asesoresGlobales={asesoresGlobales} />}
-                        {tab === 'seguimiento' && <TabSeguimiento db={db} onUpdate={onUpdate} isAsesor={isAsesor} isCoordinador={isCoordinador} isAdmin={isAdmin} asesorGrupoId={modoPersonal.grupoId} />}
+                        {tab === 'seguimiento' && <TabSeguimiento db={db} onUpdate={onUpdate} asesoresGlobales={asesoresGlobales} isAsesor={isAsesor} isCoordinador={isCoordinador} isAdmin={isAdmin} asesorGrupoId={modoPersonal.grupoId} personalName={modoPersonal.personalName} onEditPersonal={canEditStaff ? abrirEdicionPersonalWorkspace : null} />}
                         {tab === 'control' && isPersonal && <ControlConsulta db={db} zoomAccounts={zoomAccounts} isAsesor={isAsesor} grupoId={modoPersonal.grupoId} />}
                     </div>
+                    {editingWorkspacePersonal && workspacePersonalData && (
+                        <Modal show={Boolean(editingWorkspacePersonal && workspacePersonalData)} onClose={cerrarEdicionPersonalWorkspace} width="max-w-lg" ariaLabel="Editar datos del asesor">
+                            <div className="bg-white p-6">
+                                <div className="mb-5 flex items-start justify-between border-b border-slate-100 pb-4">
+                                    <div><p className="text-xs font-bold uppercase tracking-wider text-slate-500">Personal</p><h3 className="text-xl font-black text-slate-900">Editar datos del asesor</h3></div>
+                                    <button type="button" onClick={cerrarEdicionPersonalWorkspace} className="text-slate-400 hover:text-slate-800" aria-label="Cerrar edición"><i className="fa-solid fa-xmark text-lg"></i></button>
+                                </div>
+                                <div className="space-y-4">
+                                    {[['nombre', 'Nombre completo'], ['usuario', 'Usuario'], ['password', 'Contraseña']].map(([key, label]) => <label key={key} className="block text-xs font-bold uppercase tracking-wide text-slate-600">{label}<input type="text" value={workspacePersonalData[key]} onChange={e => setWorkspacePersonalData(prev => ({ ...prev, [key]: e.target.value }))} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm normal-case outline-none focus:border-slate-500 focus:bg-white" /></label>)}
+                                </div>
+                                <div className="mt-6 flex justify-end gap-3 border-t border-slate-100 pt-4"><button type="button" onClick={cerrarEdicionPersonalWorkspace} className="rounded-xl bg-slate-100 px-5 py-2.5 font-semibold text-slate-600 hover:bg-slate-200">Cancelar</button><button type="button" onClick={guardarEdicionPersonalWorkspace} className="rounded-xl bg-slate-800 px-5 py-2.5 font-bold text-white hover:bg-slate-900">Guardar cambios</button></div>
+                            </div>
+                        </Modal>
+                    )}
                 </div>
             );
         }
@@ -3213,7 +3284,7 @@ María López	maria.lopez	Z9y8x7" />
         }
 
         // --- PESTAÑAS GRUPOS, DATOS, EXPORTAR ---
-        function TabGrupos({ db, onUpdate, asesoresGlobales }) {
+        function TabGrupos({ db, onUpdate, asesoresGlobales, onEditPersonal }) {
             const [n, setN] = useState({ nombre: '', asesorId: '', asesor: '', contacto: '', dia: '', hora: '', whatsapp: '' });
             const [bulkCount, setBulkCount] = useState('');
             const [bulkGroupText, setBulkGroupText] = useState('');
@@ -3437,7 +3508,7 @@ María López	maria.lopez	Z9y8x7" />
                                     <tr key={g.id} className="border-b border-gray-50 hover:bg-blue-50/50 transition-colors">
                                         <td className="p-4 text-center"><input type="checkbox" checked={selectedGroupIds.has(g.id)} onChange={() => setSelectedGroupIds(previous => { const next = new Set(previous); if (next.has(g.id)) next.delete(g.id); else next.add(g.id); return next; })} aria-label={`Seleccionar ${g.nombre}`} /></td>
                                         <td className="p-4 font-bold text-gray-800">{g.nombre}</td>
-                                        <td className="p-4 text-blue-700 font-semibold">{g.asesor}</td>
+                                        <td className="p-4 text-gray-800 font-semibold">{onEditPersonal && g.asesorId ? <button type="button" onClick={() => onEditPersonal(asesoresGlobales.find(persona => persona.id === g.asesorId) || { id: g.asesorId, nombre: g.asesor, usuario: '', password: '', roles: ['asesor'] })} className="text-left text-gray-800 hover:text-gray-900" title="Editar datos del asesor">{g.asesor}</button> : g.asesor}</td>
                                         <td className="p-4 text-gray-600">{g.dia} - {g.hora}</td>
                                         <td className="p-4 text-blue-500 truncate max-w-xs">{/^https?:\/\//i.test(String(g.whatsapp || '').trim()) ? <a href={String(g.whatsapp).trim()} target="_blank" rel="noopener noreferrer" className="hover:underline" title="Abrir enlace">{g.whatsapp}</a> : (g.whatsapp || '')}</td>
                                         <td className="p-4 text-center flex items-center justify-center gap-2">
@@ -5374,7 +5445,7 @@ María López	maria.lopez	Z9y8x7" />
         // ==========================================
         // MACRO-MÓDULO: SEGUIMIENTO
         // ==========================================
-        function TabSeguimiento({ db, onUpdate, isAsesor, isCoordinador, isAdmin, asesorGrupoId }) {
+        function TabSeguimiento({ db, onUpdate, isAsesor, isCoordinador, isAdmin, asesorGrupoId, personalName, onEditPersonal }) {
             const semanas = db.semanasSeguimiento || [];
             
             useEffect(() => {
@@ -5520,6 +5591,98 @@ María López	maria.lopez	Z9y8x7" />
 
             const canEditCore = isAdmin;
             const canEditManual = isAdmin || ((isAsesor || isCoordinador) && !isLockedForAsesor);
+            const mensajes = db.mensajes || [];
+            const [showMessageModal, setShowMessageModal] = useState(false);
+            const [showMessageDetailModal, setShowMessageDetailModal] = useState(false);
+            const [selectedMessageParticipantId, setSelectedMessageParticipantId] = useState('');
+            const [editingParticipant, setEditingParticipant] = useState(null);
+            const [editingParticipantData, setEditingParticipantData] = useState(null);
+            const [messageForm, setMessageForm] = useState({ participantId: '', texto: '', prioridad: 'normal', destinatarios: ['asesor', 'coordinador'] });
+
+            const mensajesVisibles = useMemo(() => mensajes.filter(mensaje => {
+                if (isAdmin) return true;
+                const participant = db.participantes.find(item => item.id === mensaje.participantId);
+                if (isAsesor && participant?.grupoId !== asesorGrupoId) return false;
+                return (mensaje.destinatarios || []).some(destinatario =>
+                    destinatario === 'ambos' || (isAsesor && destinatario === 'asesor') || (isCoordinador && destinatario === 'coordinador')
+                );
+            }), [mensajes, db.participantes, isAdmin, isAsesor, isCoordinador, asesorGrupoId]);
+
+            const abrirNuevoMensaje = (participantId = '') => {
+                setMessageForm({ participantId, texto: '', prioridad: 'normal', destinatarios: ['asesor', 'coordinador'] });
+                setShowMessageModal(true);
+            };
+
+            const abrirMensajesParticipante = participantId => {
+                setSelectedMessageParticipantId(participantId);
+                setShowMessageDetailModal(true);
+            };
+
+            const abrirEdicionParticipante = participant => {
+                if (!isAdmin) return;
+                setEditingParticipant(participant);
+                setEditingParticipantData({ ...participant, grupoId: participant.grupoId || '' });
+            };
+
+            const cerrarEdicionParticipante = () => {
+                setEditingParticipant(null);
+                setEditingParticipantData(null);
+            };
+
+            const guardarEdicionParticipante = () => {
+                if (!editingParticipantData) return;
+                const participantes = db.participantes.map(participante => participante.id === editingParticipantData.id
+                    ? { ...participante, ...editingParticipantData, completo: `${editingParticipantData.paterno || ''} ${editingParticipantData.materno || ''} ${editingParticipantData.nombre || ''}`.trim() }
+                    : participante
+                );
+                onUpdate({ ...db, participantes });
+                cerrarEdicionParticipante();
+            };
+
+            const guardarMensaje = () => {
+                const texto = messageForm.texto.trim();
+                if (!messageForm.participantId || !texto) return alert('Selecciona un alumno y escribe el mensaje.');
+                if (!messageForm.destinatarios.length) return alert('Selecciona al menos un destinatario.');
+                const participante = db.participantes.find(item => item.id === messageForm.participantId);
+                const nuevoMensaje = {
+                    id: `MSG-${Date.now()}`,
+                    participantId: messageForm.participantId,
+                    grupoId: participante?.grupoId || null,
+                    texto,
+                    prioridad: messageForm.prioridad,
+                    destinatarios: messageForm.destinatarios,
+                    estado: 'pendiente',
+                    creadoPor: personalName || 'Procesos Virtuales',
+                    creadoEn: new Date().toISOString(),
+                    atendidoPor: '',
+                    atendidoEn: '',
+                    respuesta: ''
+                };
+                onUpdate({ ...db, mensajes: [...mensajes, nuevoMensaje] });
+                setShowMessageModal(false);
+            };
+
+            const actualizarMensaje = (mensajeId, changes) => {
+                const updatedMessages = mensajes.map(mensaje => mensaje.id === mensajeId ? {
+                    ...mensaje,
+                    ...changes,
+                    ...(changes.estado === 'atendido' ? { atendidoPor: personalName || (isAdmin ? 'Administrador' : isAsesor ? 'Asesor' : 'Coordinador'), atendidoEn: new Date().toISOString() } : {})
+                } : mensaje);
+                onUpdate({ ...db, mensajes: updatedMessages });
+            };
+
+            const eliminarMensaje = mensajeId => {
+                if (!isAdmin && !isCoordinador) return;
+                if (!confirm('¿Eliminar este mensaje? Esta acción no se puede deshacer.')) return;
+                onUpdate({ ...db, mensajes: mensajes.filter(mensaje => mensaje.id !== mensajeId) });
+                if (getParticipantMessages(selectedMessageParticipantId).length <= 1) setShowMessageDetailModal(false);
+            };
+
+            const getParticipantName = participantId => db.participantes.find(item => item.id === participantId)?.completo || 'Alumno sin nombre';
+            const getParticipantMessages = participantId => mensajesVisibles.filter(mensaje => mensaje.participantId === participantId);
+            const getMessageStatusClasses = estado => estado === 'atendido'
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                : 'border-amber-200 bg-amber-50 text-amber-900';
 
             const addSemana = () => {
                 setNewSemanaName('Semana ' + (semanas.length + 1));
@@ -6180,7 +6343,7 @@ María López	maria.lopez	Z9y8x7" />
                                                     <option value="ALL">Todos</option><option value="SI">SI</option><option value="NO">NO</option>
                                                 </select>
                                                 <button type="button" disabled={!canEditManual || listParticipantes.length === 0} onClick={toggleVisibleMessageGroups} className={`mt-1 block w-full whitespace-normal rounded border px-1 py-1 text-[9px] font-bold leading-tight ${canEditManual && listParticipantes.length > 0 ? 'border-yellow-300 bg-yellow-100 text-yellow-900 hover:bg-yellow-200' : 'cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400'}`} title="Marca o desmarca todos los grupos visibles con una sola actualización">
-                                                    <i className="fa-solid fa-layer-group mr-1"></i>{listParticipantes.length > 0 && listParticipantes.every(p => getGroupMsgStatus(p.grupoId)) ? 'Desmarcar grupos' : 'Marcar grupos'}
+                                                    <i className="fa-solid fa-layer-group mr-1"></i>{listParticipantes.length > 0 && listParticipantes.every(p => getGroupMsgStatus(p.grupoId)) ? 'Desmarcar grupos' : 'Mensaje Grupal'}
                                                 </button>
                                             </th>
                                             <th><select className="w-full text-[10px] p-1 border border-gray-200 rounded" value={columnFilters.msgPer} onChange={e => setColumnFilters(prev => ({ ...prev, msgPer: e.target.value }))}><option value="ALL">Todos</option><option value="SI">SI</option><option value="NO">NO</option></select></th>
@@ -6198,10 +6361,15 @@ María López	maria.lopez	Z9y8x7" />
                                                 <tr key={p.id} className="hover:bg-blue-50/50 group">
                                                     <td className="col-sticky font-bold text-gray-500 text-center" style={{left: 0, width: '40px', minWidth: '40px', maxWidth: '40px'}}>{idx+1}</td>
                                                     <td className="col-sticky font-mono text-[10px] text-center" style={{left: '40px', width: '150px', minWidth: '150px', maxWidth: '150px'}}>{p.curp}</td>
-                                                    <td className="col-sticky truncate font-semibold text-gray-800" style={{left: '190px', width: '350px', minWidth: '350px', maxWidth: '350px'}} title={p.completo}>{p.completo}</td>
+                                                    <td className="col-sticky truncate font-semibold text-gray-800" style={{left: '190px', width: '350px', minWidth: '350px', maxWidth: '350px'}} title={p.completo}>
+                                                        <div className="flex items-center gap-2">
+                                                            {isAdmin ? <button type="button" onClick={() => abrirEdicionParticipante(p)} className="truncate text-left text-gray-800 hover:text-gray-900" title="Editar datos del participante">{p.completo}</button> : <span className="truncate">{p.completo}</span>}
+                                                            {(isAdmin || getParticipantMessages(p.id).length > 0) && <button type="button" onClick={() => isAdmin && getParticipantMessages(p.id).length === 0 ? abrirNuevoMensaje(p.id) : abrirMensajesParticipante(p.id)} className={`relative shrink-0 rounded-md px-1.5 py-1 text-[10px] ${getParticipantMessages(p.id).some(mensaje => mensaje.estado === 'atendido') && !getParticipantMessages(p.id).some(mensaje => mensaje.estado !== 'atendido') ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-amber-100 text-amber-700 hover:bg-amber-200'}`} title={getParticipantMessages(p.id).length > 0 ? 'Ver mensajes del participante' : 'Enviar mensaje al asesor y coordinador'} aria-label={`Mensajes de ${p.completo}`}><i className={`fa-solid ${getParticipantMessages(p.id).length > 0 ? 'fa-message' : 'fa-message-plus'}`}></i>{getParticipantMessages(p.id).length > 1 && <span className="absolute -right-1 -top-1 rounded-full bg-red-600 px-1 text-[8px] font-black text-white">{getParticipantMessages(p.id).length}</span>}</button>}
+                                                        </div>
+                                                    </td>
                                                     <td className="col-sticky font-mono text-[10px] text-blue-600 text-center shadow-[2px_0_5px_rgba(0,0,0,0.05)] group-hover:bg-blue-50/50" style={{left: '540px', width: '120px', minWidth: '120px', maxWidth: '120px'}}>{getMoodleUsername(p.curp)}</td>
                                                     
-                                                    <td className="text-[10px]">{p.correo}</td><td className="text-[10px]">{g.asesor}</td><td className="font-bold text-[10px]">{g.nombre}</td>
+                                                    <td className="text-[10px]">{p.correo}</td><td className="text-[10px]">{isAdmin && onEditPersonal && g.asesorId ? <button type="button" onClick={() => onEditPersonal(asesoresGlobales.find(persona => persona.id === g.asesorId) || { id: g.asesorId, nombre: g.asesor, usuario: '', password: '', roles: ['asesor'] })} className="text-left text-gray-800 hover:text-gray-900" title="Editar datos del asesor">{g.asesor}</button> : g.asesor}</td><td className="font-bold text-[10px]">{g.nombre}</td>
                                                     
                                                     <td><input type="checkbox" disabled={!canEditCore} checked={d.conf} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>updatePData(p.id, 'conf', e.target.checked)} className={`seguimiento-checkbox w-4 h-4 ${!canEditCore?'opacity-50':''}`} /></td>
                                                     
@@ -6278,6 +6446,119 @@ María López	maria.lopez	Z9y8x7" />
                                     </tbody>
                                 </table>
                             </div>
+
+                            {editingParticipant && editingParticipantData && (
+                                <Modal show={Boolean(editingParticipant && editingParticipantData)} onClose={cerrarEdicionParticipante} width="max-w-3xl" ariaLabel="Editar participante">
+                                    <div className="bg-white p-6">
+                                        <div className="mb-5 flex items-start justify-between gap-3 border-b border-slate-100 pb-4">
+                                            <div>
+                                                <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Datos del participante</p>
+                                                <h3 className="text-xl font-black text-slate-900">Editar participante</h3>
+                                            </div>
+                                            <button type="button" onClick={cerrarEdicionParticipante} className="text-slate-400 hover:text-slate-800" aria-label="Cerrar edición"><i className="fa-solid fa-xmark text-lg"></i></button>
+                                        </div>
+                                        <div className="grid gap-4 sm:grid-cols-2">
+                                            {[
+                                                ['curp', 'CURP'], ['correo', 'Correo electrónico'], ['nombre', 'Nombre'], ['paterno', 'Apellido paterno'],
+                                                ['materno', 'Apellido materno'], ['telefono', 'Teléfono'], ['municipio', 'Municipio'], ['funcion', 'Función'], ['nivel', 'Nivel educativo']
+                                            ].map(([key, label]) => <label key={key} className="block text-xs font-bold text-slate-600"><span className="mb-1 block uppercase tracking-wide">{label}</span><input type={key === 'correo' ? 'email' : 'text'} value={editingParticipantData[key] || ''} onChange={e => setEditingParticipantData(prev => ({ ...prev, [key]: e.target.value }))} className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-800 outline-none focus:border-slate-500 focus:bg-white" /></label>)}
+                                            <label className="block text-xs font-bold text-slate-600 sm:col-span-2"><span className="mb-1 block uppercase tracking-wide">Grupo asignado</span><select value={editingParticipantData.grupoId || ''} onChange={e => setEditingParticipantData(prev => ({ ...prev, grupoId: e.target.value }))} className="w-full rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-800 outline-none focus:border-slate-500"><option value="">Sin grupo</option>{db.grupos.map(grupo => <option key={grupo.id} value={grupo.id}>{grupo.nombre}</option>)}</select></label>
+                                        </div>
+                                        <div className="mt-6 flex justify-end gap-3 border-t border-slate-100 pt-4">
+                                            <button type="button" onClick={cerrarEdicionParticipante} className="rounded-xl bg-slate-100 px-5 py-2.5 font-semibold text-slate-600 hover:bg-slate-200">Cancelar</button>
+                                            <button type="button" onClick={guardarEdicionParticipante} className="rounded-xl bg-slate-800 px-5 py-2.5 font-bold text-white hover:bg-slate-900">Guardar cambios</button>
+                                        </div>
+                                    </div>
+                                </Modal>
+                            )}
+
+                            {showMessageDetailModal && (
+                                <Modal show={showMessageDetailModal} onClose={() => setShowMessageDetailModal(false)} width="max-w-2xl" ariaLabel="Mensajes del participante">
+                                    <div className="bg-white p-6">
+                                        <div className="mb-5 flex items-start justify-between gap-3 border-b border-slate-100 pb-4">
+                                            <div>
+                                                <p className="text-xs font-bold uppercase tracking-wider text-amber-600">Seguimiento operativo</p>
+                                                <h3 className="text-xl font-black text-slate-900">Mensajes de {getParticipantName(selectedMessageParticipantId)}</h3>
+                                            </div>
+                                            <button type="button" onClick={() => setShowMessageDetailModal(false)} className="text-slate-400 hover:text-slate-800" aria-label="Cerrar mensajes"><i className="fa-solid fa-xmark text-lg"></i></button>
+                                        </div>
+                                        <div className="space-y-3">
+                                            {getParticipantMessages(selectedMessageParticipantId).map(mensaje => (
+                                                <article key={mensaje.id} className={`rounded-xl border p-4 ${getMessageStatusClasses(mensaje.estado)}`}>
+                                                    <div className="flex items-start justify-between gap-3">
+                                                        <div className="min-w-0 flex-1">
+                                                            <div className="flex flex-wrap items-center gap-2">
+                                                                <span className="rounded-full bg-white/70 px-2 py-1 text-[10px] font-black uppercase">Prioridad: {mensaje.prioridad}</span>
+                                                                <span className="text-[10px] font-semibold uppercase">{mensaje.estado === 'atendido' ? 'Atendido' : 'Pendiente'}</span>
+                                                            </div>
+                                                            <p className="mt-3 whitespace-pre-wrap text-sm leading-6">{mensaje.texto}</p>
+                                                            <p className="mt-3 text-[10px] opacity-75">Enviado por {mensaje.creadoPor === 'Administrador' ? 'Procesos Virtuales' : (mensaje.creadoPor || 'Procesos Virtuales')} · {mensaje.creadoEn ? new Date(mensaje.creadoEn).toLocaleString('es-MX') : ''}</p>
+                                                            {mensaje.atendidoPor && <p className="mt-1 text-[10px] opacity-75">Última actualización por {mensaje.atendidoPor}</p>}
+                                                        </div>
+                                                        <div className="flex shrink-0 flex-col items-end gap-2">
+                                                            <select value={mensaje.estado === 'atendido' ? 'atendido' : 'pendiente'} onChange={e => actualizarMensaje(mensaje.id, { estado: e.target.value })} disabled={!canEditManual} className="rounded-lg border border-current bg-white/70 px-2 py-1.5 text-[10px] font-black uppercase outline-none">
+                                                                <option value="pendiente">Pendiente</option>
+                                                                <option value="atendido">Atendido</option>
+                                                            </select>
+                                                            {(isAdmin || isCoordinador) && <button type="button" onClick={() => eliminarMensaje(mensaje.id)} className="text-[10px] font-bold text-red-600 hover:text-red-800" title="Eliminar mensaje"><i className="fa-solid fa-trash mr-1"></i>Eliminar</button>}
+                                                        </div>
+                                                    </div>
+                                                </article>
+                                            ))}
+                                        </div>
+                                        <div className="mt-5 flex justify-end gap-3 border-t border-slate-100 pt-4">
+                                            {isAdmin && <button type="button" onClick={() => { setShowMessageDetailModal(false); abrirNuevoMensaje(selectedMessageParticipantId); }} className="rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-amber-700"><i className="fa-solid fa-plus mr-2"></i>Nuevo mensaje</button>}
+                                            <button type="button" onClick={() => setShowMessageDetailModal(false)} className="rounded-xl bg-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-200">Cerrar</button>
+                                        </div>
+                                    </div>
+                                </Modal>
+                            )}
+
+                            {showMessageModal && (
+                                <Modal show={showMessageModal} onClose={() => setShowMessageModal(false)} width="max-w-xl" ariaLabel="Nuevo mensaje para asesor y coordinador">
+                                    <div className="bg-white p-6">
+                                        <div className="mb-5 flex items-start justify-between gap-3">
+                                            <div>
+                                                <p className="text-xs font-bold uppercase tracking-wider text-amber-600">Comunicación operativa</p>
+                                                <h3 className="text-xl font-black text-slate-900">Nuevo mensaje</h3>
+                                                <p className="mt-1 text-sm text-slate-500">El mensaje quedará visible en Seguimiento para los destinatarios seleccionados.</p>
+                                            </div>
+                                            <button type="button" onClick={() => setShowMessageModal(false)} className="text-slate-400 hover:text-slate-800" aria-label="Cerrar mensaje"><i className="fa-solid fa-xmark text-lg"></i></button>
+                                        </div>
+                                        <div className="space-y-4">
+                                            <div>
+                                                <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600">Alumno</label>
+                                                <select value={messageForm.participantId} onChange={e => setMessageForm(prev => ({ ...prev, participantId: e.target.value }))} className="w-full rounded-xl border border-slate-200 bg-white p-3 text-sm outline-none focus:border-amber-500">
+                                                    <option value="">Seleccionar alumno</option>
+                                                    {db.participantes.map(participante => <option key={participante.id} value={participante.id}>{participante.completo || 'Alumno sin nombre'}</option>)}
+                                                </select>
+                                            </div>
+                                            <div className="grid gap-4 sm:grid-cols-2">
+                                                <div>
+                                                    <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600">Prioridad</label>
+                                                    <select value={messageForm.prioridad} onChange={e => setMessageForm(prev => ({ ...prev, prioridad: e.target.value }))} className="w-full rounded-xl border border-slate-200 bg-white p-3 text-sm outline-none focus:border-amber-500">
+                                                        <option value="normal">Normal</option><option value="importante">Importante</option><option value="urgente">Urgente</option>
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600">Mostrar a</span>
+                                                    <div className="flex flex-wrap gap-3 pt-2 text-sm">
+                                                        {['asesor', 'coordinador'].map(destinatario => <label key={destinatario} className="flex items-center gap-2"><input type="checkbox" checked={messageForm.destinatarios.includes(destinatario)} onChange={e => setMessageForm(prev => ({ ...prev, destinatarios: e.target.checked ? [...new Set([...prev.destinatarios, destinatario])] : prev.destinatarios.filter(item => item !== destinatario) }))} />{destinatario === 'asesor' ? 'Asesor' : 'Coordinador'}</label>)}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600">Mensaje</label>
+                                                <textarea rows="5" value={messageForm.texto} onChange={e => setMessageForm(prev => ({ ...prev, texto: e.target.value }))} className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm outline-none focus:border-amber-500 focus:bg-white" placeholder="Ej. Verificar el nombre y confirmar el correo electrónico." />
+                                            </div>
+                                        </div>
+                                        <div className="mt-6 flex justify-end gap-3 border-t border-slate-100 pt-4">
+                                            <button type="button" onClick={() => setShowMessageModal(false)} className="rounded-xl px-5 py-2.5 font-semibold text-slate-500 hover:bg-slate-100">Cancelar</button>
+                                            <button type="button" onClick={guardarMensaje} className="rounded-xl bg-amber-600 px-5 py-2.5 font-bold text-white hover:bg-amber-700"><i className="fa-solid fa-paper-plane mr-2"></i>Enviar mensaje</button>
+                                        </div>
+                                    </div>
+                                </Modal>
+                            )}
 
                             {showDatosGlobalesModal && (
                                 <Modal show={showDatosGlobalesModal} onClose={() => setShowDatosGlobalesModal(false)} width="max-w-5xl" ariaLabel="Datos Globales">
