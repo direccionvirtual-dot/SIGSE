@@ -339,39 +339,34 @@
 
         function useFirestoreState(key, initialValue) {
             const [storedValue, setStoredValue] = useState(initialValue);
+            const storedValueRef = useRef(initialValue);
 
             useEffect(() => {
-                let isMounted = true;
+                if (!firebaseEnabled) return undefined;
 
-                const load = async () => {
-                    if (!firebaseEnabled) return;
-                    try {
-                        const remote = await loadRemoteState();
-                        if (!isMounted || !remote) return;
-                        if (key === 'prodep_dbs' && Array.isArray(remote.basesDeDatos)) {
-                            setStoredValue(remote.basesDeDatos);
-                        }
-                        if (key === 'prodep_asesores_global' && Array.isArray(remote.personalGlobal)) {
-                            setStoredValue(remote.personalGlobal);
-                        }
-                        if (key === 'prodep_admins' && Array.isArray(remote.adminUsers)) {
-                            setStoredValue(remote.adminUsers);
-                        }
-                        if (key === 'prodep_zoom_accounts' && Array.isArray(remote.zoomAccounts)) {
-                            setStoredValue(remote.zoomAccounts);
-                        }
-                    } catch (error) {
-                        console.warn('Firebase: no se pudo inicializar el estado.', error);
-                    }
+                const updateFromRemote = remote => {
+                    if (!remote) return;
+                    const remoteValue = key === 'prodep_dbs' ? remote.basesDeDatos
+                        : key === 'prodep_asesores_global' ? remote.personalGlobal
+                        : key === 'prodep_admins' ? remote.adminUsers
+                        : key === 'prodep_zoom_accounts' ? remote.zoomAccounts
+                        : null;
+                    if (!Array.isArray(remoteValue)) return;
+                    storedValueRef.current = remoteValue;
+                    setStoredValue(remoteValue);
                 };
 
-                load();
-                return () => { isMounted = false; };
+                const unsubscribe = remoteStateDoc.onSnapshot(snapshot => {
+                    if (snapshot.exists) updateFromRemote(snapshot.data());
+                }, error => console.warn('Firebase: no se pudo sincronizar el estado.', error));
+
+                return () => unsubscribe();
             }, [key]);
 
             const setValue = value => {
                 try {
-                    const valueToStore = value instanceof Function ? value(storedValue) : value;
+                    const valueToStore = value instanceof Function ? value(storedValueRef.current) : value;
+                    storedValueRef.current = valueToStore;
                     setStoredValue(valueToStore);
                     if (firebaseEnabled) {
                         if (key === 'prodep_dbs') {
@@ -716,9 +711,11 @@
             const [newAttendanceTotal, setNewAttendanceTotal] = useState('');
             const [newAttendanceFormUrl, setNewAttendanceFormUrl] = useState('');
             const [newAttendanceResponsesUrl, setNewAttendanceResponsesUrl] = useState('');
+            const [bulkAttendanceText, setBulkAttendanceText] = useState('');
             const [newEvidenceDbId, setNewEvidenceDbId] = useState('');
             const [newEvidenceGroupId, setNewEvidenceGroupId] = useState('');
             const [newEvidenceFolderUrl, setNewEvidenceFolderUrl] = useState('');
+            const [bulkEvidenceText, setBulkEvidenceText] = useState('');
             const [editAttendanceModal, setEditAttendanceModal] = useState({ show: false, dbId: null, id: null, numeroSesion: 1, formularioUrl: '', respuestasUrl: '' });
             const [editEvidenceModal, setEditEvidenceModal] = useState({ show: false, dbId: null, id: null, carpetaUrl: '' });
             const [controlTableFilters, setControlTableFilters] = useState({ zoom: '', sessions: '', attendances: '', evidences: '' });
@@ -1235,7 +1232,8 @@
                 const rows = sessionsToExport.map(({ db, ...session }) => {
                     const grupo = (db.grupos || []).find(item => item.id === session.grupoId) || {};
                     const cuenta = zoomAccounts.find(account => account.id === session.zoomAccountId) || {};
-                    return [
+                                                 return [
+                                                                        <tr key={cursoKey} className="bg-cyan-50"><td colSpan="4" className="p-0"><button type="button" onClick={() => setExpandedSessionHierarchy(prev => ({ ...prev, [cursoKey]: !cursoOpen }))} className="flex w-full items-center gap-2 p-3 pl-9 text-left font-black text-cyan-900"><i className={`fa-solid fa-chevron-${cursoOpen ? 'down' : 'right'} w-3`}></i><i className="fa-solid fa-book"></i>{curso}</button></td></tr>,
                         db.info.anio || '',
                         db.info.estado || db.info.idEstado || '',
                         db.info.siglas || '',
@@ -1273,6 +1271,27 @@
                 });
                 return ordenarControl(rows, 'attendances', (row, key) => key === 'curso' ? row.db.info.siglas : row[key]);
             }, [basesDeDatos, controlTableFilters.attendances, controlAttendanceFilters, controlTableSort]);
+            const controlAttendancesHierarchy = useMemo(() => {
+                const years = new Map();
+                controlAttendancesVisible.forEach(row => {
+                    const year = String(row.db.info.anio || 'Sin año');
+                    const estado = String(row.db.info.estado || row.db.info.idEstado || 'Sin estado');
+                    const curso = String(row.db.info.siglas || row.db.info.nombreCurso || 'Sin curso');
+                    if (!years.has(year)) years.set(year, new Map());
+                    const states = years.get(year);
+                    if (!states.has(estado)) states.set(estado, new Map());
+                    const courses = states.get(estado);
+                    if (!courses.has(curso)) courses.set(curso, []);
+                    courses.get(curso).push(row);
+                });
+                return Array.from(years, ([year, states]) => ({
+                    year,
+                    states: Array.from(states, ([estado, courses]) => ({
+                        estado,
+                        courses: Array.from(courses, ([curso, rows]) => ({ curso, rows }))
+                    }))
+                }));
+            }, [controlAttendancesVisible]);
             const controlEvidencesVisible = useMemo(() => {
                 const search = controlTableFilters.evidences.trim().toLowerCase();
                 const rows = basesDeDatos.flatMap(db => (db.controlEvidencias || []).map(row => ({ ...row, db }))).filter(row => {
@@ -1286,6 +1305,39 @@
                 });
                 return ordenarControl(rows, 'evidences', (row, key) => key === 'curso' ? row.db.info.siglas : key === 'grupo' ? row.db.grupos.find(item => item.id === row.grupoId)?.nombre : row[key]);
             }, [basesDeDatos, controlTableFilters.evidences, controlEvidenceFilters, controlTableSort]);
+            const controlEvidencesHierarchy = useMemo(() => {
+                const years = new Map();
+                controlEvidencesVisible.forEach(row => {
+                    const year = String(row.db.info.anio || 'Sin año');
+                    const estado = String(row.db.info.estado || row.db.info.idEstado || 'Sin estado');
+                    const curso = String(row.db.info.siglas || row.db.info.nombreCurso || 'Sin curso');
+                    const grupoRegistrado = (row.db.grupos || []).find(item => item.id === row.grupoId);
+                    const grupo = grupoRegistrado || {
+                        id: row.grupoId || `sin-grupo-${row.id}`,
+                        nombre: row.grupoNombre || row.grupo || 'Grupo no disponible',
+                        asesor: row.asesorNombre || row.asesor || '-'
+                    };
+                    const groupKey = grupo.id || `sin-grupo-${row.id}`;
+                    if (!years.has(year)) years.set(year, new Map());
+                    const states = years.get(year);
+                    if (!states.has(estado)) states.set(estado, new Map());
+                    const courses = states.get(estado);
+                    if (!courses.has(curso)) courses.set(curso, new Map());
+                    const groups = courses.get(curso);
+                    if (!groups.has(groupKey)) groups.set(groupKey, { grupo, evidences: [] });
+                    groups.get(groupKey).evidences.push({ ...row, grupo });
+                });
+                return Array.from(years, ([year, states]) => ({
+                    year,
+                    states: Array.from(states, ([estado, courses]) => ({
+                        estado,
+                        courses: Array.from(courses, ([curso, groups]) => ({
+                            curso,
+                            groups: Array.from(groups.values())
+                        }))
+                    }))
+                }));
+            }, [controlEvidencesVisible]);
             const controlSessionYearOptions = useMemo(() => {
                 return [...new Set(basesDeDatos.map(db => db.info.anio).filter(Boolean))].sort((a,b) => String(a).localeCompare(String(b), 'es', { numeric: true }));
             }, [basesDeDatos]);
@@ -1427,6 +1479,64 @@
                 setNewAttendanceResponsesUrl('');
             };
 
+            const cargarAsistenciasMasivas = () => {
+                const db = basesDeDatos.find(item => item.id === newAttendanceDbId);
+                if (!db) return alert('Selecciona primero un curso.');
+                const filas = bulkAttendanceText.split(/\r?\n/).map(row => row.trim()).filter(Boolean);
+                if (!filas.length) return alert('Pega la tabla con las columnas SESIÓN, REGISTRO DE ASISTENCIAS y RESPUESTA DE ASISTENCIAS.');
+
+                const inicio = filas.findIndex(fila => {
+                    const encabezado = normalizeText(fila);
+                    return encabezado.includes('SESION') && encabezado.includes('REGISTRO') && encabezado.includes('RESPUESTA');
+                });
+                const filasDatos = inicio >= 0 ? filas.slice(inicio + 1) : filas;
+                const registros = new Map();
+                const filasInvalidas = [];
+
+                filasDatos.forEach(fila => {
+                    const columnas = fila.split('\t');
+                    const numeroMatch = String(columnas[0] || '').match(/\d+/);
+                    const numeroSesion = numeroMatch ? parseInt(numeroMatch[0], 10) : 0;
+                    const formularioUrl = String(columnas[1] || '').trim();
+                    const respuestasUrl = String(columnas.slice(2).join('\t') || '').trim();
+                    if (!numeroSesion || !formularioUrl || !respuestasUrl) {
+                        filasInvalidas.push(fila);
+                        return;
+                    }
+                    registros.set(numeroSesion, {
+                        id: `ASI-${Date.now()}-${numeroSesion}`,
+                        numeroSesion,
+                        formularioUrl,
+                        respuestasUrl
+                    });
+                });
+
+                const asistencias = Array.from(registros.values());
+                if (!asistencias.length) return alert(`No se encontraron filas válidas.${filasInvalidas.length ? `\n\nFilas omitidas:\n${filasInvalidas.join('\n')}` : ''}`);
+
+                const existentes = new Map((db.controlAsistencias || []).map(row => [row.numeroSesion, row]));
+                const duplicadas = asistencias.filter(row => existentes.has(row.numeroSesion));
+                let reemplazarExistentes = false;
+                if (duplicadas.length) {
+                    reemplazarExistentes = confirm(`Ya existe asistencia para estas sesiones:\n\n${duplicadas.map(row => `Sesión ${row.numeroSesion}`).join('\n')}\n\n¿Deseas reemplazar sus enlaces?`);
+                    if (!reemplazarExistentes) duplicadas.forEach(row => registros.delete(row.numeroSesion));
+                }
+
+                const asistenciasParaGuardar = Array.from(registros.values());
+                if (!asistenciasParaGuardar.length) return alert('No se reemplazó ningún registro existente.');
+                const sesionesGuardadas = new Set(asistenciasParaGuardar.map(row => row.numeroSesion));
+                setBasesDeDatos(prev => prev.map(item => item.id === db.id ? {
+                    ...item,
+                    controlAsistencias: [
+                        ...(item.controlAsistencias || []).filter(row => !sesionesGuardadas.has(row.numeroSesion)),
+                        ...asistenciasParaGuardar
+                    ]
+                } : item));
+                setBulkAttendanceText('');
+                const reemplazadas = reemplazarExistentes ? duplicadas.length : 0;
+                alert(`Se procesaron ${asistenciasParaGuardar.length} asistencia(s): ${asistenciasParaGuardar.length - reemplazadas} nueva(s) y ${reemplazadas} reemplazada(s).${filasInvalidas.length ? `\n\nFilas omitidas:\n${filasInvalidas.join('\n')}` : ''}`);
+            };
+
             const generarAsistenciasControl = () => {
                 const db = basesDeDatos.find(item => item.id === newAttendanceDbId);
                 const total = parseInt(newAttendanceTotal || db?.info?.numSesiones, 10);
@@ -1445,9 +1555,78 @@
                 const db = basesDeDatos.find(item => item.id === newEvidenceDbId);
                 const grupo = db?.grupos?.find(item => item.id === newEvidenceGroupId);
                 if (!db || !grupo || !newEvidenceFolderUrl.trim()) return alert('Selecciona un curso, grupo e indica la carpeta de Drive.');
-                const evidencia = { id: `EVI-${Date.now()}`, grupoId: grupo.id, carpetaUrl: newEvidenceFolderUrl.trim() };
+                const evidencia = { id: `EVI-${Date.now()}`, grupoId: grupo.id, grupoNombre: grupo.nombre || '', asesorNombre: grupo.asesor || '', carpetaUrl: newEvidenceFolderUrl.trim() };
                 setBasesDeDatos(prev => prev.map(item => item.id === db.id ? { ...item, controlEvidencias: [...(item.controlEvidencias || []).filter(row => row.grupoId !== grupo.id), evidencia] } : item));
                 setNewEvidenceFolderUrl('');
+            };
+
+            const cargarEvidenciasMasivas = () => {
+                const db = basesDeDatos.find(item => item.id === newEvidenceDbId);
+                if (!db) return alert('Selecciona primero un curso.');
+                const filas = bulkEvidenceText.split(/\r?\n/).map(row => row.trim()).filter(Boolean);
+                if (!filas.length) return alert('Pega la tabla con las columnas GRUPO y ENLACE.');
+
+                const filasDatos = filas[0].toUpperCase().includes('GRUPO') && filas[0].toUpperCase().includes('ENLACE')
+                    ? filas.slice(1)
+                    : filas;
+                const gruposPorNombre = new Map((db.grupos || []).map(grupo => [normalizeText(grupo.nombre), grupo]));
+                const coincidencias = [];
+                const noEncontrados = [];
+
+                filasDatos.forEach((fila, index) => {
+                    const columnas = fila.split('\t');
+                    const nombreGrupo = (columnas[0] || '').trim();
+                    const enlace = columnas.slice(1).join('\t').trim();
+                    if (!nombreGrupo || !enlace) return;
+                    const grupo = gruposPorNombre.get(normalizeText(nombreGrupo));
+                    if (!grupo) {
+                        noEncontrados.push(nombreGrupo);
+                        return;
+                    }
+                    coincidencias.push({
+                        id: `EVI-${Date.now()}-${index}`,
+                        grupoId: grupo.id,
+                        grupoNombre: grupo.nombre || '',
+                        asesorNombre: grupo.asesor || '',
+                        carpetaUrl: enlace
+                    });
+                });
+
+                if (!coincidencias.length) {
+                    return alert(`No se encontraron coincidencias de grupos en el curso seleccionado.${noEncontrados.length ? `\n\nGrupos no encontrados:\n${noEncontrados.join('\n')}` : ''}`);
+                }
+
+                const coincidenciasPorGrupo = new Map(coincidencias.map(evidencia => [evidencia.grupoId, evidencia]));
+                const evidenciasExistentes = new Map((db.controlEvidencias || []).map(evidencia => [evidencia.grupoId, evidencia]));
+                const gruposConEnlace = [...coincidenciasPorGrupo.values()].filter(evidencia => evidenciasExistentes.has(evidencia.grupoId));
+                let reemplazarExistentes = false;
+
+                if (gruposConEnlace.length) {
+                    reemplazarExistentes = confirm(`Ya existe evidencia para ${gruposConEnlace.length} grupo(s):\n\n${gruposConEnlace.map(evidencia => evidencia.grupoNombre).join('\n')}\n\n¿Deseas reemplazar sus enlaces?`);
+                    if (!reemplazarExistentes) {
+                        gruposConEnlace.forEach(evidencia => coincidenciasPorGrupo.delete(evidencia.grupoId));
+                    }
+                }
+
+                if (!coincidenciasPorGrupo.size) {
+                    return alert('No se reemplazó ningún enlace existente.');
+                }
+
+                setBasesDeDatos(prev => prev.map(item => item.id === db.id ? {
+                    ...item,
+                    controlEvidencias: [
+                        ...(item.controlEvidencias || []).filter(evidencia => !coincidenciasPorGrupo.has(evidencia.grupoId)),
+                        ...coincidenciasPorGrupo.values()
+                    ]
+                } : item));
+                setBulkEvidenceText('');
+
+                const reemplazadas = reemplazarExistentes ? gruposConEnlace.length : 0;
+                const nuevas = coincidenciasPorGrupo.size - reemplazadas;
+                const mensaje = `Se procesaron ${coincidenciasPorGrupo.size} evidencia(s): ${nuevas} nueva(s) y ${reemplazadas} reemplazada(s).`;
+                alert(noEncontrados.length
+                    ? `${mensaje}\n\nNo hubo coincidencia para:\n${[...new Set(noEncontrados)].join('\n')}`
+                    : mensaje);
             };
 
             const abrirEdicionAsistencia = (dbId, row) => setEditAttendanceModal({ show: true, dbId, id: row.id, numeroSesion: row.numeroSesion, formularioUrl: row.formularioUrl, respuestasUrl: row.respuestasUrl });
@@ -1721,7 +1900,7 @@
                                             <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-[10px] text-slate-200">v9.2</div>
+                                        <div className="text-[10px] text-slate-200">v9.6</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -1729,7 +1908,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v9.2</div>
+                                        <div className="text-xs text-slate-200">v9.6</div>
                                     </div>
                                 )}
                             </div>
@@ -2505,6 +2684,12 @@
                                                 <input type="url" className="rounded-xl border border-emerald-200 bg-white p-3 text-sm outline-none focus:border-emerald-500 sm:col-span-2" value={newAttendanceResponsesUrl} onChange={e => setNewAttendanceResponsesUrl(e.target.value)} placeholder="Enlace de respuestas" />
                                             </div>
                                             <div className="mt-4 flex flex-wrap gap-3"><button onClick={agregarAsistenciaControl} className="rounded-xl bg-emerald-700 px-5 py-3 font-bold text-white transition-colors hover:bg-emerald-800"><i className="fa-solid fa-plus mr-2"></i>Guardar asistencia</button><button onClick={generarAsistenciasControl} className="rounded-xl bg-teal-700 px-5 py-3 font-bold text-white transition-colors hover:bg-teal-800"><i className="fa-solid fa-wand-magic-sparkles mr-2"></i>Generar asistencias faltantes</button></div>
+                                            <div className="mt-6 border-t border-emerald-200 pt-5">
+                                                <h4 className="font-bold text-emerald-950"><i className="fa-solid fa-file-import mr-2 text-emerald-600"></i>Carga masiva de asistencias</h4>
+                                                <p className="mt-1 text-xs text-emerald-800/70">Selecciona el curso y pega tres columnas: SESIÓN, REGISTRO DE ASISTENCIAS y RESPUESTA DE ASISTENCIAS (PARA EVIDENCIAS).</p>
+                                                <textarea rows="7" className="mt-3 w-full rounded-xl border border-emerald-200 bg-white p-3 font-mono text-xs outline-none focus:border-emerald-500" value={bulkAttendanceText} onChange={e => setBulkAttendanceText(e.target.value)} placeholder={'SESIÓN\tREGISTRO DE ASISTENCIAS\tRESPUESTA DE ASISTENCIAS (PARA EVIDENCIAS)\nSESIÓN 01\thttps://forms.gle/...\thttps://docs.google.com/spreadsheets/d/...'} disabled={!newAttendanceDbId}></textarea>
+                                                <button onClick={cargarAsistenciasMasivas} disabled={!newAttendanceDbId || !bulkAttendanceText.trim()} className="mt-3 rounded-xl bg-emerald-800 px-5 py-3 font-bold text-white transition-colors hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-50"><i className="fa-solid fa-upload mr-2"></i>Cargar asistencias</button>
+                                            </div>
                                             <div className="grid gap-3 md:grid-cols-3 mt-5">
                                                 <select className="rounded-xl border border-emerald-200 bg-white p-3 text-sm outline-none focus:border-emerald-500" value={controlAttendanceFilters.year} onChange={e => setControlAttendanceFilters(prev => ({ ...prev, year: e.target.value }))}>
                                                     <option value="">Todos los años</option>
@@ -2520,7 +2705,33 @@
                                                 </select>
                                             </div>
                                             <input type="search" className="mt-5 w-full rounded-xl border border-emerald-200 bg-white p-3 text-sm outline-none focus:border-emerald-500" value={controlTableFilters.attendances} onChange={e => setControlTableFilters(prev => ({ ...prev, attendances: e.target.value }))} placeholder="Buscar por curso o sesión..." aria-label="Buscar asistencias" />
-                                            <div className="mt-5 overflow-x-auto rounded-2xl border border-emerald-100 bg-white"><table className="w-full min-w-full text-left text-sm"><thead className="bg-emerald-50 text-xs uppercase tracking-wide text-emerald-800"><tr><th className="cursor-pointer p-3" onClick={() => cambiarOrdenControl('attendances', 'curso')}>Curso{indicadorOrdenControl('attendances', 'curso')}</th><th className="cursor-pointer p-3" onClick={() => cambiarOrdenControl('attendances', 'numeroSesion')}>Sesión{indicadorOrdenControl('attendances', 'numeroSesion')}</th><th className="p-3">Enlaces</th><th className="p-3"></th></tr></thead><tbody>{controlAttendancesVisible.map(row => <tr key={row.id} className="border-t border-emerald-50"><td className="p-3 font-semibold">{row.db.info.siglas}-{row.db.info.idEstado}</td><td className="p-3">Sesión {row.numeroSesion}</td><td className="p-3">{row.formularioUrl ? <><a href={row.formularioUrl} target="_blank" rel="noreferrer" className="mr-2 font-bold text-emerald-700 hover:underline">Formulario</a><button type="button" onClick={() => row.formularioUrl && copyToClipboard(row.formularioUrl)} className="text-emerald-700 hover:text-emerald-900" title="Copiar enlace del formulario" aria-label={`Copiar enlace del formulario de la sesión ${row.numeroSesion}`}><i className="fa-solid fa-copy"></i></button></> : <span className="mr-3 text-xs text-amber-600">Formulario pendiente</span>}{row.respuestasUrl ? <a href={row.respuestasUrl} target="_blank" rel="noreferrer" className="ml-3 font-bold text-emerald-700 hover:underline">Respuestas</a> : <span className="ml-3 text-xs text-amber-600">Respuestas pendientes</span>}</td><td className="p-3 text-right"><div className="flex justify-end gap-3"><button onClick={() => abrirEdicionAsistencia(row.db.id, row)} className="text-emerald-600 hover:text-emerald-800" title="Editar asistencia"><i className="fa-solid fa-pen"></i></button><button onClick={() => eliminarControlRegistro(row.db.id, 'controlAsistencias', row.id)} className="text-gray-400 hover:text-red-600" title="Eliminar asistencia"><i className="fa-solid fa-trash"></i></button></div></td></tr>)}{controlAttendancesVisible.length === 0 && <tr><td colSpan="4" className="p-7 text-center text-gray-400">{basesDeDatos.every(db => !(db.controlAsistencias || []).length) ? 'Aún no hay asistencias registradas.' : 'No hay asistencias que coincidan con la búsqueda.'}</td></tr>}</tbody></table></div>
+                                            <div className="mt-5 overflow-x-auto rounded-2xl border border-emerald-100 bg-white"><table className="w-full min-w-full text-left text-sm"><thead className="bg-emerald-50 text-xs uppercase tracking-wide text-emerald-800"><tr><th className="p-3">Sesión</th><th className="p-3">Enlaces</th><th className="p-3"></th></tr></thead><tbody>
+                                                {controlAttendancesVisible.length > 0 ? controlAttendancesHierarchy.flatMap(({ year, states }) => {
+                                                    const yearKey = `attendance-year-${year}`;
+                                                    const yearOpen = expandedSessionHierarchy[yearKey] !== false;
+                                                    return [
+                                                        <tr key={yearKey} className="bg-slate-900 text-white"><td colSpan="3" className="p-0"><button type="button" onClick={() => setExpandedSessionHierarchy(prev => ({ ...prev, [yearKey]: !yearOpen }))} className="flex w-full items-center gap-2 p-3 text-left text-sm font-black uppercase tracking-wide"><i className={`fa-solid fa-chevron-${yearOpen ? 'down' : 'right'} w-3 text-cyan-300`}></i><i className="fa-solid fa-calendar text-cyan-300"></i>{year}</button></td></tr>,
+                                                        ...(yearOpen ? states.flatMap(({ estado, courses }) => {
+                                                            const estadoKey = `${yearKey}-estado-${estado}`;
+                                                            const estadoOpen = expandedSessionHierarchy[estadoKey] !== false;
+                                                            return [
+                                                                <tr key={estadoKey} className="bg-slate-100"><td colSpan="3" className="p-0"><button type="button" onClick={() => setExpandedSessionHierarchy(prev => ({ ...prev, [estadoKey]: !estadoOpen }))} className="flex w-full items-center gap-2 p-3 pl-6 text-left font-black text-slate-800"><i className={`fa-solid fa-chevron-${estadoOpen ? 'down' : 'right'} w-3 text-cyan-600`}></i><i className="fa-solid fa-location-dot text-cyan-600"></i>{estado}</button></td></tr>,
+                                                                ...(estadoOpen ? courses.flatMap(({ curso, rows }) => {
+                                                                    const cursoKey = `${estadoKey}-curso-${curso}`;
+                                                                    const cursoOpen = expandedSessionHierarchy[cursoKey] !== false;
+                                                                    return [
+                                                                        <tr key={cursoKey} className="bg-cyan-50"><td colSpan="3" className="p-0"><button type="button" onClick={() => setExpandedSessionHierarchy(prev => ({ ...prev, [cursoKey]: !cursoOpen }))} className="flex w-full items-center gap-2 p-3 pl-9 text-left font-black text-cyan-900"><i className={`fa-solid fa-chevron-${cursoOpen ? 'down' : 'right'} w-3`}></i><i className="fa-solid fa-book"></i>{curso}</button></td></tr>,
+                                                                        ...(cursoOpen ? [
+                                                                            <tr key={`${cursoKey}-head`} className="bg-emerald-50 text-xs uppercase tracking-wide text-emerald-800"><th className="p-3 pl-12">Sesión</th><th className="p-3">Enlaces</th><th className="p-3"></th></tr>,
+                                                                            ...rows.map(row => <tr key={row.id} className="border-t border-emerald-50 hover:bg-emerald-50/40"><td className="p-3 pl-12 font-semibold">Sesión {row.numeroSesion}</td><td className="p-3">{row.formularioUrl ? <><a href={row.formularioUrl} target="_blank" rel="noreferrer" className="mr-2 font-bold text-emerald-700 hover:underline">Formulario</a><button type="button" onClick={() => copyToClipboard(row.formularioUrl)} className="text-emerald-700 hover:text-emerald-900" title="Copiar enlace del formulario"><i className="fa-solid fa-copy"></i></button></> : <span className="mr-3 text-xs text-amber-600">Formulario pendiente</span>}{row.respuestasUrl ? <a href={row.respuestasUrl} target="_blank" rel="noreferrer" className="ml-3 font-bold text-emerald-700 hover:underline">Respuestas</a> : <span className="ml-3 text-xs text-amber-600">Respuestas pendientes</span>}</td><td className="p-3 text-right"><div className="flex justify-end gap-3"><button onClick={() => abrirEdicionAsistencia(row.db.id, row)} className="text-emerald-600 hover:text-emerald-800" title="Editar asistencia"><i className="fa-solid fa-pen"></i></button><button onClick={() => eliminarControlRegistro(row.db.id, 'controlAsistencias', row.id)} className="text-gray-400 hover:text-red-600" title="Eliminar asistencia"><i className="fa-solid fa-trash"></i></button></div></td></tr>)
+                                                                        ] : [])
+                                                                    ];
+                                                                }) : [])
+                                                            ];
+                                                        }) : [])
+                                                    ];
+                                                }) : <tr><td colSpan="3" className="p-7 text-center text-gray-400">{basesDeDatos.every(db => !(db.controlAsistencias || []).length) ? 'Aún no hay asistencias registradas.' : 'No hay asistencias que coincidan con la búsqueda.'}</td></tr>}
+                                            </tbody></table></div>
                                         </div>
                                     )}
 
@@ -2533,6 +2744,12 @@
                                                 <input type="url" className="rounded-xl border border-amber-200 bg-white p-3 text-sm outline-none focus:border-amber-500 sm:col-span-2" value={newEvidenceFolderUrl} onChange={e => setNewEvidenceFolderUrl(e.target.value)} placeholder="Enlace de carpeta de Drive" />
                                             </div>
                                             <button onClick={agregarEvidenciaControl} className="mt-4 rounded-xl bg-amber-600 px-5 py-3 font-bold text-white transition-colors hover:bg-amber-700"><i className="fa-solid fa-plus mr-2"></i>Guardar evidencia</button>
+                                            <div className="mt-6 border-t border-amber-200 pt-5">
+                                                <h4 className="font-bold text-amber-950"><i className="fa-solid fa-file-import mr-2 text-amber-600"></i>Carga masiva de evidencias</h4>
+                                                <p className="mt-1 text-xs text-amber-800/70">Selecciona el curso y pega dos columnas: GRUPO y ENLACE.</p>
+                                                <textarea rows="6" className="mt-3 w-full rounded-xl border border-amber-200 bg-white p-3 font-mono text-xs outline-none focus:border-amber-500" value={bulkEvidenceText} onChange={e => setBulkEvidenceText(e.target.value)} placeholder={'GRUPO\tENLACE\nGRUPO CULIACÁN 01\thttps://drive.google.com/drive/folders/...'} disabled={!newEvidenceDbId}></textarea>
+                                                <button onClick={cargarEvidenciasMasivas} disabled={!newEvidenceDbId || !bulkEvidenceText.trim()} className="mt-3 rounded-xl bg-amber-700 px-5 py-3 font-bold text-white transition-colors hover:bg-amber-800 disabled:cursor-not-allowed disabled:opacity-50"><i className="fa-solid fa-upload mr-2"></i>Cargar evidencias</button>
+                                            </div>
                                             <div className="grid gap-3 md:grid-cols-4 mt-5">
                                                 <select className="rounded-xl border border-amber-200 bg-white p-3 text-sm outline-none focus:border-amber-500" value={controlEvidenceFilters.year} onChange={e => setControlEvidenceFilters(prev => ({ ...prev, year: e.target.value }))}>
                                                     <option value="">Todos los años</option>
@@ -2552,7 +2769,44 @@
                                                 </select>
                                             </div>
                                             <input type="search" className="mt-5 w-full rounded-xl border border-amber-200 bg-white p-3 text-sm outline-none focus:border-amber-500" value={controlTableFilters.evidences} onChange={e => setControlTableFilters(prev => ({ ...prev, evidences: e.target.value }))} placeholder="Buscar por curso, grupo o asesor..." aria-label="Buscar evidencias" />
-                                            <div className="mt-5 overflow-x-auto rounded-2xl border border-amber-100 bg-white"><table className="w-full min-w-full text-left text-sm"><thead className="bg-amber-50 text-xs uppercase tracking-wide text-amber-800"><tr><th className="cursor-pointer p-3" onClick={() => cambiarOrdenControl('evidences', 'curso')}>Curso{indicadorOrdenControl('evidences', 'curso')}</th><th className="cursor-pointer p-3" onClick={() => cambiarOrdenControl('evidences', 'grupo')}>Grupo / asesor{indicadorOrdenControl('evidences', 'grupo')}</th><th className="p-3">Carpeta</th><th className="p-3"></th></tr></thead><tbody>{controlEvidencesVisible.map(row => { const group = row.db.grupos.find(item => item.id === row.grupoId); return <tr key={row.id} className="border-t border-amber-50"><td className="p-3 font-semibold">{row.db.info.siglas}-{row.db.info.idEstado}</td><td className="p-3">{group?.nombre || '-'}<div className="text-xs text-gray-400">{group?.asesor || '-'}</div></td><td className="p-3"><a href={row.carpetaUrl} target="_blank" rel="noreferrer" className="font-bold text-amber-700 hover:underline">Abrir carpeta</a></td><td className="p-3 text-right"><div className="flex justify-end gap-3"><button onClick={() => abrirEdicionEvidencia(row.db.id, row)} className="text-amber-600 hover:text-amber-800" title="Editar evidencia"><i className="fa-solid fa-pen"></i></button><button onClick={() => eliminarControlRegistro(row.db.id, 'controlEvidencias', row.id)} className="text-gray-400 hover:text-red-600" title="Eliminar evidencia"><i className="fa-solid fa-trash"></i></button></div></td></tr> })}{controlEvidencesVisible.length === 0 && <tr><td colSpan="4" className="p-7 text-center text-gray-400">{basesDeDatos.every(db => !(db.controlEvidencias || []).length) ? 'Aún no hay evidencias registradas.' : 'No hay evidencias que coincidan con la búsqueda.'}</td></tr>}</tbody></table></div>
+                                            <div className="mt-5 overflow-x-auto rounded-2xl border border-amber-100 bg-white"><table className="w-full min-w-full text-left text-sm"><thead className="bg-amber-50 text-xs uppercase tracking-wide text-amber-800"><tr><th className="p-3">Curso / grupo</th><th className="p-3">Grupo / asesor</th><th className="p-3">Carpeta</th><th className="p-3"></th></tr></thead><tbody>
+                                                {controlEvidencesVisible.length > 0 ? controlEvidencesHierarchy.flatMap(({ year, states }) => {
+                                                    const yearKey = `evidence-year-${year}`;
+                                                    const yearOpen = expandedSessionHierarchy[yearKey] !== false;
+                                                    return [
+                                                        <tr key={yearKey} className="bg-slate-900 text-white"><td colSpan="4" className="p-0"><button type="button" onClick={() => setExpandedSessionHierarchy(prev => ({ ...prev, [yearKey]: !yearOpen }))} className="flex w-full items-center gap-2 p-3 text-left text-sm font-black uppercase tracking-wide"><i className={`fa-solid fa-chevron-${yearOpen ? 'down' : 'right'} w-3 text-cyan-300`}></i><i className="fa-solid fa-calendar text-cyan-300"></i>{year}</button></td></tr>,
+                                                        ...(yearOpen ? states.flatMap(({ estado, courses }) => {
+                                                            const estadoKey = `${yearKey}-estado-${estado}`;
+                                                            const estadoOpen = expandedSessionHierarchy[estadoKey] !== false;
+                                                            return [
+                                                                <tr key={estadoKey} className="bg-slate-100"><td colSpan="4" className="p-0"><button type="button" onClick={() => setExpandedSessionHierarchy(prev => ({ ...prev, [estadoKey]: !estadoOpen }))} className="flex w-full items-center gap-2 p-3 pl-6 text-left font-black text-slate-800"><i className={`fa-solid fa-chevron-${estadoOpen ? 'down' : 'right'} w-3 text-cyan-600`}></i><i className="fa-solid fa-location-dot text-cyan-600"></i>{estado}</button></td></tr>,
+                                                                ...(estadoOpen ? courses.flatMap(({ curso, groups }) => {
+                                                                    const cursoKey = `${estadoKey}-curso-${curso}`;
+                                                                    const cursoOpen = expandedSessionHierarchy[cursoKey] !== false;
+                                                                    // Evidence rows are rendered directly under the course.
+                                                                    const cursoHeader = <tr key={cursoKey} className="bg-cyan-50"><td colSpan="4" className="p-0"><button type="button" onClick={() => setExpandedSessionHierarchy(prev => ({ ...prev, [cursoKey]: !cursoOpen }))} className="flex w-full items-center gap-2 p-3 pl-9 text-left font-black text-cyan-900"><i className={`fa-solid fa-chevron-${cursoOpen ? 'down' : 'right'} w-3`}></i><i className="fa-solid fa-book"></i>{curso}</button></td></tr>;
+                                                                                                                                return [
+                                                                                                                                    cursoHeader,
+                                                                                                                                    <tr key={`${cursoKey}-table-head`} className="bg-amber-50 text-xs uppercase tracking-wide text-amber-800"><th className="p-3 pl-12">Grupo</th><th className="p-3">Asesor</th><th className="p-3">Carpeta</th><th className="p-3"></th></tr>,
+                                                                                                                                    ...(cursoOpen ? [
+                                                                                                                                        ...groups.flatMap(({ evidences }) => evidences.map(row => (
+                                                                                                                                            <tr key={row.id} className="border-t border-amber-50 hover:bg-amber-50/40">
+                                                                                                                                                <td className="p-3 font-semibold text-slate-700">{row.grupo?.nombre || row.grupoNombre || 'Grupo no disponible'}</td>
+                                                                                                                                                <td className="p-3 text-slate-600">{row.grupo?.asesor || row.asesorNombre || '-'}</td>
+                                                                                                                                                <td className="p-3"><div className="flex items-center justify-between gap-3"><a href={row.carpetaUrl} target="_blank" rel="noreferrer" className="font-bold text-amber-700 hover:underline">Abrir carpeta</a><span className="flex items-center gap-3"><button onClick={() => abrirEdicionEvidencia(row.db.id, row)} className="text-amber-600 hover:text-amber-800" title="Editar evidencia"><i className="fa-solid fa-pen"></i></button><button onClick={() => eliminarControlRegistro(row.db.id, 'controlEvidencias', row.id)} className="text-gray-400 hover:text-red-600" title="Eliminar evidencia"><i className="fa-solid fa-trash"></i></button></span></div></td>
+                                                                                                                                                <td></td>
+                                                                                                                                            </tr>
+                                                                                                                                        )))
+                                                                                                                                    ] : [])
+                                                                                                                                ];
+                                                        }) : [])
+                                                    ];
+                                                }) : [])
+                                            ];
+                                        }) : (
+                                                    <tr><td colSpan="4" className="p-7 text-center text-gray-400">{basesDeDatos.every(db => !(db.controlEvidencias || []).length) ? 'Aún no hay evidencias registradas.' : 'No hay evidencias que coincidan con la búsqueda.'}</td></tr>
+                                                )}
+                                            </tbody></table></div>
                                         </div>
                                     )}
                                 </div>
@@ -3107,10 +3361,15 @@ María López	maria.lopez	Z9y8x7" />
             useEffect(() => { setGrupoSeleccionadoId(''); }, [db.id]);
             const [expandedIds, setExpandedIds] = useState([]);
             const sesiones = (db.controlSesiones || []).filter(session => (!isAsesor || session.grupoId === grupoId) && (isAsesor || !grupoSeleccionadoId || session.grupoId === grupoSeleccionadoId));
-            const evidencias = (db.controlEvidencias || []).filter(record => !isAsesor || record.grupoId === grupoId);
+            const grupoActual = db.grupos.find(item => item.id === grupoId);
+            const evidencias = (db.controlEvidencias || []).filter(record => {
+                if (!isAsesor) return true;
+                return record.grupoId === grupoId
+                    || normalizeText(record.grupoNombre || record.grupo || '') === normalizeText(grupoActual?.nombre || '')
+                    || normalizeText(record.asesorNombre || record.asesor || '') === normalizeText(grupoActual?.asesor || '');
+            });
             const cuentaZoom = id => zoomAccounts.find(account => account.id === id);
             const grupo = id => db.grupos.find(item => item.id === id);
-
             return (
                 <div className="mx-auto w-full max-w-7xl space-y-6 pb-8">
                     <div className="rounded-2xl border border-blue-100 bg-white p-6 shadow-sm">
@@ -3126,6 +3385,13 @@ María López	maria.lopez	Z9y8x7" />
                                 const group = grupo(session.grupoId);
                                 const account = cuentaZoom(session.zoomAccountId);
                                 const isOpen = expandedIds.includes(session.id);
+                                const sessionCopyText = [
+                                    `${group?.nombre || 'Grupo'} · Sesión ${session.numero}`,
+                                    `${session.dia} · ${session.horario}`,
+                                    account?.usuario ? `Usuario Zoom: ${account.usuario}` : '',
+                                    account?.password ? `Contraseña Zoom: ${account.password}` : '',
+                                    session.invitacion || ''
+                                ].filter(Boolean).join('\n');
                                 return (
                                     <article key={session.id} className={`rounded-2xl border p-5 ${session.editadaManualmente ? 'border-amber-300 bg-amber-50/70' : 'border-slate-100 bg-slate-50'}`}>
                                         <div className="flex items-start justify-between gap-3">
@@ -3139,6 +3405,9 @@ María López	maria.lopez	Z9y8x7" />
                                             </div>
                                             <div className="flex items-center gap-3">
                                                 <span className="rounded-lg bg-white px-3 py-2 text-xs font-bold text-slate-600">{session.dia} · {session.horario}</span>
+                                                <button type="button" onClick={() => copyToClipboard(sessionCopyText)} className="rounded-full p-2 text-cyan-600 hover:bg-cyan-50 hover:text-cyan-800" title="Copiar información de la sesión" aria-label={`Copiar información de la sesión ${session.numero}`}>
+                                                    <i className="fa-solid fa-copy"></i>
+                                                </button>
                                                 <button onClick={() => setExpandedIds(prev => prev.includes(session.id) ? prev.filter(x => x !== session.id) : [...prev, session.id])} className="rounded-full p-2 text-slate-600 hover:bg-slate-100">
                                                     {isOpen ? <i className="fa-solid fa-chevron-up"></i> : <i className="fa-solid fa-chevron-down"></i>}
                                                 </button>
@@ -3812,7 +4081,7 @@ María López	maria.lopez	Z9y8x7" />
                     const group = (db.grupos || []).find(item => item.id === participant.grupoId);
                     const searchable = [
                         participant.completo, participant.nombre, participant.paterno, participant.materno,
-                        participant.curp, participant.correo, participant.telefono, participant.celular,
+                        participant.curp, participant.usuario, getMoodleUsername(participant.curp), participant.correo, participant.telefono, participant.celular,
                         group?.nombre, db.info?.nombreCurso, db.info?.siglas, db.info?.idCurso
                     ].map(value => normalizeText(value || '')).join(' ');
 
@@ -3869,13 +4138,15 @@ María López	maria.lopez	Z9y8x7" />
                             <div className="overflow-x-auto">
                                 <table className="w-full text-left text-sm">
                                     <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
-                                        <tr><th className="p-3">Alumno</th><th className="p-3">CURP / Contacto</th><th className="p-3">Curso</th><th className="p-3">Grupo</th><th className="p-3 text-center">Acción</th></tr>
+                                        <tr><th className="p-3">Alumno</th><th className="p-3">Usuario</th><th className="p-3">Correo</th><th className="p-3">CURP / Contacto</th><th className="p-3">Curso</th><th className="p-3">Grupo</th><th className="p-3 text-center">Acción</th></tr>
                                     </thead>
                                     <tbody>
                                         {resultados.map(result => (
                                             <tr key={`${result.db.id}-${result.participant.id}`} className="border-b border-gray-100 hover:bg-emerald-50/50">
                                                 <td className="p-3 font-semibold text-gray-800">{result.participant.completo || `${result.participant.nombre || ''} ${result.participant.paterno || ''}`.trim() || 'Sin nombre'}</td>
-                                                <td className="p-3 text-xs text-gray-600"><div>{result.participant.curp || 'Sin CURP'}</div><div>{result.participant.telefono || result.participant.celular || result.participant.correo || '-'}</div></td>
+                                                <td className="p-3 font-mono text-xs text-gray-700">{result.participant.usuario || getMoodleUsername(result.participant.curp) || '-'}</td>
+                                                <td className="p-3 text-xs text-gray-600">{result.participant.correo || '-'}</td>
+                                                <td className="p-3 text-xs text-gray-600"><div>{result.participant.curp || 'Sin CURP'}</div><div>{result.participant.telefono || result.participant.celular || '-'}</div></td>
                                                 <td className="p-3 text-gray-700"><div className="font-semibold">{result.db.info?.siglas || 'Sin sigla'}</div><div className="text-xs text-gray-500">{result.db.info?.nombreCurso || 'Curso sin nombre'}</div></td>
                                                 <td className="p-3 text-gray-600">{result.group?.nombre || 'Sin grupo'}</td>
                                                 <td className="p-3 text-center"><button onClick={() => openEdit(result)} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-700 transition-colors"><i className="fa-solid fa-pen mr-1"></i>Editar</button></td>
