@@ -155,6 +155,11 @@
                 overflow: visible !important;
             }
 
+            .workspace-content.control-workspace-content {
+                overflow-y: auto !important;
+                overflow-x: hidden !important;
+            }
+
             .seguimiento-panel {
                 min-height: 0;
             }
@@ -1716,7 +1721,7 @@
                                             <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-[10px] text-slate-200">v9.1</div>
+                                        <div className="text-[10px] text-slate-200">v9.2</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -1724,7 +1729,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v9.1</div>
+                                        <div className="text-xs text-slate-200">v9.2</div>
                                     </div>
                                 )}
                             </div>
@@ -3068,7 +3073,7 @@ María López	maria.lopez	Z9y8x7" />
                         </div>
                     </header>
 
-                    <div className={`workspace-content ${tab === 'grupos' ? 'group-workspace-content overflow-visible' : 'flex-1 min-h-0 overflow-hidden'} min-w-0 flex flex-col p-3 print:p-0`}>
+                    <div className={`workspace-content ${tab === 'grupos' ? 'group-workspace-content overflow-visible' : tab === 'control' ? 'control-workspace-content flex-1 min-h-0 overflow-y-auto' : 'flex-1 min-h-0 overflow-hidden'} min-w-0 flex flex-col p-3 print:p-0`}>
                         {tab === 'resumen' && (isAdmin || isCoordinador) && <TabResumen db={db} asesoresGlobales={asesoresGlobales} />}
                         {tab === 'ajustes' && isAdmin && <TabAjustes db={db} onUpdate={onUpdate} asesoresGlobales={asesoresGlobales} />}
                         {tab === 'pegadoExcel' && isAdmin && <TabPegadoExcel db={db} onUpdate={onUpdate} textoPegado={textoPegado} setTextoPegado={setTextoPegado} participantesProcesados={participantesProcesados} setParticipantesProcesados={setParticipantesProcesados} procesarTextoPegado={procesarTextoPegado} descargarPlantillaBase={descargarPlantillaBase} />}
