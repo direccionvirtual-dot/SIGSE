@@ -923,7 +923,7 @@
             };
 
             // Parseo Robusto Reparado
-            const procesarTextoPegado = (texto) => {
+            const procesarTextoPegado = (texto, gruposDisponibles = []) => {
                 setTextoPegado(texto);
                 if (!texto.trim()) { setParticipantesProcesados([]); return; }
                 
@@ -949,8 +949,11 @@
                     paterno: findCol(['PATERNO', 'APELLIDO PATERNO']), materno: findCol(['MATERNO', 'APELLIDO MATERNO']),
                     telefono: findCol(['TELEFONO', 'CELULAR']), cct: findCol(['CLAVE CENTRO', 'CCT']), subsistema: findCol(['SUBSISTEMA']),
                     municipio: findCol(['MUNICIPIO']), funcion: findCol(['FUNCION']), nivel: findCol(['NIVEL EDUCATIVO', 'NIVEL']),
-                    servicio: findCol(['SERVICIO', 'MODALIDAD']), folio: findCol(['FOLIO']), concluido: findCol(['CURSO CONCLUIDO', 'CONCLUIDO'])
+                    servicio: findCol(['SERVICIO', 'MODALIDAD']), folio: findCol(['FOLIO']), concluido: findCol(['CURSO CONCLUIDO', 'CONCLUIDO']),
+                    grupo: findCol(['GRUPO'])
                 };
+
+                const gruposPorNombre = new Map((gruposDisponibles || []).map(grupo => [normalizeText(grupo.nombre), grupo]));
 
                 const parsedData = filas.slice(1).map((fila, index) => {
                     const celdas = fila.split('\t');
@@ -958,6 +961,8 @@
                     const pNombre = formatImportedText(getVal(mapIndices.nombre));
                     const pPaterno = formatImportedText(getVal(mapIndices.paterno));
                     const pMaterno = formatImportedText(getVal(mapIndices.materno));
+                    const grupoImportado = getVal(mapIndices.grupo);
+                    const grupoEncontrado = grupoImportado ? gruposPorNombre.get(normalizeText(grupoImportado)) : null;
 
                     if (!pNombre && !getVal(mapIndices.curp)) return null;
 
@@ -969,7 +974,9 @@
                         telefono: getVal(mapIndices.telefono), cct: getVal(mapIndices.cct), subsistema: getVal(mapIndices.subsistema),
                         municipio: getVal(mapIndices.municipio), funcion: getVal(mapIndices.funcion), nivel: getVal(mapIndices.nivel),
                         servicio: getVal(mapIndices.servicio), folio: getVal(mapIndices.folio), concluido: getVal(mapIndices.concluido),
-                        grupoId: null
+                        grupoId: grupoEncontrado?.id || null,
+                        grupoImportado: grupoImportado || '',
+                        grupoNoEncontrado: Boolean(grupoImportado && !grupoEncontrado)
                     };
                 }).filter(item => item !== null);
                 
@@ -1900,7 +1907,7 @@
                                             <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-[10px] text-slate-200">v9.6</div>
+                                        <div className="text-[10px] text-slate-200">v9.7</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -1908,7 +1915,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v9.6</div>
+                                        <div className="text-xs text-slate-200">v9.7</div>
                                     </div>
                                 )}
                             </div>
@@ -3508,24 +3515,26 @@ María López	maria.lopez	Z9y8x7" />
             const [alumnoManual, setAlumnoManual] = useState({
                 no: '', correo: '', rfc: '', curp: '', edad: '', sexo: '', nombre: '', paterno: '', materno: '', telefono: '', cct: '', subsistema: '', municipio: '', funcion: '', nivel: '', servicio: ''
             });
+            const gruposNoEncontrados = [...new Set(participantesProcesados.filter(participante => participante.grupoNoEncontrado).map(participante => participante.grupoImportado))];
 
             const agregarParticipantesPegados = () => {
                 if (!participantesProcesados.length) return;
-                const nuevos = participantesProcesados.filter(nuevo => !db.participantes.some(actual => {
+                const participantesConGrupoInvalido = participantesProcesados.filter(participante => participante.grupoNoEncontrado).length;
+                const nuevos = participantesProcesados.filter(nuevo => !nuevo.grupoNoEncontrado && !db.participantes.some(actual => {
                     const mismoCurp = Boolean(actual.curp && nuevo.curp && actual.curp.trim().toLowerCase() === nuevo.curp.trim().toLowerCase());
                     const mismoCorreo = Boolean(actual.correo && nuevo.correo && actual.correo.trim().toLowerCase() === nuevo.correo.trim().toLowerCase());
                     return mismoCurp || mismoCorreo;
                 }));
+                const duplicados = participantesProcesados.length - participantesConGrupoInvalido - nuevos.length;
 
-                if (!nuevos.length) {
-                    setTextoPegado('');
-                    setParticipantesProcesados([]);
-                    return;
-                }
-
-                onUpdate({ ...db, participantes: [...db.participantes, ...nuevos] });
+                if (nuevos.length) onUpdate({ ...db, participantes: [...db.participantes, ...nuevos] });
                 setTextoPegado('');
                 setParticipantesProcesados([]);
+                const detalles = [
+                    participantesConGrupoInvalido ? `${participantesConGrupoInvalido} con grupo no encontrado` : '',
+                    duplicados ? `${duplicados} duplicado(s)` : ''
+                ].filter(Boolean);
+                alert(`Se han registrado ${nuevos.length} alumno${nuevos.length === 1 ? '' : 's'}.${detalles.length ? `\n\nNo se registraron: ${detalles.join(' y ')}.` : ''}${gruposNoEncontrados.length ? `\n\nGrupos no encontrados:\n${gruposNoEncontrados.join('\n')}` : ''}`);
             };
 
             const guardarAlumnoManual = () => {
@@ -3634,8 +3643,13 @@ María López	maria.lopez	Z9y8x7" />
                         </div>
                     )}
 
-                    <p className="text-sm text-gray-500 mb-4">Pega aquí la información del Excel con encabezados para importar alumnos al curso actual.</p>
-                    <textarea className="flex-1 w-full p-4 border-dashed border-2 border-gray-300 rounded-xl bg-gray-50 text-xs font-mono outline-none focus:border-blue-500 focus:bg-white transition-colors" placeholder="Pegar aquí..." value={textoPegado} onChange={e=>procesarTextoPegado(e.target.value)}></textarea>
+                    <p className="text-sm text-gray-500 mb-4">Pega aquí la información del Excel con encabezados para importar alumnos al curso actual. Incluye la columna GRUPO para asignarlos automáticamente.</p>
+                    <textarea className="flex-1 w-full p-4 border-dashed border-2 border-gray-300 rounded-xl bg-gray-50 text-xs font-mono outline-none focus:border-blue-500 focus:bg-white transition-colors" placeholder="Pegar aquí..." value={textoPegado} onChange={e=>procesarTextoPegado(e.target.value, db.grupos)}></textarea>
+                    {gruposNoEncontrados.length > 0 && (
+                        <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                            <strong>Grupos no encontrados:</strong> {gruposNoEncontrados.join(', ')}. Esos participantes no se cargarán; los demás conservarán su asignación.
+                        </div>
+                    )}
                     <div className="flex items-center justify-between mt-4">
                         <div className="text-sm px-4 py-2 bg-blue-50 text-blue-800 font-bold rounded-lg border border-blue-100">
                             Registros detectados: {participantesProcesados.length}
