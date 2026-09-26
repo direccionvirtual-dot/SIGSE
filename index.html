@@ -263,11 +263,194 @@
             messagingSenderId: "255431153979",
             appId: "1:255431153979:web:badfff34a04faf47a57f1e"
         };
+        const PER_COURSE_STORAGE_ENABLED = true;
 
         const firebaseApp = (typeof firebase !== 'undefined' ? firebase.initializeApp(firebaseConfig) : null);
         const firebaseDb = firebaseApp ? firebase.firestore() : null;
         const firebaseEnabled = !!firebaseDb;
         const remoteStateDoc = firebaseDb ? firebaseDb.collection('prodep_app').doc('app_state') : null;
+        const courseRecordsCollection = remoteStateDoc ? remoteStateDoc.collection('basesDeDatos') : null;
+        const COURSE_SCHEMA_VERSION = 3;
+        const MAX_COURSE_DOCUMENT_BYTES = 900 * 1024;
+        const getCourseWeeksCollection = courseId => courseRecordsCollection.doc(String(courseId)).collection('semanasSeguimiento');
+
+        const notifySaveFailed = error => {
+            const detail = { message: error?.code || error?.message || 'Error desconocido' };
+            window.dispatchEvent(new CustomEvent('sigse-save-error', { detail }));
+        };
+
+        const serializeComparable = value => {
+            if (value === undefined) return 'undefined';
+            if (Array.isArray(value)) return `[${value.map(serializeComparable).join(',')}]`;
+            if (value && typeof value === 'object') {
+                const keys = Object.keys(value).filter(key => value[key] !== undefined).sort();
+                return `{${keys.map(key => `${JSON.stringify(key)}:${serializeComparable(value[key])}`).join(',')}}`;
+            }
+            return JSON.stringify(value);
+        };
+
+        const getCourseDocumentData = record => {
+            const { semanasSeguimiento, ...courseData } = record;
+            return courseData;
+        };
+
+        const readCourseWeeks = async (courseReference, courseData) => {
+            const embeddedWeeks = courseData.semanasSeguimiento || [];
+            const embeddedOrder = new Map(embeddedWeeks.map((week, index) => [String(week.id), index]));
+            const weeks = new Map(embeddedWeeks.map(week => [String(week.id), week]));
+            const snapshot = await courseReference.collection('semanasSeguimiento').get();
+            snapshot.docs.forEach(document => weeks.set(document.id, { ...document.data(), id: document.id }));
+            return Array.from(weeks.values()).sort((left, right) =>
+                Number(left.orden ?? embeddedOrder.get(String(left.id)) ?? 0) - Number(right.orden ?? embeddedOrder.get(String(right.id)) ?? 0)
+            );
+        };
+
+        const readCourseRecords = async snapshot => Promise.all(snapshot.docs.map(async document => {
+            const courseData = document.data();
+            const semanasSeguimiento = await readCourseWeeks(document.ref, courseData);
+            return { ...courseData, id: document.id, semanasSeguimiento };
+        }));
+
+        const writeCourseRecords = async (records, previousRecords = [], force = false) => {
+            const previousById = new Map((previousRecords || []).map(record => [String(record.id), record]));
+            if (force) {
+                const currentSnapshot = await courseRecordsCollection.get();
+                const currentRecords = await readCourseRecords(currentSnapshot);
+                currentRecords.forEach(record => previousById.set(String(record.id), record));
+            }
+
+            const nextById = new Map();
+            const operations = [];
+            (records || []).forEach(record => {
+                const id = String(record?.id || '').trim();
+                if (!id || id.includes('/')) throw new Error('Cada curso debe tener un identificador válido para guardarse.');
+                const courseData = getCourseDocumentData(record);
+                if (new TextEncoder().encode(JSON.stringify(courseData)).length > MAX_COURSE_DOCUMENT_BYTES) {
+                    throw new Error(`El curso ${record.info?.siglas || id} supera el tamaño seguro por documento. Sus participantes deben dividirse en registros separados.`);
+                }
+                nextById.set(id, record);
+                const previous = previousById.get(id);
+                if (force || serializeComparable(getCourseDocumentData(previous || {})) !== serializeComparable(courseData)) {
+                    operations.push({ type: 'set-course', courseId: id, data: courseData });
+                }
+
+                const previousWeeks = new Map((previous?.semanasSeguimiento || []).map(week => [String(week.id), week]));
+                const nextWeeks = new Map();
+                (record.semanasSeguimiento || []).forEach((week, index) => {
+                    const weekId = String(week?.id || '').trim();
+                    if (!weekId || weekId.includes('/')) throw new Error(`El curso ${record.info?.siglas || id} tiene una semana sin identificador válido.`);
+                    const weekData = { ...week, orden: index };
+                    if (new TextEncoder().encode(JSON.stringify(weekData)).length > MAX_COURSE_DOCUMENT_BYTES) {
+                        throw new Error(`Una semana del curso ${record.info?.siglas || id} supera el tamaño seguro por documento.`);
+                    }
+                    nextWeeks.set(weekId, weekData);
+                    if (force || serializeComparable(previousWeeks.get(weekId)) !== serializeComparable(weekData)) {
+                        operations.push({ type: 'set-week', courseId: id, weekId, data: weekData });
+                    }
+                });
+                previousWeeks.forEach((week, weekId) => {
+                    if (!nextWeeks.has(weekId)) operations.push({ type: 'delete-week', courseId: id, weekId });
+                });
+            });
+            previousById.forEach((record, id) => {
+                if (!nextById.has(id)) {
+                    (record.semanasSeguimiento || []).forEach(week => {
+                        operations.push({ type: 'delete-week', courseId: id, weekId: String(week.id) });
+                    });
+                    operations.push({ type: 'delete-course', courseId: id });
+                }
+            });
+
+            for (let start = 0; start < operations.length; start += 450) {
+                const batch = firebaseDb.batch();
+                operations.slice(start, start + 450).forEach(operation => {
+                    const courseReference = courseRecordsCollection.doc(operation.courseId);
+                    const reference = operation.type.includes('week')
+                        ? courseReference.collection('semanasSeguimiento').doc(operation.weekId)
+                        : courseReference;
+                    if (operation.type.startsWith('delete')) batch.delete(reference);
+                    else batch.set(reference, operation.data);
+                });
+                await batch.commit();
+            }
+            return operations.length;
+        };
+
+        const migrateLegacyCourseRecords = async () => {
+            const snapshot = await remoteStateDoc.get();
+            const remote = snapshot.exists ? snapshot.data() || {} : {};
+            if (Number(remote.basesDeDatosSchemaVersion || 0) === COURSE_SCHEMA_VERSION) return 0;
+
+            const currentCourses = await courseRecordsCollection.get();
+            const recordsToMigrate = Array.isArray(remote.basesDeDatos)
+                ? remote.basesDeDatos
+                : await readCourseRecords(currentCourses);
+
+            const weeklyWrites = [];
+            recordsToMigrate.forEach(record => {
+                const courseId = String(record?.id || '').trim();
+                if (!courseId || courseId.includes('/')) throw new Error('Un curso del formato anterior tiene un identificador inválido.');
+                (record.semanasSeguimiento || []).forEach((week, index) => {
+                    const weekId = String(week?.id || '').trim();
+                    if (!weekId || weekId.includes('/')) throw new Error(`Una semana del curso ${record.info?.siglas || courseId} tiene un identificador inválido.`);
+                    const weekData = { ...week, orden: index };
+                    if (new TextEncoder().encode(JSON.stringify(weekData)).length > MAX_COURSE_DOCUMENT_BYTES) {
+                        throw new Error(`Una semana del curso ${record.info?.siglas || courseId} supera el tamaño seguro por documento.`);
+                    }
+                    weeklyWrites.push({ courseId, weekId, week: weekData });
+                });
+            });
+
+            for (let start = 0; start < weeklyWrites.length; start += 450) {
+                const batch = firebaseDb.batch();
+                weeklyWrites.slice(start, start + 450).forEach(({ courseId, weekId, week }) => {
+                    batch.set(getCourseWeeksCollection(courseId).doc(weekId), week);
+                });
+                await batch.commit();
+            }
+
+            for (const record of recordsToMigrate) {
+                const courseId = String(record.id);
+                const weekSnapshot = await getCourseWeeksCollection(courseId).get();
+                const verifiedWeeks = new Map(weekSnapshot.docs.map(document => [document.id, document.data()]));
+                if (verifiedWeeks.size !== (record.semanasSeguimiento || []).length || (record.semanasSeguimiento || []).some((week, index) =>
+                    serializeComparable(verifiedWeeks.get(String(week.id))) !== serializeComparable({ ...week, orden: index })
+                )) {
+                    throw new Error('Los datos de seguimiento no coincidieron; se conservó intacto el formato anterior.');
+                }
+            }
+
+            const courseWrites = [];
+            recordsToMigrate.forEach(record => {
+                const courseData = getCourseDocumentData(record);
+                if (new TextEncoder().encode(JSON.stringify(courseData)).length > MAX_COURSE_DOCUMENT_BYTES) {
+                    throw new Error(`El curso ${record.info?.siglas || record.id} supera el tamaño seguro por documento.`);
+                }
+                courseWrites.push({ id: String(record.id), courseData });
+            });
+            for (let start = 0; start < courseWrites.length; start += 450) {
+                const batch = firebaseDb.batch();
+                courseWrites.slice(start, start + 450).forEach(({ id, courseData }) => {
+                    batch.set(courseRecordsCollection.doc(id), courseData);
+                });
+                await batch.commit();
+            }
+
+            const verifiedCourses = await courseRecordsCollection.get();
+            const verifiedCourseData = new Map(verifiedCourses.docs.map(document => [document.id, document.data()]));
+            if (verifiedCourseData.size !== courseWrites.length || courseWrites.some(({ id, courseData }) =>
+                serializeComparable(verifiedCourseData.get(id)) !== serializeComparable(courseData)
+            )) {
+                throw new Error('La verificación de cursos no coincidió; se conservaron los datos de seguimiento.');
+            }
+
+            await remoteStateDoc.set({
+                basesDeDatos: firebase.firestore.FieldValue.delete(),
+                basesDeDatosSchemaVersion: COURSE_SCHEMA_VERSION,
+                updatedAt: new Date().toISOString()
+            }, { merge: true });
+            return weeklyWrites.length + courseWrites.length + 1;
+        };
 
         const getTodayUsageKey = () => new Date().toISOString().slice(0, 10);
 
@@ -313,7 +496,7 @@
         };
 
         const saveRemoteState = async (updates) => {
-            if (!firebaseEnabled) return;
+            if (!firebaseEnabled) return true;
             try {
                 await remoteStateDoc.set({
                     ...updates,
@@ -321,8 +504,11 @@
                 }, { merge: true });
                 const stats = await incrementUsageStats(1);
                 if (stats) notifyUsageUpdated(stats);
+                return true;
             } catch (error) {
                 console.warn('Firebase: no se pudo guardar el estado remoto.', error);
+                notifySaveFailed(error);
+                return false;
             }
         };
 
@@ -340,9 +526,110 @@
         function useFirestoreState(key, initialValue) {
             const [storedValue, setStoredValue] = useState(initialValue);
             const storedValueRef = useRef(initialValue);
+            const courseStateReadyRef = useRef(key !== 'prodep_dbs' || !firebaseEnabled || !PER_COURSE_STORAGE_ENABLED);
+            const courseSchemaVersionRef = useRef(0);
 
             useEffect(() => {
                 if (!firebaseEnabled) return undefined;
+
+                if (key === 'prodep_dbs' && PER_COURSE_STORAGE_ENABLED) {
+                    let isMounted = true;
+                    let unsubscribe = null;
+
+                    const initializeCourseState = async () => {
+                        try {
+                            const remoteSnapshot = await remoteStateDoc.get();
+                            if (!isMounted) return;
+                            const remote = remoteSnapshot.exists ? remoteSnapshot.data() || {} : {};
+                            courseSchemaVersionRef.current = Number(remote.basesDeDatosSchemaVersion || 0);
+
+                            if (courseSchemaVersionRef.current !== COURSE_SCHEMA_VERSION) {
+                                const writes = await migrateLegacyCourseRecords();
+                                if (!isMounted) return;
+                                courseSchemaVersionRef.current = COURSE_SCHEMA_VERSION;
+                                const stats = await incrementUsageStats(writes);
+                                if (stats) notifyUsageUpdated(stats);
+                                window.dispatchEvent(new CustomEvent('sigse-course-migration-complete'));
+                            }
+
+                            const initialCourses = await readCourseRecords(await courseRecordsCollection.get());
+                            if (!isMounted) return;
+                            const coursesById = new Map(initialCourses.map(record => [String(record.id), getCourseDocumentData(record)]));
+                            const weeksByCourse = new Map(initialCourses.map(record => [String(record.id), record.semanasSeguimiento || []]));
+                            const weekUnsubscribes = new Map();
+                            const publishRecords = () => {
+                                const records = Array.from(coursesById, ([id, course]) => ({
+                                    ...course,
+                                    id,
+                                    semanasSeguimiento: weeksByCourse.get(id) || []
+                                }));
+                                storedValueRef.current = records;
+                                setStoredValue(records);
+                            };
+                            const watchWeeks = courseId => {
+                                if (weekUnsubscribes.has(courseId)) return;
+                                const unsubscribeWeeks = getCourseWeeksCollection(courseId).onSnapshot(snapshot => {
+                                    if (!isMounted) return;
+                                    weeksByCourse.set(courseId, snapshot.docs.map(document => ({ ...document.data(), id: document.id })));
+                                    publishRecords();
+                                }, error => {
+                                    console.warn('Firebase: no se pudo sincronizar el seguimiento semanal.', error);
+                                    notifySaveFailed(error);
+                                });
+                                weekUnsubscribes.set(courseId, unsubscribeWeeks);
+                            };
+
+                            publishRecords();
+                            courseStateReadyRef.current = true;
+                            unsubscribe = courseRecordsCollection.onSnapshot(snapshot => {
+                                if (!isMounted) return;
+                                const activeCourseIds = new Set(snapshot.docs.map(document => document.id));
+                                weekUnsubscribes.forEach((unsubscribeWeeks, courseId) => {
+                                    if (!activeCourseIds.has(courseId)) {
+                                        unsubscribeWeeks();
+                                        weekUnsubscribes.delete(courseId);
+                                        weeksByCourse.delete(courseId);
+                                        coursesById.delete(courseId);
+                                    }
+                                });
+                                snapshot.docs.forEach(document => {
+                                    coursesById.set(document.id, document.data());
+                                    watchWeeks(document.id);
+                                });
+                                publishRecords();
+                            }, error => {
+                                console.warn('Firebase: no se pudo sincronizar los cursos.', error);
+                                notifySaveFailed(error);
+                            });
+                            const unsubscribeCourses = unsubscribe;
+                            unsubscribe = () => {
+                                unsubscribeCourses();
+                                weekUnsubscribes.forEach(unsubscribeWeeks => unsubscribeWeeks());
+                            };
+                        } catch (error) {
+                            console.warn('Firebase: no se pudo preparar la migración de cursos.', error);
+                            notifySaveFailed(error);
+                            try {
+                                const remote = await loadRemoteState();
+                                const fallbackRecords = Array.isArray(remote?.basesDeDatos)
+                                    ? remote.basesDeDatos
+                                    : await readCourseRecords(await courseRecordsCollection.get());
+                                if (isMounted) {
+                                    storedValueRef.current = fallbackRecords;
+                                    setStoredValue(fallbackRecords);
+                                }
+                            } catch (fallbackError) {
+                                console.warn('Firebase: no se pudieron recuperar los cursos para mostrarlos.', fallbackError);
+                            }
+                        }
+                    };
+
+                    initializeCourseState();
+                    return () => {
+                        isMounted = false;
+                        if (unsubscribe) unsubscribe();
+                    };
+                }
 
                 const updateFromRemote = remote => {
                     if (!remote) return;
@@ -365,25 +652,57 @@
 
             const setValue = value => {
                 try {
+                    const previousValue = storedValueRef.current;
                     const valueToStore = value instanceof Function ? value(storedValueRef.current) : value;
                     storedValueRef.current = valueToStore;
                     setStoredValue(valueToStore);
-                    if (firebaseEnabled) {
-                        if (key === 'prodep_dbs') {
-                            saveRemoteState({ basesDeDatos: valueToStore });
+                    if (!firebaseEnabled) return Promise.resolve(true);
+
+                    if (key === 'prodep_dbs') {
+                        if (!PER_COURSE_STORAGE_ENABLED) return saveRemoteState({ basesDeDatos: valueToStore });
+                        if (!courseStateReadyRef.current) {
+                            storedValueRef.current = previousValue;
+                            setStoredValue(previousValue);
+                            notifySaveFailed(new Error('Firebase todavía está cargando o migrando los cursos. Intenta nuevamente en unos segundos.'));
+                            return Promise.resolve(false);
                         }
-                        if (key === 'prodep_asesores_global') {
-                            saveRemoteState({ personalGlobal: valueToStore });
-                        }
-                        if (key === 'prodep_admins') {
-                            saveRemoteState({ adminUsers: valueToStore });
-                        }
-                        if (key === 'prodep_zoom_accounts') {
-                            saveRemoteState({ zoomAccounts: valueToStore });
-                        }
+
+                        return (async () => {
+                            let writes = await writeCourseRecords(valueToStore, previousValue);
+                            if (courseSchemaVersionRef.current !== COURSE_SCHEMA_VERSION) {
+                                await remoteStateDoc.set({
+                                    basesDeDatos: firebase.firestore.FieldValue.delete(),
+                                    basesDeDatosSchemaVersion: COURSE_SCHEMA_VERSION,
+                                    updatedAt: new Date().toISOString()
+                                }, { merge: true });
+                                courseSchemaVersionRef.current = COURSE_SCHEMA_VERSION;
+                                writes += 1;
+                            }
+                            if (writes > 0) {
+                                const stats = await incrementUsageStats(writes);
+                                if (stats) notifyUsageUpdated(stats);
+                            }
+                            return true;
+                        })().catch(error => {
+                            console.warn('Firebase: no se pudieron guardar los cursos.', error);
+                            if (storedValueRef.current === valueToStore) {
+                                storedValueRef.current = previousValue;
+                                setStoredValue(previousValue);
+                            }
+                            notifySaveFailed(error);
+                            return false;
+                        });
                     }
+
+                    const updateKey = key === 'prodep_asesores_global' ? 'personalGlobal'
+                        : key === 'prodep_admins' ? 'adminUsers'
+                        : key === 'prodep_zoom_accounts' ? 'zoomAccounts'
+                        : null;
+                    return updateKey ? saveRemoteState({ [updateKey]: valueToStore }) : Promise.resolve(true);
                 } catch (error) {
                     console.error(error);
+                    notifySaveFailed(error);
+                    return Promise.resolve(false);
                 }
             };
 
@@ -775,10 +1094,23 @@
                     showToast(`Guardado. Escrituras hoy: ${stats.writesToday}/${stats.limit} (${pct}%)`, 'success');
                 };
 
+                const handleSaveError = (event) => {
+                    const detail = event.detail || {};
+                    showToast('No se pudo guardar. Revisa la conexión y vuelve a intentar antes de continuar.', 'error');
+                };
+
+                const handleCourseMigration = () => {
+                    showToast('Los cursos se copiaron y verificaron correctamente.', 'success');
+                };
+
                 window.addEventListener('sigse-usage-update', handleUsageUpdate);
+                window.addEventListener('sigse-save-error', handleSaveError);
+                window.addEventListener('sigse-course-migration-complete', handleCourseMigration);
                 return () => {
                     isMounted = false;
                     window.removeEventListener('sigse-usage-update', handleUsageUpdate);
+                    window.removeEventListener('sigse-save-error', handleSaveError);
+                    window.removeEventListener('sigse-course-migration-complete', handleCourseMigration);
                     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
                 };
             }, []);
@@ -1023,7 +1355,7 @@
                 });
             }, [personalGlobal, coursesPersonalFilter]);
 
-            const guardarBaseDeDatos = () => {
+            const guardarBaseDeDatos = async () => {
                 if (!sectorFormativoTipo || !tipoFormacion || !modalidad || !estadoSeleccionado || !siglas) { showToast("Selecciona el sector formativo, tipo de formación, modalidad, estado y siglas.", 'error'); return; }
                 const sectorFormativoFinal = sectorFormativoTipo === 'Otros' ? (sectorFormativoOtro.trim() || 'Otros') : sectorFormativoTipo;
                 const nuevaBD = {
@@ -1036,7 +1368,8 @@
                     participantes: participantesProcesados || [], grupos: [], semanasSeguimiento: [],
                     fechaCreacion: new Date().toLocaleDateString()
                 };
-                setBasesDeDatos([...basesDeDatos, nuevaBD]);
+                const saved = await setBasesDeDatos(current => [...current, nuevaBD]);
+                if (saved === false) return;
                 setActiveDbId(nuevaBD.id);
                 trackRecentOffer(nuevaBD.id);
                 setAppView('workspace');
@@ -1047,7 +1380,7 @@
 
             const dbActiva = basesDeDatos.find(db => db.id === activeDbId);
             const updateActiveDb = (newData) => {
-                setBasesDeDatos(basesDeDatos.map(db => db.id === activeDbId ? { ...db, ...newData } : db));
+                return setBasesDeDatos(current => current.map(db => db.id === activeDbId ? { ...db, ...newData } : db));
             };
 
             // Respaldo
@@ -1065,16 +1398,23 @@
                 const file = e.target.files[0];
                 if (!file) return;
                 const reader = new FileReader();
-                reader.onload = (evt) => {
+                reader.onload = async (evt) => {
                     try {
                         const data = JSON.parse(evt.target.result);
                         if (data.basesDeDatos && (data.asesoresGlobales || data.personalGlobal)) {
                             if(confirm("¿Estás seguro de restaurar este respaldo? Reemplazará los datos actuales en esta pantalla.")) {
-                                setBasesDeDatos(data.basesDeDatos);
-                                setPersonalGlobal(data.personalGlobal || data.asesoresGlobales);
-                                if (Array.isArray(data.adminUsers)) setAdminUsers(data.adminUsers);
-                                if (Array.isArray(data.zoomAccounts)) setZoomAccounts(data.zoomAccounts);
-                                showToast("¡Sistema restaurado con éxito! Tus cursos y gráficas han vuelto.", 'success');
+                                const saves = [
+                                    setBasesDeDatos(data.basesDeDatos),
+                                    setPersonalGlobal(data.personalGlobal || data.asesoresGlobales)
+                                ];
+                                if (Array.isArray(data.adminUsers)) saves.push(setAdminUsers(data.adminUsers));
+                                if (Array.isArray(data.zoomAccounts)) saves.push(setZoomAccounts(data.zoomAccounts));
+                                const results = await Promise.all(saves);
+                                if (results.some(result => result === false)) {
+                                    showToast('El respaldo se leyó, pero Firebase no confirmó todos los cambios.', 'error');
+                                    return;
+                                }
+                                showToast("¡Sistema restaurado y guardado en Firebase!", 'success');
                             }
                         } else {
                             showToast("El archivo no es un respaldo válido de SIGSE.", 'error');
@@ -1907,7 +2247,7 @@
                                             <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-[10px] text-slate-200">v9.7</div>
+                                        <div className="text-[10px] text-slate-200">v10.0</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -1915,7 +2255,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v9.7</div>
+                                        <div className="text-xs text-slate-200">v10.0</div>
                                     </div>
                                 )}
                             </div>
@@ -3517,7 +3857,7 @@ María López	maria.lopez	Z9y8x7" />
             });
             const gruposNoEncontrados = [...new Set(participantesProcesados.filter(participante => participante.grupoNoEncontrado).map(participante => participante.grupoImportado))];
 
-            const agregarParticipantesPegados = () => {
+            const agregarParticipantesPegados = async () => {
                 if (!participantesProcesados.length) return;
                 const participantesConGrupoInvalido = participantesProcesados.filter(participante => participante.grupoNoEncontrado).length;
                 const nuevos = participantesProcesados.filter(nuevo => !nuevo.grupoNoEncontrado && !db.participantes.some(actual => {
@@ -3527,7 +3867,13 @@ María López	maria.lopez	Z9y8x7" />
                 }));
                 const duplicados = participantesProcesados.length - participantesConGrupoInvalido - nuevos.length;
 
-                if (nuevos.length) onUpdate({ ...db, participantes: [...db.participantes, ...nuevos] });
+                if (nuevos.length) {
+                    const saved = await onUpdate({ ...db, participantes: [...db.participantes, ...nuevos] });
+                    if (saved === false) {
+                        alert('Firebase no confirmó el guardado. Conservé la tabla pegada para que puedas intentar de nuevo.');
+                        return;
+                    }
+                }
                 setTextoPegado('');
                 setParticipantesProcesados([]);
                 const detalles = [
@@ -3537,7 +3883,7 @@ María López	maria.lopez	Z9y8x7" />
                 alert(`Se han registrado ${nuevos.length} alumno${nuevos.length === 1 ? '' : 's'}.${detalles.length ? `\n\nNo se registraron: ${detalles.join(' y ')}.` : ''}${gruposNoEncontrados.length ? `\n\nGrupos no encontrados:\n${gruposNoEncontrados.join('\n')}` : ''}`);
             };
 
-            const guardarAlumnoManual = () => {
+            const guardarAlumnoManual = async () => {
                 const nombre = (alumnoManual.nombre || '').trim();
                 const paterno = (alumnoManual.paterno || '').trim();
                 const materno = (alumnoManual.materno || '').trim();
@@ -3571,7 +3917,8 @@ María López	maria.lopez	Z9y8x7" />
                     grupoId: null
                 };
 
-                onUpdate({ ...db, participantes: [...db.participantes, nuevo] });
+                const saved = await onUpdate({ ...db, participantes: [...db.participantes, nuevo] });
+                if (saved === false) return;
                 setAlumnoManual({ no: '', correo: '', rfc: '', curp: '', edad: '', sexo: '', nombre: '', paterno: '', materno: '', telefono: '', cct: '', subsistema: '', municipio: '', funcion: '', nivel: '', servicio: '' });
                 setMostrarCargaManual(false);
             };
