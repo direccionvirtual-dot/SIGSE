@@ -733,6 +733,48 @@
         const SECTORES_FORMATIVOS = ["Educación Continua", "PRODEP", "Formadores", "Otros"];
 
         // --- FUNCIONES AUXILIARES ---
+        const parseQuotedTSV = (input) => {
+            const text = String(input || '').replace(/^\uFEFF/, '');
+            const rows = [];
+            let row = [];
+            let cell = '';
+            let insideQuotes = false;
+
+            for (let index = 0; index < text.length; index += 1) {
+                const character = text[index];
+                if (insideQuotes) {
+                    if (character === '"' && text[index + 1] === '"') {
+                        cell += '"';
+                        index += 1;
+                    } else if (character === '"') {
+                        insideQuotes = false;
+                    } else if (character === '\r' || character === '\n') {
+                        if (character === '\r' && text[index + 1] === '\n') index += 1;
+                        cell += '\n';
+                    } else {
+                        cell += character;
+                    }
+                } else if (character === '"' && cell.length === 0) {
+                    insideQuotes = true;
+                } else if (character === '\t') {
+                    row.push(cell);
+                    cell = '';
+                } else if (character === '\r' || character === '\n') {
+                    if (character === '\r' && text[index + 1] === '\n') index += 1;
+                    row.push(cell);
+                    if (row.some(value => value.trim())) rows.push(row);
+                    row = [];
+                    cell = '';
+                } else {
+                    cell += character;
+                }
+            }
+
+            row.push(cell);
+            if (row.some(value => value.trim())) rows.push(row);
+            return rows;
+        };
+
         const normalizeText = (text) => text ? text.toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim() : '';
         const formatImportedText = (text) => text ? text.toString().toUpperCase().trim() : '';
         const getMoodleUsername = (curp) => curp ? curp.substring(0, 10).toLowerCase() : '';
@@ -1022,6 +1064,9 @@
             const [newSessionZoomId, setNewSessionZoomId] = useState('');
             const [newSessionInvite, setNewSessionInvite] = useState('');
             const [newSessionTotal, setNewSessionTotal] = useState('');
+            const [bulkSessionText, setBulkSessionText] = useState('');
+            const [bulkSessionDay, setBulkSessionDay] = useState('');
+            const [bulkSessionTime, setBulkSessionTime] = useState('');
             const [editSessionModal, setEditSessionModal] = useState({ show: false, dbId: null, id: null, numero: 1, dia: '', horario: '', zoomAccountId: '', invitacion: '' });
             const [expandedSessionIds, setExpandedSessionIds] = useState([]);
             const [expandedSessionHierarchy, setExpandedSessionHierarchy] = useState({});
@@ -1803,6 +1848,147 @@
                 alert(`Se generaron ${sesionesNuevas.length} sesiones. Puedes ajustar cualquier sesión con el lápiz.`);
             };
 
+            const cargarSesionesControlMasiva = async () => {
+                const db = getSessionDb();
+                if (!db) return alert('Selecciona primero el curso que recibirá las sesiones.');
+
+                const filas = parseQuotedTSV(bulkSessionText);
+                if (filas.length < 2) return alert('Pega la tabla con encabezados y al menos una fila de datos.');
+
+                const encabezados = filas[0].map(normalizeText);
+                const grupoIndex = encabezados.findIndex(header => header.includes('GRUPO'));
+                const cuentaIndex = encabezados.findIndex(header => header.includes('CUENTA') && header.includes('ZOOM'));
+                const diaIndex = encabezados.findIndex(header => header === 'DIA' || header.includes('DIA'));
+                const horarioIndex = encabezados.findIndex(header => header.includes('HORA'));
+                const sessionColumns = encabezados
+                    .map((header, index) => {
+                        const match = header.match(/SESION\s*(\d+)/);
+                        return match ? { numero: parseInt(match[1], 10), index } : null;
+                    })
+                    .filter(Boolean)
+                    .sort((left, right) => left.numero - right.numero);
+
+                if ([grupoIndex, cuentaIndex, diaIndex, horarioIndex].some(index => index === -1) || !sessionColumns.length) {
+                    return alert('No identifiqué todas las columnas necesarias. Incluye GRUPO, CUENTA ZOOM, DIA, HORARIO y al menos una columna SESIÓN 1.');
+                }
+
+                const gruposPorNombre = new Map((db.grupos || []).map(group => [normalizeText(group.nombre), group]));
+                const sesionesExistentes = db.controlSesiones || [];
+                const sesionesPorClave = new Map(sesionesExistentes.map(session => [`${session.grupoId}:${session.numero}`, session]));
+                const candidatasPorClave = new Map();
+                let filasOmitidas = 0;
+
+                filas.slice(1).forEach((fila, rowIndex) => {
+                    const nombreGrupo = String(fila[grupoIndex] || '').trim();
+                    const cuentaTexto = String(fila[cuentaIndex] || '').trim();
+                    const usuarioZoom = cuentaTexto.split(/\r?\n/).map(value => value.trim()).filter(Boolean)[0] || '';
+                    const dia = String(fila[diaIndex] || '').trim().toUpperCase();
+                    const horario = String(fila[horarioIndex] || '').trim().toUpperCase();
+                    const group = gruposPorNombre.get(normalizeText(nombreGrupo));
+                    const zoomAccount = zoomAccounts.find(account => normalizeText(account.usuario) === normalizeText(usuarioZoom));
+
+                    if (!group || !zoomAccount || !dia || !horario) {
+                        filasOmitidas += 1;
+                        return;
+                    }
+
+                    let filaValida = false;
+                    sessionColumns.forEach(({ numero, index }) => {
+                        const invitacion = String(fila[index] || '').trim();
+                        if (!invitacion) return;
+                        filaValida = true;
+                        const key = `${group.id}:${numero}`;
+                        if (candidatasPorClave.has(key)) {
+                            filasOmitidas += 1;
+                            return;
+                        }
+                        const existing = sesionesPorClave.get(key);
+                        candidatasPorClave.set(key, {
+                            id: existing?.id || `SES-BULK-${Date.now()}-${rowIndex}-${numero}`,
+                            grupoId: group.id,
+                            numero,
+                            dia,
+                            horario,
+                            zoomAccountId: zoomAccount.id,
+                            invitacion,
+                            existingId: existing?.id || null
+                        });
+                    });
+                    if (!filaValida) filasOmitidas += 1;
+                });
+
+                const candidatas = Array.from(candidatasPorClave.values());
+                if (!candidatas.length) return alert(`No se encontraron filas válidas. Revisa que los nombres de grupo y cuentas Zoom coincidan con el curso seleccionado.${filasOmitidas ? ` Se omitieron ${filasOmitidas} fila(s).` : ''}`);
+
+                const duplicadas = candidatas.filter(session => session.existingId);
+                const reemplazarExistentes = duplicadas.length > 0 && confirm(
+                    `Ya existen ${duplicadas.length} sesión(es) para esos grupos y números.\n\n` +
+                    `${duplicadas.slice(0, 12).map(session => `${db.grupos.find(group => group.id === session.grupoId)?.nombre || 'Grupo'} · Sesión ${session.numero}`).join('\n')}` +
+                    `${duplicadas.length > 12 ? '\n…' : ''}\n\n¿Deseas reemplazar sus datos?\n\nAceptar = reemplazar\nCancelar = conservar las existentes y cargar solo las nuevas.`
+                );
+                const sesionesParaGuardar = candidatas.filter(session => !session.existingId || reemplazarExistentes);
+                if (!sesionesParaGuardar.length) return alert('No se reemplazaron sesiones existentes. No había sesiones nuevas para agregar.');
+
+                const nuevasPorClave = new Map(sesionesParaGuardar.map(session => [`${session.grupoId}:${session.numero}`, session]));
+                const siguienteControlSesiones = sesionesExistentes.map(session => {
+                    const replacement = nuevasPorClave.get(`${session.grupoId}:${session.numero}`);
+                    if (!replacement || !replacement.existingId) return session;
+                    const { existingId, ...replacementData } = replacement;
+                    return { ...replacementData, id: session.id, editadaManualmente: false };
+                });
+                const clavesExistentes = new Set(sesionesExistentes.map(session => `${session.grupoId}:${session.numero}`));
+                sesionesParaGuardar.forEach(session => {
+                    if (!clavesExistentes.has(`${session.grupoId}:${session.numero}`)) {
+                        const { existingId, ...newSession } = session;
+                        siguienteControlSesiones.push(newSession);
+                    }
+                });
+
+                const saved = await setBasesDeDatos(current => current.map(item => item.id === db.id
+                    ? { ...item, controlSesiones: siguienteControlSesiones }
+                    : item
+                ));
+                if (saved === false) return;
+
+                setBulkSessionText('');
+                const addedCount = sesionesParaGuardar.filter(session => !session.existingId).length;
+                const replacedCount = reemplazarExistentes ? duplicadas.length : 0;
+                alert(`Carga terminada: ${addedCount} sesión(es) nueva(s)${replacedCount ? ` y ${replacedCount} reemplazada(s)` : ''}.${filasOmitidas ? ` Se omitieron ${filasOmitidas} fila(s): revisa grupo, cuenta Zoom o invitación.` : ''}`);
+            };
+
+            const aplicarHorarioMasivoSesiones = async () => {
+                const db = getSessionDb();
+                const dia = bulkSessionDay.trim().toUpperCase();
+                const horario = bulkSessionTime.trim().toUpperCase();
+                if (!db) return alert('Selecciona primero el curso que quieres actualizar.');
+                if (!dia || !horario) return alert('Escribe el nuevo día y horario para continuar.');
+
+                const sesiones = db.controlSesiones || [];
+                const grupos = db.grupos || [];
+                if (!sesiones.length && !grupos.length) return alert('Este curso aún no tiene grupos ni sesiones para actualizar.');
+
+                const confirmacion = confirm(
+                    `Se actualizarán el día y horario de ${sesiones.length} sesión(es) y ${grupos.length} grupo(s) del curso ${db.info.siglas || ''}.\n\n` +
+                    `Nuevo horario: ${dia} · ${horario}\n\n` +
+                    'Esta acción reemplazará los valores de todos los grupos y sesiones del curso. ¿Deseas continuar?'
+                );
+                if (!confirmacion) return;
+
+                const saved = await setBasesDeDatos(current => current.map(item => item.id === db.id
+                    ? {
+                        ...item,
+                        grupos: (item.grupos || []).map(group => ({ ...group, dia, hora: horario })),
+                        controlSesiones: (item.controlSesiones || []).map(session => ({ ...session, dia, horario }))
+                    }
+                    : item
+                ));
+                if (saved === false) return;
+
+                setBulkSessionDay('');
+                setBulkSessionTime('');
+                alert(`Se actualizaron ${sesiones.length} sesión(es) y ${grupos.length} grupo(s) con ${dia} · ${horario}.`);
+            };
+
             const eliminarSesionControl = (dbId, sessionId) => {
                 if (confirm('¿Eliminar esta sesión del control?')) setBasesDeDatos(prev => prev.map(db => db.id === dbId ? { ...db, controlSesiones: (db.controlSesiones || []).filter(session => session.id !== sessionId) } : db));
             };
@@ -2247,7 +2433,7 @@
                                             <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-[10px] text-slate-200">v10.0</div>
+                                        <div className="text-[10px] text-slate-200">v10.3</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -2255,7 +2441,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v10.0</div>
+                                        <div className="text-xs text-slate-200">v10.3</div>
                                     </div>
                                 )}
                             </div>
@@ -2342,7 +2528,7 @@
                         </header>
 
                         <main className="max-w-7xl mx-auto p-6 space-y-6">
-                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4 mb-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-4">
                                 <button onClick={() => setAdminSection('admin')} className={`rounded-2xl p-4 shadow-sm border ${adminSection === 'admin' ? 'border-blue-600 bg-blue-50' : 'border-gray-200 bg-white'} transition-colors hover:border-blue-500 flex items-center justify-center gap-3 min-h-[90px]`}>
                                     <div className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-100 text-blue-600 shrink-0">
                                         <i className="fa-solid fa-user-shield text-lg"></i>
@@ -2366,6 +2552,12 @@
                                         <i className="fa-solid fa-user-magnifying-glass text-lg"></i>
                                     </div>
                                     <h3 className="text-sm font-bold text-gray-800 text-left">Búsqueda de Alumnos</h3>
+                                </button>
+                                <button onClick={() => setAdminSection('offers-search')} className={`rounded-2xl p-4 shadow-sm border ${adminSection === 'offers-search' ? 'border-cyan-600 bg-cyan-50' : 'border-gray-200 bg-white'} transition-colors hover:border-cyan-500 flex items-center justify-center gap-3 min-h-[90px]`}>
+                                    <div className="flex items-center justify-center w-10 h-10 rounded-full bg-cyan-100 text-cyan-700 shrink-0">
+                                        <i className="fa-solid fa-magnifying-glass text-lg"></i>
+                                    </div>
+                                    <h3 className="text-sm font-bold text-gray-800 text-left">Búsqueda de Ofertas</h3>
                                 </button>
                                 <button onClick={() => setAdminSection('personal')} className={`rounded-2xl p-4 shadow-sm border ${adminSection === 'personal' ? 'border-violet-600 bg-violet-50' : 'border-gray-200 bg-white'} transition-colors hover:border-violet-500 flex items-center justify-center gap-3 min-h-[90px]`}>
                                     <div className="flex items-center justify-center w-10 h-10 rounded-full bg-violet-100 text-violet-600 shrink-0">
@@ -2776,6 +2968,18 @@
                                 <BusquedaGlobalAlumnos basesDeDatos={basesDeDatos} setBasesDeDatos={setBasesDeDatos} onBack={() => setAdminSection('menu')} />
                             )}
 
+                            {adminSection === 'offers-search' && (
+                                <BusquedaGlobalOfertas
+                                    basesDeDatos={basesDeDatos}
+                                    onBack={() => setAdminSection('menu')}
+                                    onSelect={db => {
+                                        setActiveDbId(db.id);
+                                        trackRecentOffer(db.id);
+                                        setAppView('workspace');
+                                    }}
+                                />
+                            )}
+
                             {adminSection === 'personal' && (
                                 <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
                                     <div className="p-5 border-b border-gray-100 bg-gray-50 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -2940,6 +3144,21 @@
                                                 <textarea rows="5" className="rounded-xl border border-slate-200 bg-white p-3 text-sm font-mono outline-none focus:border-cyan-500 md:col-span-2" value={newSessionInvite} onChange={e => setNewSessionInvite(e.target.value)} placeholder="Pega aquí la invitación completa de Zoom (opcional). Presiona Enter para separar en líneas." />
                                             </div>
                                             <div className="mt-4 flex flex-wrap gap-3"><button onClick={agregarSesionControl} className="rounded-xl bg-slate-900 px-5 py-3 font-bold text-white transition-colors hover:bg-cyan-700"><i className="fa-solid fa-plus mr-2"></i>Registrar sesión</button><button onClick={generarSesionesControl} className="rounded-xl bg-cyan-700 px-5 py-3 font-bold text-white transition-colors hover:bg-cyan-800"><i className="fa-solid fa-wand-magic-sparkles mr-2"></i>Generar sesiones faltantes</button><button onClick={descargarControlSesionesXLSX} className="rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-3 font-bold text-emerald-800 transition-colors hover:bg-emerald-100"><i className="fa-solid fa-file-excel mr-2"></i>Descargar Excel</button></div>
+                                            <div className="mt-6 rounded-xl border border-cyan-100 bg-white p-4">
+                                                <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                                    <div><h4 className="font-bold text-slate-900"><i className="fa-solid fa-paste mr-2 text-cyan-600"></i>Carga masiva de sesiones</h4><p className="mt-1 text-xs text-slate-500">Pega la tabla con encabezados. Se usarán GRUPO, CUENTA ZOOM, DIA, HORARIO y las columnas SESIÓN 1, SESIÓN 2, etc. El curso se toma del selector superior.</p></div>
+                                                    <button type="button" onClick={cargarSesionesControlMasiva} disabled={!newSessionDbId || !bulkSessionText.trim()} className="shrink-0 rounded-xl bg-cyan-700 px-5 py-3 font-bold text-white transition-colors hover:bg-cyan-800 disabled:cursor-not-allowed disabled:opacity-50"><i className="fa-solid fa-file-import mr-2"></i>Importar sesiones</button>
+                                                </div>
+                                                <textarea rows="8" value={bulkSessionText} onChange={event => setBulkSessionText(event.target.value)} placeholder={'CUENTA ZOOM\tESTADO\tCURSO\tGRUPO\tDIA\tHORARIO\tASESOR\tSESIÓN 1\n"usuario@ejemplo.mx\ncontraseña"\tSLP\tICEP\tGRUPO 01\tLUNES\t05:30 PM\tASESOR\t"Invitación completa de Zoom…\nhttps://zoom.us/j/…"'} className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 font-mono text-xs outline-none focus:border-cyan-500 focus:bg-white" aria-label="Pegar tabla de sesiones de Zoom" />
+                                            </div>
+                                            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                                                <div className="mb-3"><h4 className="font-bold text-amber-950"><i className="fa-solid fa-calendar-check mr-2 text-amber-700"></i>Actualizar día y horario de todo el curso</h4><p className="mt-1 text-xs text-amber-900">Aplica los mismos valores a todos los grupos y a todas sus sesiones existentes.</p></div>
+                                                <div className="flex flex-col gap-3 sm:flex-row">
+                                                    <input type="text" value={bulkSessionDay} onChange={event => setBulkSessionDay(event.target.value)} placeholder="Día (ej. LUNES)" aria-label="Nuevo día para todos los grupos y sesiones" className="min-w-0 flex-1 rounded-xl border border-amber-200 bg-white p-3 text-sm uppercase outline-none focus:border-amber-500" />
+                                                    <input type="text" value={bulkSessionTime} onChange={event => setBulkSessionTime(event.target.value)} placeholder="Horario (ej. 05:30 PM)" aria-label="Nuevo horario para todos los grupos y sesiones" className="min-w-0 flex-1 rounded-xl border border-amber-200 bg-white p-3 text-sm uppercase outline-none focus:border-amber-500" />
+                                                    <button type="button" onClick={aplicarHorarioMasivoSesiones} disabled={!newSessionDbId || !bulkSessionDay.trim() || !bulkSessionTime.trim()} className="shrink-0 rounded-xl bg-amber-700 px-5 py-3 font-bold text-white transition-colors hover:bg-amber-800 disabled:cursor-not-allowed disabled:opacity-50"><i className="fa-solid fa-rotate mr-2"></i>Aplicar a todo el curso</button>
+                                                </div>
+                                            </div>
                                             <div className="grid gap-3 md:grid-cols-4">
                                                 <select className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold outline-none focus:border-emerald-500 md:col-span-2" value={controlExportCourseId} onChange={e => setControlExportCourseId(e.target.value)} aria-label="Curso para exportar a Excel">
                                                     <option value="ALL">Exportar: todos los cursos</option>
@@ -3611,18 +3830,48 @@ María López	maria.lopez	Z9y8x7" />
         // COMPONENTE WORKSPACE (4.0 LÓGICA DE PERMISOS)
         // ==========================================
         function Workspace({ db, appView, setAppView, asesoresGlobales, setAsesoresGlobales, zoomAccounts, onUpdate, modoPersonal, textoPegado, setTextoPegado, participantesProcesados, setParticipantesProcesados, procesarTextoPegado, descargarPlantillaBase, onEditPersonal }) {
-            const isPersonal = modoPersonal.activo;
-            const isAsesor = isPersonal && modoPersonal.roleInProject === 'asesor';
-            const isCoordinador = isPersonal && modoPersonal.roleInProject === 'coordinador';
-            const isManager = isPersonal && modoPersonal.roleInProject === 'manager';
+            const [previewMode, setPreviewMode] = useState(null);
+            const [previewHistory, setPreviewHistory] = useState([]);
+            const [previewCoordinatorId, setPreviewCoordinatorId] = useState('');
+            const [previewAdviserGroupId, setPreviewAdviserGroupId] = useState('');
+            const currentModoPersonal = previewMode || modoPersonal;
+            const isPersonal = currentModoPersonal.activo;
+            const isAsesor = isPersonal && currentModoPersonal.roleInProject === 'asesor';
+            const isCoordinador = isPersonal && currentModoPersonal.roleInProject === 'coordinador';
+            const isManager = isPersonal && currentModoPersonal.roleInProject === 'manager';
             const isAdmin = !isPersonal || isManager;
             const canEditStaff = !isPersonal;
+
+            const coordinadoresDelCurso = (db.info.coordinadorIds || (db.info.coordinadorId ? [db.info.coordinadorId] : []))
+                .map(id => asesoresGlobales.find(persona => persona.id === id))
+                .filter(Boolean);
+            const gruposConAsesor = (db.grupos || []).filter(group => group.asesorId || group.asesor);
+
+            const cambiarVistaPrevia = nextMode => {
+                setPreviewHistory(previous => [...previous, previewMode]);
+                setPreviewMode(nextMode);
+                setTab(nextMode.roleInProject === 'asesor' ? 'seguimiento' : 'resumen');
+            };
+
+            const volverVistaPrevia = () => {
+                if (!previewHistory.length) return;
+                setPreviewMode(previewHistory[previewHistory.length - 1]);
+                setPreviewHistory(previous => previous.slice(0, -1));
+                setTab('resumen');
+            };
 
             const [tab, setTab] = useState(isAdmin || isCoordinador ? 'resumen' : 'seguimiento'); 
             const [editingWorkspacePersonal, setEditingWorkspacePersonal] = useState(null);
             const [workspacePersonalData, setWorkspacePersonalData] = useState(null);
 
             const handleVolver = () => {
+                if (previewMode) {
+                    setPreviewMode(null);
+                    setPreviewHistory([]);
+                    if (!modoPersonal.activo) setAppView('admin_dashboard');
+                    else setAppView('personal_dashboard');
+                    return;
+                }
                 if (isPersonal) setAppView('personal_dashboard');
                 else setAppView('admin_dashboard');
             };
@@ -3654,7 +3903,7 @@ María López	maria.lopez	Z9y8x7" />
                             <button onClick={handleVolver} className="hover:text-gray-300 text-sm bg-blue-800 px-3 py-1.5 rounded-lg border border-blue-700 transition-colors shadow-inner flex items-center gap-2"><i className="fa-solid fa-arrow-left"></i> Volver al Panel</button>
                             <h1 className="text-lg font-bold">
                                 {db.info.siglas}-{db.info.idEstado}-{db.info.anio}
-                                {isAsesor && <span className="ml-3 text-yellow-300 bg-black/20 px-2 py-0.5 rounded text-sm"><i className="fa-solid fa-user-tie"></i> ASESOR: {db.grupos.find(g=>g.id===modoPersonal.grupoId)?.nombre}</span>}
+                                {isAsesor && <span className="ml-3 text-yellow-300 bg-black/20 px-2 py-0.5 rounded text-sm"><i className="fa-solid fa-user-tie"></i> ASESOR: {db.grupos.find(g=>g.id===currentModoPersonal.grupoId)?.nombre}</span>}
                                 {isCoordinador && <span className="ml-3 text-purple-300 bg-black/20 px-2 py-0.5 rounded text-sm"><i className="fa-solid fa-sitemap"></i> COORDINADOR GENERAL</span>}
                                 {isManager && <span className="ml-3 text-amber-300 bg-black/20 px-2 py-0.5 rounded text-sm"><i className="fa-solid fa-briefcase"></i> MANAGER</span>}
                             </h1>
@@ -3674,15 +3923,56 @@ María López	maria.lopez	Z9y8x7" />
                         </div>
                     </header>
 
+                    {((!modoPersonal.activo && !previewMode) || isCoordinador || previewHistory.length > 0) && (
+                        <div className="no-print flex flex-wrap items-center gap-3 border-b border-blue-100 bg-white px-4 py-2">
+                            {!modoPersonal.activo && !previewMode && (
+                                <>
+                                    <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Acceso por rol</span>
+                                    <select value={previewCoordinatorId} onChange={event => setPreviewCoordinatorId(event.target.value)} className="max-w-xs rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-purple-500" aria-label="Seleccionar coordinador del curso">
+                                        <option value="">Seleccionar coordinador</option>
+                                        {coordinadoresDelCurso.map(persona => <option key={persona.id} value={persona.id}>{persona.nombre}</option>)}
+                                    </select>
+                                    <button type="button" disabled={!previewCoordinatorId} onClick={() => {
+                                        const coordinator = coordinadoresDelCurso.find(persona => persona.id === previewCoordinatorId);
+                                        if (!coordinator) return;
+                                        cambiarVistaPrevia({ activo: true, grupoId: null, personalId: coordinator.id, personalName: coordinator.nombre, roleInProject: 'coordinador' });
+                                    }} className="rounded-lg bg-purple-700 px-3 py-2 text-xs font-bold text-white transition-colors hover:bg-purple-800 disabled:cursor-not-allowed disabled:opacity-50"><i className="fa-solid fa-sitemap mr-1.5"></i>Ver como coordinador</button>
+                                </>
+                            )}
+                            {isCoordinador && (
+                                <>
+                                    <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Vista de asesor</span>
+                                    <select value={previewAdviserGroupId} onChange={event => setPreviewAdviserGroupId(event.target.value)} className="max-w-xs rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-amber-500" aria-label="Seleccionar grupo para ver como asesor">
+                                        <option value="">Seleccionar grupo</option>
+                                        {gruposConAsesor.map(group => <option key={group.id} value={group.id}>{group.nombre} · {group.asesor || 'Asesor'}</option>)}
+                                    </select>
+                                    <button type="button" disabled={!previewAdviserGroupId} onClick={() => {
+                                        const group = gruposConAsesor.find(item => item.id === previewAdviserGroupId);
+                                        if (!group) return;
+                                        const adviser = asesoresGlobales.find(persona => persona.id === group.asesorId)
+                                            || asesoresGlobales.find(persona => normalizeText(persona.nombre) === normalizeText(group.asesor));
+                                        cambiarVistaPrevia({ activo: true, grupoId: group.id, personalId: adviser?.id || group.asesorId || null, personalName: adviser?.nombre || group.asesor || 'Asesor', roleInProject: 'asesor' });
+                                    }} className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-bold text-white transition-colors hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"><i className="fa-solid fa-user-tie mr-1.5"></i>Ver como asesor</button>
+                                </>
+                            )}
+                            {previewHistory.length > 0 && (
+                                <button type="button" onClick={volverVistaPrevia} className="ml-auto rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-100"><i className="fa-solid fa-arrow-left mr-1.5"></i>Volver a {(() => {
+                                    const previousMode = previewHistory[previewHistory.length - 1] || modoPersonal;
+                                    return previousMode?.roleInProject === 'coordinador' ? 'coordinador' : previousMode?.roleInProject === 'asesor' ? 'asesor' : previousMode?.roleInProject === 'manager' ? 'manager' : 'administración';
+                                })()}</button>
+                            )}
+                        </div>
+                    )}
+
                     <div className={`workspace-content ${tab === 'grupos' ? 'group-workspace-content overflow-visible' : tab === 'control' ? 'control-workspace-content flex-1 min-h-0 overflow-y-auto' : 'flex-1 min-h-0 overflow-hidden'} min-w-0 flex flex-col p-3 print:p-0`}>
                         {tab === 'resumen' && (isAdmin || isCoordinador) && <TabResumen db={db} asesoresGlobales={asesoresGlobales} />}
                         {tab === 'ajustes' && isAdmin && <TabAjustes db={db} onUpdate={onUpdate} asesoresGlobales={asesoresGlobales} />}
                         {tab === 'pegadoExcel' && isAdmin && <TabPegadoExcel db={db} onUpdate={onUpdate} textoPegado={textoPegado} setTextoPegado={setTextoPegado} participantesProcesados={participantesProcesados} setParticipantesProcesados={setParticipantesProcesados} procesarTextoPegado={procesarTextoPegado} descargarPlantillaBase={descargarPlantillaBase} />}
                         {tab === 'grupos' && isAdmin && <TabGrupos db={db} onUpdate={onUpdate} asesoresGlobales={asesoresGlobales} onEditPersonal={canEditStaff ? abrirEdicionPersonalWorkspace : null} />}
                         {tab === 'datos' && isAdmin && <TabDatos db={db} onUpdate={onUpdate} />}
-                        {tab === 'exportar' && (isAdmin || isCoordinador || isAsesor) && <TabExportar db={db} onUpdate={onUpdate} isAdmin={isAdmin} isCoordinador={isCoordinador} isAsesor={isAsesor} asesorGrupoId={modoPersonal.grupoId} asesoresGlobales={asesoresGlobales} />}
-                        {tab === 'seguimiento' && <TabSeguimiento db={db} onUpdate={onUpdate} asesoresGlobales={asesoresGlobales} isAsesor={isAsesor} isCoordinador={isCoordinador} isAdmin={isAdmin} asesorGrupoId={modoPersonal.grupoId} personalName={modoPersonal.personalName} onEditPersonal={canEditStaff ? abrirEdicionPersonalWorkspace : null} />}
-                        {tab === 'control' && isPersonal && <ControlConsulta db={db} zoomAccounts={zoomAccounts} isAsesor={isAsesor} grupoId={modoPersonal.grupoId} />}
+                        {tab === 'exportar' && (isAdmin || isCoordinador || isAsesor) && <TabExportar db={db} onUpdate={onUpdate} isAdmin={isAdmin} isCoordinador={isCoordinador} isAsesor={isAsesor} asesorGrupoId={currentModoPersonal.grupoId} asesoresGlobales={asesoresGlobales} />}
+                        {tab === 'seguimiento' && <TabSeguimiento db={db} onUpdate={onUpdate} asesoresGlobales={asesoresGlobales} isAsesor={isAsesor} isCoordinador={isCoordinador} isAdmin={isAdmin} asesorGrupoId={currentModoPersonal.grupoId} personalName={currentModoPersonal.personalName} onEditPersonal={canEditStaff ? abrirEdicionPersonalWorkspace : null} />}
+                        {tab === 'control' && isPersonal && <ControlConsulta db={db} zoomAccounts={zoomAccounts} isAsesor={isAsesor} grupoId={currentModoPersonal.grupoId} />}
                     </div>
                     {editingWorkspacePersonal && workspacePersonalData && (
                         <Modal show={Boolean(editingWorkspacePersonal && workspacePersonalData)} onClose={cerrarEdicionPersonalWorkspace} width="max-w-lg" ariaLabel="Editar datos del asesor">
@@ -3775,7 +4065,7 @@ María López	maria.lopez	Z9y8x7" />
                         </div>
                     </div>
                     <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-                        <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm"><h3 className="mb-1 text-lg font-bold text-emerald-900"><i className="fa-solid fa-clipboard-check mr-2 text-emerald-600"></i>Asistencias</h3><p className="mb-4 text-sm text-gray-500">Enlaces comunes para este curso.</p><div className="space-y-3">{(db.controlAsistencias || []).map(record => { const cursoCorto = `${db.info.siglas}-${db.info.idEstado}${String(db.info.anio || '').slice(-2)}`; const mensajeWhatsApp = `${cursoCorto} / *Sesión ${record.numeroSesion}*\n${record.formularioUrl || ''}`; return <div key={record.id} className="flex items-center justify-between gap-3 rounded-xl bg-emerald-50 p-4"><span className="font-bold text-emerald-900">Sesión {record.numeroSesion}</span><span className="flex flex-wrap justify-end gap-3 text-xs font-bold">{record.formularioUrl ? <a href={record.formularioUrl} target="_blank" rel="noreferrer" className="text-emerald-700 hover:underline">Formulario <i className="fa-solid fa-arrow-up-right-from-square ml-1"></i></a> : <span className="text-amber-600">Formulario pendiente</span>}{record.formularioUrl && <button type="button" onClick={() => copyToClipboard(mensajeWhatsApp)} className="text-emerald-700 hover:text-emerald-900" title="Copiar mensaje para WhatsApp" aria-label={`Copiar mensaje de WhatsApp de la sesión ${record.numeroSesion}`}><i className="fa-solid fa-copy"></i></button>}{record.respuestasUrl ? <a href={record.respuestasUrl} target="_blank" rel="noreferrer" className="text-emerald-700 hover:underline">Respuestas <i className="fa-solid fa-arrow-up-right-from-square ml-1"></i></a> : <span className="text-amber-600">Respuestas pendientes</span>}</span></div>; })}{!(db.controlAsistencias || []).length && <p className="rounded-xl border border-dashed border-emerald-100 p-6 text-center text-sm text-gray-400">Aún no hay enlaces de asistencia.</p>}</div></div>
+                        <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm"><h3 className="mb-1 text-lg font-bold text-emerald-900"><i className="fa-solid fa-clipboard-check mr-2 text-emerald-600"></i>Asistencias</h3><p className="mb-4 text-sm text-gray-500">Enlaces comunes para este curso.</p><div className="space-y-3">{(db.controlAsistencias || []).map(record => { const cursoCorto = `${db.info.siglas}-${db.info.idEstado}${String(db.info.anio || '').slice(-2)}`; const mensajeWhatsApp = `${cursoCorto} / *Sesión ${record.numeroSesion}*\n${record.formularioUrl || ''}`; return <div key={record.id} className="flex items-center justify-between gap-3 rounded-xl bg-emerald-50 p-4"><span className="font-bold text-emerald-900">Sesión {record.numeroSesion}</span><span className="flex flex-wrap justify-end gap-3 text-xs font-bold">{record.formularioUrl ? <a href={record.formularioUrl} target="_blank" rel="noreferrer" className="text-emerald-700 hover:underline">Formulario <i className="fa-solid fa-arrow-up-right-from-square ml-1"></i></a> : <span className="text-amber-600">Formulario pendiente</span>}{record.formularioUrl && <button type="button" onClick={() => copyToClipboard(mensajeWhatsApp)} className="text-emerald-700 hover:text-emerald-900" title="Copiar mensaje para WhatsApp" aria-label={`Copiar mensaje de WhatsApp de la sesión ${record.numeroSesion}`}><i className="fa-solid fa-copy"></i></button>}{!isAsesor && (record.respuestasUrl ? <a href={record.respuestasUrl} target="_blank" rel="noreferrer" className="text-emerald-700 hover:underline">Respuestas <i className="fa-solid fa-arrow-up-right-from-square ml-1"></i></a> : <span className="text-amber-600">Respuestas pendientes</span>)}</span></div>; })}{!(db.controlAsistencias || []).length && <p className="rounded-xl border border-dashed border-emerald-100 p-6 text-center text-sm text-gray-400">Aún no hay enlaces de asistencia.</p>}</div></div>
                         <div className="rounded-2xl border border-amber-100 bg-white p-5 shadow-sm"><h3 className="mb-1 text-lg font-bold text-amber-900"><i className="fa-solid fa-folder-open mr-2 text-amber-600"></i>Evidencias</h3><p className="mb-4 text-sm text-gray-500">{isAsesor ? 'Carpeta de tu grupo.' : 'Carpetas de los grupos del curso.'}</p><div className="space-y-3">{evidencias.map(record => { const group = grupo(record.grupoId); return <div key={record.id} className="flex items-center justify-between gap-3 rounded-xl bg-amber-50 p-4"><span><strong className="block text-amber-900">{group?.nombre || 'Grupo'}</strong><small className="text-gray-500">{group?.asesor || ''}</small></span><a href={record.carpetaUrl} target="_blank" rel="noreferrer" className="text-xs font-bold text-amber-700 hover:underline">Abrir carpeta <i className="fa-solid fa-arrow-up-right-from-square ml-1"></i></a></div> })}{!evidencias.length && <p className="rounded-xl border border-dashed border-amber-100 p-6 text-center text-sm text-gray-400">Aún no hay carpetas de evidencias.</p>}</div></div>
                     </div>
                 </div>
@@ -4425,6 +4715,98 @@ María López	maria.lopez	Z9y8x7" />
                             </div>
                         </Modal>
                     )}
+                </div>
+            );
+        }
+
+        function BusquedaGlobalOfertas({ basesDeDatos, onBack, onSelect }) {
+            const [search, setSearch] = useState('');
+
+            const resultados = useMemo(() => {
+                const query = normalizeText(search.trim());
+                if (!query) return [];
+
+                return (basesDeDatos || [])
+                    .filter(db => {
+                        const searchable = [
+                            db.info?.nombreCurso,
+                            db.info?.siglas,
+                            db.info?.idCurso,
+                            db.info?.estado,
+                            db.info?.idEstado,
+                            db.info?.anio,
+                            db.info?.sectorFormativo,
+                            db.info?.tipoFormacion,
+                            db.info?.modalidad
+                        ].map(value => normalizeText(value || '')).join(' ');
+                        return searchable.includes(query);
+                    })
+                    .sort((left, right) => normalizeText(left.info?.nombreCurso || left.info?.siglas || '').localeCompare(
+                        normalizeText(right.info?.nombreCurso || right.info?.siglas || ''),
+                        'es',
+                        { sensitivity: 'base' }
+                    ));
+            }, [basesDeDatos, search]);
+
+            return (
+                <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+                    <div className="flex flex-col gap-4 border-b border-gray-100 p-6 md:flex-row md:items-center md:justify-between">
+                        <div>
+                            <h2 className="text-xl font-bold text-gray-900"><i className="fa-solid fa-magnifying-glass text-cyan-600 mr-2"></i>Búsqueda Global de Ofertas</h2>
+                            <p className="mt-1 text-sm text-gray-600">Busca por nombre, siglas, ID, estado, año, sector, tipo o modalidad.</p>
+                        </div>
+                        <button onClick={onBack} className="self-start rounded-xl bg-gray-100 px-4 py-2 text-gray-700 transition-colors hover:bg-gray-200 md:self-auto"><i className="fa-solid fa-arrow-left mr-2"></i>Volver al menú</button>
+                    </div>
+
+                    <div className="border-b border-cyan-100 bg-cyan-50 p-6">
+                        <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-cyan-900">Buscar oferta</label>
+                        <div className="relative max-w-3xl">
+                            <i className="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-cyan-500"></i>
+                            <input
+                                type="search"
+                                autoFocus
+                                className="w-full rounded-xl border border-cyan-200 bg-white py-3 pl-11 pr-4 text-sm outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-200"
+                                value={search}
+                                onChange={event => setSearch(event.target.value)}
+                                placeholder="Ej. ICEP, capacitación docente, SLP o 2026..."
+                            />
+                        </div>
+                    </div>
+
+                    <div className="p-6">
+                        {!search.trim() ? (
+                            <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center text-sm text-gray-500">Escribe un dato de la oferta para comenzar la búsqueda.</div>
+                        ) : resultados.length === 0 ? (
+                            <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center text-sm text-gray-500">No se encontraron ofertas con ese criterio.</div>
+                        ) : (
+                            <div className="overflow-x-auto">
+                                <table className="w-full min-w-[760px] text-left text-sm">
+                                    <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+                                        <tr>
+                                            <th className="p-3">Oferta</th>
+                                            <th className="p-3">Siglas / ID</th>
+                                            <th className="p-3">Estado</th>
+                                            <th className="p-3">Año</th>
+                                            <th className="p-3 text-center">Alumnos</th>
+                                            <th className="p-3 text-center">Acción</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {resultados.map(db => (
+                                            <tr key={db.id} className="border-b border-gray-100 hover:bg-cyan-50/50">
+                                                <td className="p-3 font-semibold text-gray-800">{db.info?.nombreCurso || 'Oferta sin nombre'}</td>
+                                                <td className="p-3 text-gray-700"><div className="font-bold">{db.info?.siglas || 'Sin siglas'}</div><div className="font-mono text-xs text-gray-500">{db.info?.idCurso || '-'}</div></td>
+                                                <td className="p-3 text-gray-700">{db.info?.estado || db.info?.idEstado || '-'}</td>
+                                                <td className="p-3 text-gray-700">{db.info?.anio || '-'}</td>
+                                                <td className="p-3 text-center font-semibold text-gray-700">{(db.participantes || []).length}</td>
+                                                <td className="p-3 text-center"><button type="button" onClick={() => onSelect(db)} className="rounded-lg bg-cyan-700 px-3 py-2 text-xs font-bold text-white transition-colors hover:bg-cyan-800"><i className="fa-solid fa-folder-open mr-1"></i>Abrir oferta</button></td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </div>
                 </div>
             );
         }
@@ -5239,15 +5621,29 @@ María López	maria.lopez	Z9y8x7" />
                 downloadCSV(`Google_Contacts_${db.info.siglas}.csv`, csvContent);
             };
 
-            const expCorreosTSV = () => {
+            const getMailMergeData = () => {
                 const headers = ['Nombres', 'Grupo', 'GrupoWP', 'Usuario', 'Contraseña', 'Dia', 'Hora', 'Curso', 'Asesor', 'Asesor Num', 'WP', 'Recipient'];
                 const rows = db.participantes.map(p => {
                     const g = db.grupos.find(x => x.id === p.grupoId) || {};
                     return [
-                        p.completo, g.nombre||'', g.whatsapp||'', getMoodleUsername(p.curp), db.info.moodlePass, g.dia||'', g.hora||'', db.info.nombreCurso, g.asesor||'', g.contacto||'', p.telefono||'', p.correo||''
-                    ].join('\t');
+                        p.completo || '', g.nombre || '', g.whatsapp || '', getMoodleUsername(p.curp), db.info.moodlePass || '', g.dia || '', g.hora || '', db.info.nombreCurso || '', g.asesor || '', g.contacto || '', p.telefono || '', p.correo || ''
+                    ];
                 });
-                copyToClipboard([headers.join('\t'), ...rows].join('\n'));
+                return { headers, rows };
+            };
+
+            const expCorreosTSV = () => {
+                const { headers, rows } = getMailMergeData();
+                copyToClipboard([headers, ...rows].map(row => row.join('\t')).join('\n'));
+            };
+
+            const expCorreosCSV = () => {
+                const { headers, rows } = getMailMergeData();
+                const csvData = [headers, ...rows]
+                    .map(row => row.map(value => `"${String(value ?? '').replace(/"/g, '""')}"`).join(','))
+                    .join('\n');
+                const courseName = String(db.info.siglas || 'curso').replace(/[^a-zA-Z0-9_-]+/g, '_');
+                downloadCSV(`Mail_Merge_${courseName}.csv`, csvData);
             };
 
             const relacionAsesores = useMemo(() => {
@@ -5264,6 +5660,13 @@ María López	maria.lopez	Z9y8x7" />
                     })
                     .sort((a, b) => a.grupo.localeCompare(b.grupo, 'es', { sensitivity: 'base' }) || a.asesor.localeCompare(b.asesor, 'es', { sensitivity: 'base' }));
             }, [db.grupos, asesoresGlobales]);
+
+            const coordinadoresDelCurso = useMemo(() => {
+                const coordinadorIds = db.info.coordinadorIds || (db.info.coordinadorId ? [db.info.coordinadorId] : []);
+                return coordinadorIds
+                    .map(id => asesoresGlobales.find(persona => persona.id === id))
+                    .filter(Boolean);
+            }, [db.info, asesoresGlobales]);
 
             const exportarRelacionAsesoresPdf = () => {
                 if (!window.jspdf) return alert('La exportación a PDF no está disponible en este navegador.');
@@ -5410,8 +5813,11 @@ María López	maria.lopez	Z9y8x7" />
                             {subTab === 'correos' && !isCoordinador && !isAsesor && (
                                 <div className="no-print max-w-2xl">
                                     <div className="flex items-center gap-4 mb-6 text-blue-900"><div className="w-12 h-12 bg-green-100 text-green-600 rounded-xl flex items-center justify-center"><i className="fa-solid fa-envelope text-2xl"></i></div><h2 className="text-3xl font-bold">Plantilla Mail Merge</h2></div>
-                                    <p className="text-gray-600 mb-8 leading-relaxed">Copia la información combinada de base de datos y grupos al portapapeles, formateada con tabulaciones para pegar directamente en tu plantilla de Google Sheets para envíos masivos.</p>
-                                    <button onClick={expCorreosTSV} className="bg-blue-600 text-white px-8 py-4 rounded-xl shadow-lg shadow-blue-500/30 flex items-center gap-3 hover:bg-blue-700 font-bold text-lg transition-transform active:scale-95"><i className="fa-solid fa-copy"></i> Copiar Datos (TSV)</button>
+                                    <p className="text-gray-600 mb-8 leading-relaxed">Exporta la información combinada de alumnos y grupos para tu plantilla de envíos masivos.</p>
+                                    <div className="flex flex-wrap gap-3">
+                                        <button onClick={expCorreosTSV} className="bg-blue-600 text-white px-8 py-4 rounded-xl shadow-lg shadow-blue-500/30 flex items-center gap-3 hover:bg-blue-700 font-bold text-lg transition-transform active:scale-95"><i className="fa-solid fa-copy"></i> Copiar Datos (TSV)</button>
+                                        <button onClick={expCorreosCSV} className="bg-emerald-700 text-white px-8 py-4 rounded-xl shadow-lg shadow-emerald-500/25 flex items-center gap-3 hover:bg-emerald-800 font-bold text-lg transition-transform active:scale-95"><i className="fa-solid fa-file-csv"></i> Descargar CSV</button>
+                                    </div>
                                 </div>
                             )}
                             {subTab === 'asistencia' && <SubTabAsistencia db={db} isAsesor={isAsesor} grupoId={asesorGrupoId} />}
@@ -5428,6 +5834,21 @@ María López	maria.lopez	Z9y8x7" />
                                     <div className="flex gap-3">
                                         <button onClick={exportarRelacionAsesoresPdf} className="bg-indigo-600 text-white px-6 py-2.5 rounded-lg shadow font-bold hover:bg-indigo-700 transition-colors flex items-center gap-2"><i className="fa-solid fa-file-pdf"></i> Descargar PDF</button>
                                     </div>
+
+                                    <section className="rounded-xl border border-blue-100 bg-blue-50 p-4">
+                                        <h3 className="mb-3 text-sm font-bold uppercase tracking-wide text-blue-900">Coordinador del curso</h3>
+                                        {coordinadoresDelCurso.length ? (
+                                            <div className="space-y-3">
+                                                {coordinadoresDelCurso.map(coordinador => (
+                                                    <div key={coordinador.id} className="grid gap-3 border-b border-blue-100 pb-3 last:border-0 last:pb-0 sm:grid-cols-3">
+                                                        <div><div className="text-[11px] font-bold uppercase text-blue-700">Nombre</div><div className="font-semibold text-gray-800">{coordinador.nombre || 'Sin nombre'}</div></div>
+                                                        <div><div className="text-[11px] font-bold uppercase text-blue-700">Usuario</div><div className="font-mono text-gray-800">{coordinador.usuario || 'Sin usuario'}</div></div>
+                                                        <div><div className="text-[11px] font-bold uppercase text-blue-700">Contraseña</div><div className="font-mono text-gray-800">{coordinador.password || 'Sin contraseña'}</div></div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ) : <p className="text-sm text-gray-600">Este curso no tiene coordinador asignado.</p>}
+                                    </section>
 
                                     <div className="overflow-x-auto border border-gray-200 rounded-xl shadow-sm max-h-[520px]">
                                         <table className="w-full text-xs text-left whitespace-nowrap">
