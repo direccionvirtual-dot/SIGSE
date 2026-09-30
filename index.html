@@ -816,6 +816,24 @@
             return `${Math.round(val)}%`;
         };
 
+        const normalizeSeguimientoParticipant = (record = {}) => {
+            const normalized = { ...record };
+            const objectFields = ['asis', 'paEst', 'paCal', 'paRem', 'actEst', 'actCal', 'actRem'];
+            objectFields.forEach(field => {
+                if (!normalized[field] || typeof normalized[field] !== 'object' || Array.isArray(normalized[field])) {
+                    normalized[field] = {};
+                }
+            });
+            normalized.conf = !!normalized.conf;
+            normalized.encEst = !!normalized.encEst;
+            normalized.encInst = !!normalized.encInst;
+            normalized.msgGrp = !!normalized.msgGrp;
+            normalized.msgPer = !!normalized.msgPer;
+            normalized.llam = !!normalized.llam;
+            normalized.obs = typeof normalized.obs === 'string' ? normalized.obs : (normalized.obs ?? '');
+            return normalized;
+        };
+
         // ==========================================
         // COMPONENTE GENÉRICO DE GRÁFICAS 
         // ==========================================
@@ -1424,8 +1442,12 @@
             };
 
             const dbActiva = basesDeDatos.find(db => db.id === activeDbId);
-            const updateActiveDb = (newData) => {
-                return setBasesDeDatos(current => current.map(db => db.id === activeDbId ? { ...db, ...newData } : db));
+            const updateActiveDb = (newDataOrUpdater) => {
+                return setBasesDeDatos(current => current.map(db => {
+                    if (db.id !== activeDbId) return db;
+                    const newData = typeof newDataOrUpdater === 'function' ? newDataOrUpdater(db) : newDataOrUpdater;
+                    return { ...db, ...newData };
+                }));
             };
 
             // Respaldo
@@ -2433,7 +2455,7 @@
                                             <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-[10px] text-slate-200">v10.4</div>
+                                        <div className="text-[10px] text-slate-200">v10.6</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -2441,7 +2463,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v10.4</div>
+                                        <div className="text-xs text-slate-200">v10.6</div>
                                     </div>
                                 )}
                             </div>
@@ -6878,6 +6900,9 @@ María López	maria.lopez	Z9y8x7" />
             const [editingParticipant, setEditingParticipant] = useState(null);
             const [editingParticipantData, setEditingParticipantData] = useState(null);
             const [messageForm, setMessageForm] = useState({ participantId: '', texto: '', prioridad: 'normal', destinatarios: ['asesor', 'coordinador'] });
+            const [obsDrafts, setObsDrafts] = useState({});
+            const [savingObs, setSavingObs] = useState({});
+            const pendingObservationSavesRef = useRef({});
 
             const mensajesVisibles = useMemo(() => mensajes.filter(mensaje => {
                 if (isAdmin) return true;
@@ -7018,9 +7043,28 @@ María López	maria.lopez	Z9y8x7" />
             };
 
             const getPData = useCallback((pId) => {
-                if(!activeSem || !activeSem.data[pId]) return { conf: false, asis: {}, paEst: {}, paCal: {}, paRem: {}, actEst: {}, actCal: {}, actRem: {}, encEst: false, encInst: false, msgGrp: false, msgPer: false, llam: false, obs: '' };
-                return activeSem.data[pId];
+                if (!activeSem || !activeSem.data[pId]) {
+                    return normalizeSeguimientoParticipant({
+                        conf: false, asis: {}, paEst: {}, paCal: {}, paRem: {}, actEst: {}, actCal: {}, actRem: {},
+                        encEst: false, encInst: false, msgGrp: false, msgPer: false, llam: false, obs: ''
+                    });
+                }
+                return normalizeSeguimientoParticipant(activeSem.data[pId]);
             }, [activeSem]);
+
+            useEffect(() => {
+                const pendingObs = Object.entries(obsDrafts).some(([participantId, value]) => {
+                    const currentValue = getPData(participantId)?.obs || '';
+                    return String(value ?? '') !== String(currentValue ?? '');
+                });
+                const handleBeforeUnload = event => {
+                    if (!pendingObs) return;
+                    event.preventDefault();
+                    event.returnValue = '';
+                };
+                window.addEventListener('beforeunload', handleBeforeUnload);
+                return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+            }, [obsDrafts, getPData]);
 
             const getEffectiveAsis = useCallback((pId) => {
                 if (!activeSem) return {};
@@ -7302,15 +7346,45 @@ María López	maria.lopez	Z9y8x7" />
             }, [listParticipantes, aPA, aAct, getPData, calcFinal]);
 
             const updatePData = (pId, field, value, subField = null) => {
-                if(!activeSem) return;
-                const newData = { ...activeSem.data };
-                if(!newData[pId]) newData[pId] = { conf: false, asis: {}, paEst: {}, paCal: {}, paRem: {}, actEst: {}, actCal: {}, actRem: {}, encEst: false, encInst: false, msgGrp: false, msgPer: false, llam: false, obs: '' };
-                
-                if (subField !== null) newData[pId][field] = { ...newData[pId][field], [subField]: value };
-                else newData[pId][field] = value;
-                
-                const newSemanas = semanas.map(s => s.id === activeSem.id ? { ...s, data: newData } : s);
-                onUpdate({ ...db, semanasSeguimiento: newSemanas });
+                if (!activeSem) return Promise.resolve(false);
+                return onUpdate(currentDb => {
+                    const currentWeeks = currentDb.semanasSeguimiento || [];
+                    const currentSem = currentWeeks.find(week => week.id === activeSem.id);
+                    if (!currentSem) return {};
+
+                    const newData = { ...(currentSem.data || {}) };
+                    const participantData = { ...newData[pId] };
+                    if (subField !== null) participantData[field] = { ...(participantData[field] || {}), [subField]: value };
+                    else participantData[field] = value;
+
+                    newData[pId] = normalizeSeguimientoParticipant(participantData);
+                    return {
+                        semanasSeguimiento: currentWeeks.map(week => week.id === activeSem.id ? { ...week, data: newData } : week)
+                    };
+                });
+            };
+
+            const saveObservation = (pId, value) => {
+                const trimmed = (value ?? '').toString();
+                const pendingSave = pendingObservationSavesRef.current[pId];
+                if (pendingSave?.value === trimmed) return pendingSave.promise;
+                const currentValue = getPData(pId)?.obs || '';
+                if (trimmed === currentValue) {
+                    setObsDrafts(prev => ({ ...prev, [pId]: trimmed }));
+                    return Promise.resolve(true);
+                }
+                setSavingObs(prev => ({ ...prev, [pId]: true }));
+                const savePromise = updatePData(pId, 'obs', trimmed).then(saved => {
+                    if (saved !== false) setObsDrafts(prev => ({ ...prev, [pId]: trimmed }));
+                    return saved !== false;
+                }).finally(() => {
+                    if (pendingObservationSavesRef.current[pId]?.promise === savePromise) {
+                        delete pendingObservationSavesRef.current[pId];
+                        setSavingObs(prev => ({ ...prev, [pId]: false }));
+                    }
+                });
+                pendingObservationSavesRef.current[pId] = { value: trimmed, promise: savePromise };
+                return savePromise;
             };
 
             const toggleVisibleMessageGroups = () => {
@@ -7719,7 +7793,37 @@ María López	maria.lopez	Z9y8x7" />
                                                     <td className="bg-yellow-50"><input type="checkbox" disabled={!canEditManual} checked={d.msgPer} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>updatePData(p.id, 'msgPer', e.target.checked)} className={`seguimiento-checkbox w-4 h-4 ${!canEditManual?'opacity-50 cursor-not-allowed':''}`}/></td>
                                                     <td className="bg-yellow-50"><input type="checkbox" disabled={!canEditManual} checked={d.llam} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>updatePData(p.id, 'llam', e.target.checked)} className={`seguimiento-checkbox w-4 h-4 ${!canEditManual?'opacity-50 cursor-not-allowed':''}`}/></td>
                                                     <td className="bg-yellow-50 p-0">
-                                                        <input type="text" disabled={!canEditManual} className={`w-full h-full min-h-[30px] px-3 text-xs outline-none bg-transparent border-none transition-colors ${canEditManual?'focus:bg-white focus:ring-2 focus:ring-yellow-500':'opacity-50 bg-gray-50 cursor-not-allowed'}`} placeholder={canEditManual?"Escribir observación...":"Bloqueado..."} value={d.obs} onChange={e=>updatePData(p.id, 'obs', e.target.value)} />
+                                                        <div className="flex items-center gap-1 px-1">
+                                                            <textarea
+                                                                rows={2}
+                                                                disabled={!canEditManual}
+                                                                className={`flex-1 min-h-[38px] px-3 py-2 text-xs outline-none bg-transparent border-none resize-y transition-colors ${canEditManual ? 'focus:bg-white focus:ring-2 focus:ring-yellow-500' : 'opacity-50 bg-gray-50 cursor-not-allowed'}`}
+                                                                placeholder={canEditManual ? 'Escribir observación...' : 'Bloqueado...'}
+                                                                value={obsDrafts[p.id] ?? d.obs ?? ''}
+                                                                onChange={e => {
+                                                                    const value = e.target.value;
+                                                                    setObsDrafts(prev => ({ ...prev, [p.id]: value }));
+                                                                }}
+                                                                onBlur={e => saveObservation(p.id, e.target.value)}
+                                                                onKeyDown={e => {
+                                                                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                                                                        e.preventDefault();
+                                                                        saveObservation(p.id, e.currentTarget.value);
+                                                                    }
+                                                                }}
+                                                            />
+                                                            {canEditManual && (savingObs[p.id] || String(obsDrafts[p.id] ?? d.obs ?? '') !== String(d.obs ?? '')) && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => saveObservation(p.id, obsDrafts[p.id] ?? d.obs ?? '')}
+                                                                    disabled={!!savingObs[p.id]}
+                                                                    className="shrink-0 rounded-md bg-yellow-600 px-2 py-1 text-[10px] font-bold text-white hover:bg-yellow-700"
+                                                                    title="Guardar observación"
+                                                                >
+                                                                    {savingObs[p.id] ? 'Guardando...' : 'Guardar'}
+                                                                </button>
+                                                            )}
+                                                        </div>
                                                     </td>
                                                 </tr>
                                             );
