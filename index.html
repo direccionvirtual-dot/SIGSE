@@ -2455,7 +2455,7 @@
                                             <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-[10px] text-slate-200">v10.6</div>
+                                        <div className="text-[10px] text-slate-200">v11.0</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -2463,7 +2463,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v10.6</div>
+                                        <div className="text-xs text-slate-200">v11.0</div>
                                     </div>
                                 )}
                             </div>
@@ -4932,7 +4932,7 @@ María López	maria.lopez	Z9y8x7" />
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     {[
-                                        ['curp', 'CURP'], ['correo', 'Correo'], ['nombre', 'Nombre'], ['paterno', 'Apellido Paterno'],
+                                        ['curp', 'CURP'], ['usuario', 'Usuario'], ['correo', 'Correo'], ['nombre', 'Nombre'], ['paterno', 'Apellido Paterno'],
                                         ['materno', 'Apellido Materno'], ['telefono', 'Teléfono'], ['municipio', 'Municipio'], ['funcion', 'Función'], ['nivel', 'Nivel']
                                     ].map(([key, label]) => <div key={key}><label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label><input className="w-full p-3 border border-gray-200 rounded-xl text-sm outline-none focus:border-emerald-500" value={editData[key] || ''} onChange={e => setEditData({ ...editData, [key]: e.target.value })} /></div>)}
                                     <div className="md:col-span-2"><label className="block text-xs font-semibold text-gray-600 mb-1">Grupo asignado</label><select className="w-full p-3 border border-gray-200 rounded-xl text-sm outline-none focus:border-emerald-500" value={editData.grupoId || ''} onChange={e => setEditData({ ...editData, grupoId: e.target.value })}><option value="">-- Sin grupo --</option>{(basesDeDatos.find(db => db.id === editingStudent.dbId)?.grupos || []).map(group => <option key={group.id} value={group.id}>{group.nombre}</option>)}</select></div>
@@ -6232,14 +6232,18 @@ María López	maria.lopez	Z9y8x7" />
         }
 
         function SubTabEficiencia({ db, activeSem, listParticipantes, getPData, calcFinal }) {
+            const grupos = Array.isArray(db?.grupos) ? db.grupos : [];
+            const participantes = Array.isArray(db?.participantes) ? db.participantes : [];
+            const participantesLista = Array.isArray(listParticipantes) ? listParticipantes : participantes;
             const aPA = Array.from({length: db.info.numPA}, (_, i) => i + 1);
             const aAct = Array.from({length: db.info.numAct}, (_, i) => i + 1);
             const aSes = Array.from({length: db.info.numSesiones || 0}, (_, i) => i + 1);
             const umbralAcreditacion = Number(db.info?.acreditacion ?? 80);
+            const [expandedGroups, setExpandedGroups] = useState({});
 
             const stats = useMemo(() => {
-                const results = db.grupos.map(g => {
-                    const ps = db.participantes.filter(p => p.grupoId === g.id);
+                const results = grupos.map(g => {
+                    const ps = participantes.filter(p => p.grupoId === g.id);
                     const inscritos = ps.length;
                     const atendidos = ps.filter(p => getPData(p.id).conf).length;
                     const acreditados = ps.filter(p => calcFinal(p.id) >= umbralAcreditacion).length;
@@ -6253,7 +6257,7 @@ María López	maria.lopez	Z9y8x7" />
                     return { id: g.id, nombre: g.nombre, inscritos, atendidos, acreditados, paCounts, actCounts };
                 });
 
-                const sinPs = db.participantes.filter(p => !p.grupoId);
+                const sinPs = participantes.filter(p => !p.grupoId);
                 if (sinPs.length > 0) {
                     const inscritos = sinPs.length;
                     const atendidos = sinPs.filter(p => getPData(p.id).conf).length;
@@ -6265,7 +6269,7 @@ María López	maria.lopez	Z9y8x7" />
                     results.push({ id: 'NONE', nombre: 'Sin Asignar', inscritos, atendidos, acreditados, paCounts, actCounts });
                 }
                 return results;
-            }, [db, getPData, calcFinal, umbralAcreditacion]);
+            }, [grupos, participantes, db.info.numPA, db.info.numAct, getPData, calcFinal, umbralAcreditacion]);
 
             const total = useMemo(() => {
                 const t = { nombre: 'Total ' + db.info.siglas, inscritos: 0, atendidos: 0, acreditados: 0, paCounts: {}, actCounts: {} };
@@ -6276,6 +6280,108 @@ María López	maria.lopez	Z9y8x7" />
                 });
                 return t;
             }, [stats, db.info]);
+
+            const activityBreakdown = useMemo(() => {
+                const columns = [
+                    ...aPA.map(index => ({ type: 'pa', index, label: `PA ${index}` })),
+                    ...aAct.map(index => ({ type: 'act', index, label: `ACT ${index}` }))
+                ];
+                const buildGroup = (id, nombre, groupParticipants) => ({
+                    id,
+                    nombre,
+                    inscritos: groupParticipants.length,
+                    activities: columns.map(column => {
+                        const deliveries = groupParticipants.filter(participant => {
+                            const data = getPData(participant.id);
+                            return column.type === 'pa' ? data.paEst[column.index] : data.actEst[column.index];
+                        }).length;
+                        const reviewing = groupParticipants.filter(participant => {
+                            const data = getPData(participant.id);
+                            const submitted = column.type === 'pa' ? data.paEst[column.index] : data.actEst[column.index];
+                            const grade = column.type === 'pa' ? data.paCal[column.index] : data.actCal[column.index];
+                            return submitted && parseFloatSafe(grade) === 0;
+                        }).length;
+                        const graded = groupParticipants.filter(participant => {
+                            const data = getPData(participant.id);
+                            return parseFloatSafe(column.type === 'pa' ? data.paCal[column.index] : data.actCal[column.index]) > 0;
+                        }).length;
+                        return {
+                            efficiency: groupParticipants.length ? (deliveries / groupParticipants.length) * 100 : 0,
+                            deliveries,
+                            reviewing,
+                            graded,
+                            missing: groupParticipants.length - graded
+                        };
+                    })
+                });
+                const groupRows = stats.map(group => buildGroup(
+                    group.id,
+                    group.nombre,
+                    participantes.filter(participant => group.id === 'NONE' ? !participant.grupoId : participant.grupoId === group.id)
+                ));
+                groupRows.push(buildGroup('TOTAL', total.nombre, participantes));
+                return { columns, groups: groupRows };
+            }, [aPA, aAct, stats, participantes, getPData, total.nombre]);
+
+            const datosGlobales = useMemo(() => {
+                const totalParticipantes = participantesLista.length;
+                const datos = participantesLista.map(p => getPData(p.id));
+                const totalAcreditados = participantesLista.filter(p => calcFinal(p.id) >= umbralAcreditacion).length;
+                const porcentajeAcreditados = totalParticipantes ? (totalAcreditados / totalParticipantes) * 100 : 0;
+
+                const paStats = aPA.map(i => {
+                    const entregas = datos.filter(d => d.paEst[i]).length;
+                    const porRevisar = datos.filter(d => d.paEst[i] && parseFloatSafe(d.paCal[i]) === 0).length;
+                    const calificado = datos.filter(d => parseFloatSafe(d.paCal[i]) > 0).length;
+                    const faltantes = totalParticipantes - calificado;
+                    const eficiencia = totalParticipantes ? Math.round((entregas / totalParticipantes) * 100) : 0;
+                    return { entregas, porRevisar, calificado, faltantes, eficiencia };
+                });
+
+                const actStats = aAct.map(i => {
+                    const entregas = datos.filter(d => d.actEst[i]).length;
+                    const porRevisar = datos.filter(d => d.actEst[i] && parseFloatSafe(d.actCal[i]) === 0).length;
+                    const calificado = datos.filter(d => parseFloatSafe(d.actCal[i]) > 0).length;
+                    const faltantes = totalParticipantes - calificado;
+                    const eficiencia = totalParticipantes ? Math.round((entregas / totalParticipantes) * 100) : 0;
+                    return { entregas, porRevisar, calificado, faltantes, eficiencia };
+                });
+
+                return {
+                    totalParticipantes,
+                    totalAcreditados,
+                    porcentajeAcreditados,
+                    paStats,
+                    actStats
+                };
+            }, [participantesLista, aPA, aAct, getPData, calcFinal, umbralAcreditacion]);
+
+            const exportarDatosGlobalesComoImagen = async () => {
+                const target = document.getElementById('datos-globales-eficiencia-card');
+                if (!target) return alert('No se pudo capturar el contenido de Datos Globales.');
+                if (!window.html2canvas) return alert('La captura de imagen no está disponible en este navegador.');
+
+                try {
+                    const canvas = await window.html2canvas(target, { backgroundColor: '#ffffff', scale: 2, useCORS: true, scrollX: 0, scrollY: 0 });
+                    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+                    if (!blob) return alert('No se pudo generar la imagen.');
+
+                    if (navigator.clipboard && navigator.clipboard.write) {
+                        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+                        alert('La información de Datos Globales se copió como imagen al portapapeles.');
+                    } else {
+                        const url = canvas.toDataURL('image/png');
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = `Datos_Globales_${(db.info?.siglas || 'curso')}.png`;
+                        link.click();
+                        alert('La imagen se descargó porque tu navegador no permite copiar directo al portapapeles.');
+                    }
+                } catch (error) {
+                    console.error('Error al copiar Datos Globales como imagen:', error);
+                    alert('No se pudo copiar la imagen. Intenta nuevamente.');
+                }
+            };
 
             const chartColors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#ec4899'];
             
@@ -6343,7 +6449,7 @@ María López	maria.lopez	Z9y8x7" />
             const dataAsistencias = [{
                 label: '% Asistencia',
                 data: aSes.map(i => {
-                    const asistencias = db.participantes.filter(p => !!getEffectiveAsisLocal(p.id)[i]).length;
+                    const asistencias = participantes.filter(p => !!getEffectiveAsisLocal(p.id)[i]).length;
                     return total.inscritos ? parseFloatSafe((asistencias / total.inscritos * 100).toFixed(1)) : 0;
                 }),
                 backgroundColor: '#2563eb'
@@ -6544,6 +6650,7 @@ María López	maria.lopez	Z9y8x7" />
                         const tag = block.tagName && block.tagName.toLowerCase();
                         if (!tag) return false;
                         if (block.classList && block.classList.contains('no-print')) return false;
+                        if (block.classList && block.classList.contains('no-report')) return false;
                         return true;
                     });
 
@@ -6602,6 +6709,59 @@ María López	maria.lopez	Z9y8x7" />
 
                     <div className="space-y-8 max-w-7xl mx-auto print-only-container">
                         
+                        <div id="datos-globales-eficiencia-card" className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden break-inside-avoid">
+                            <div className="flex items-start justify-between gap-3 bg-gray-50 p-4 border-b border-gray-100">
+                                <div>
+                                    <h3 className="font-bold text-gray-800 uppercase text-sm tracking-wider">Datos Globales - {cursoHeaderMeta}</h3>
+                                    <div className="text-[11px] text-gray-500 mt-1">{String(activeSem?.nombre || '').replace(/^SEMANA\s*/i, 'Semana ').trim()}</div>
+                                </div>
+                                <button onClick={exportarDatosGlobalesComoImagen} className="text-gray-500 hover:text-blue-600 bg-white hover:bg-blue-50 border border-gray-200 rounded-xl p-2.5 transition-colors no-print" title="Copiar imagen del bloque"><i className="fa-solid fa-copy"></i></button>
+                            </div>
+                            <div className="p-4 space-y-5">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="bg-green-50 border border-green-100 rounded-2xl p-5">
+                                        <div className="text-sm font-semibold text-green-700 uppercase tracking-widest">Acreditados</div>
+                                        <div className="mt-3 text-4xl font-black text-green-900">{datosGlobales.totalAcreditados}</div>
+                                        <div className="text-sm text-gray-500 mt-2">Participantes con estatus <span className="font-semibold">ACREDITADO</span> en la semana activa.</div>
+                                    </div>
+                                    <div className="bg-blue-50 border border-blue-100 rounded-2xl p-5">
+                                        <div className="text-sm font-semibold text-blue-700 uppercase tracking-widest">Porcentaje</div>
+                                        <div className="mt-3 text-4xl font-black text-blue-900">{formatPercent(datosGlobales.porcentajeAcreditados)}</div>
+                                        <div className="text-sm text-gray-500 mt-2">Sobre <span className="font-semibold">{datosGlobales.totalParticipantes}</span> participantes de la semana activa.</div>
+                                    </div>
+                                </div>
+
+                                <div className="overflow-x-auto">
+                                    <table className="min-w-full text-left text-sm border-collapse">
+                                        <thead>
+                                            <tr>
+                                                <th className="border-b border-gray-200 bg-gray-50 px-4 py-3 font-semibold text-gray-600">Métrica</th>
+                                                {aPA.map(i => <th key={`hdr-pa-${i}`} className="border-b border-gray-200 bg-gray-50 px-4 py-3 font-semibold text-gray-600">PA {i}</th>)}
+                                                {aAct.map(i => <th key={`hdr-act-${i}`} className="border-b border-gray-200 bg-gray-50 px-4 py-3 font-semibold text-gray-600">ACT {i}</th>)}
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {['Eficiencia', 'Entregas', 'Por revisar', 'Calificado', 'Faltantes'].map((label, rowIndex) => (
+                                                <tr key={`row-${rowIndex}`} className={rowIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                                                    <td className="border-b border-gray-200 px-4 py-3 font-semibold text-gray-700">{label}</td>
+                                                    {aPA.map((i, index) => {
+                                                        const stat = datosGlobales.paStats[index];
+                                                        const value = label === 'Eficiencia' ? `${stat.eficiencia}%` : label === 'Entregas' ? stat.entregas : label === 'Por revisar' ? stat.porRevisar : label === 'Calificado' ? stat.calificado : stat.faltantes;
+                                                        return <td key={`pa-${i}-${label}`} className="border-b border-gray-200 px-4 py-3 text-gray-700">{value}</td>;
+                                                    })}
+                                                    {aAct.map((i, index) => {
+                                                        const stat = datosGlobales.actStats[index];
+                                                        const value = label === 'Eficiencia' ? `${stat.eficiencia}%` : label === 'Entregas' ? stat.entregas : label === 'Por revisar' ? stat.porRevisar : label === 'Calificado' ? stat.calificado : stat.faltantes;
+                                                        return <td key={`act-${i}-${label}`} className="border-b border-gray-200 px-4 py-3 text-gray-700">{value}</td>;
+                                                    })}
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
                         <div id="eficiencia-terminal-general-card" className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden break-inside-avoid">
                             <div className="flex items-start justify-between gap-3 bg-gray-50 p-4 border-b border-gray-100">
                                 <div>
@@ -6737,6 +6897,65 @@ María López	maria.lopez	Z9y8x7" />
                                 labels={['% No Acreditados', '% Acreditados']}
                                 datasets={dataEfiGlobal}
                             />
+                        </div>
+
+                        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden break-inside-avoid no-report">
+                            <div className="flex items-start justify-between gap-3 bg-gray-50 p-4 border-b border-gray-100">
+                                <div>
+                                    <h3 className="font-bold text-gray-800 uppercase text-sm tracking-wider">Desglose por Grupo y Actividad</h3>
+                                    <div className="text-[11px] text-gray-500 mt-1">Eficiencia terminal y entregas por grupo para {String(activeSem?.nombre || '').replace(/^SEMANA\s*/i, 'Semana ').trim()}</div>
+                                </div>
+                            </div>
+                            <div className="space-y-4 p-4">
+                                {activityBreakdown.groups.map(group => (
+                                    <div key={`desglose-grupo-${group.id}`} className="overflow-hidden rounded-lg border border-slate-200">
+                                        <button
+                                            type="button"
+                                            aria-expanded={Boolean(expandedGroups[group.id])}
+                                            onClick={() => setExpandedGroups(current => ({ ...current, [group.id]: !current[group.id] }))}
+                                            className={`flex w-full items-center justify-between gap-3 px-4 py-3 text-left focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500 ${group.id === 'TOTAL' ? 'bg-slate-800 text-white hover:bg-slate-700' : 'bg-slate-50 text-slate-800 hover:bg-slate-100'}`}
+                                        >
+                                            <span className="flex items-center gap-3">
+                                                <span aria-hidden="true" className="w-4 text-center text-lg leading-none">{expandedGroups[group.id] ? '−' : '+'}</span>
+                                                <span className="font-bold">{group.nombre}</span>
+                                            </span>
+                                            <span className={`text-xs ${group.id === 'TOTAL' ? 'text-slate-300' : 'text-slate-500'}`}>{group.inscritos} inscritos</span>
+                                        </button>
+                                        {expandedGroups[group.id] && (
+                                            <div className="overflow-x-auto">
+                                                <table className="min-w-full border-collapse text-sm">
+                                                    <thead className="bg-slate-100 text-slate-700">
+                                                        <tr>
+                                                            <th className="border-b border-slate-200 p-3 text-left font-bold">Métrica</th>
+                                                            {activityBreakdown.columns.map(column => (
+                                                                <th key={`desglose-${group.id}-${column.type}-${column.index}`} className="min-w-[88px] border-b border-slate-200 p-3 text-center font-bold">{column.label}</th>
+                                                            ))}
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {[
+                                                            { label: 'Eficiencia', key: 'efficiency', format: value => formatPercent(value) },
+                                                            { label: 'Entregas', key: 'deliveries' },
+                                                            { label: 'Por revisar', key: 'reviewing' },
+                                                            { label: 'Calificado', key: 'graded' },
+                                                            { label: 'Faltantes', key: 'missing' }
+                                                        ].map(metric => (
+                                                            <tr key={`desglose-${group.id}-${metric.key}`} className="odd:bg-white even:bg-slate-50">
+                                                                <th className="border-b border-slate-200 p-3 text-left font-semibold text-slate-700">{metric.label}</th>
+                                                                {group.activities.map((activity, index) => (
+                                                                    <td key={`desglose-${group.id}-${metric.key}-${index}`} className="border-b border-slate-200 p-3 text-center text-slate-700">
+                                                                        {metric.format ? metric.format(activity[metric.key]) : activity[metric.key]}
+                                                                    </td>
+                                                                ))}
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
                         </div>
 
                     </div>
