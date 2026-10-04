@@ -2455,7 +2455,7 @@
                                             <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-[10px] text-slate-200">v11.0</div>
+                                        <div className="text-[10px] text-slate-200">v11.1</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -2463,7 +2463,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v11.0</div>
+                                        <div className="text-xs text-slate-200">v11.1</div>
                                     </div>
                                 )}
                             </div>
@@ -6231,7 +6231,7 @@ María López	maria.lopez	Z9y8x7" />
             );
         }
 
-        function SubTabEficiencia({ db, activeSem, listParticipantes, getPData, calcFinal }) {
+        function SubTabEficiencia({ db, activeSem, listParticipantes, getPData, getEffectiveConf, calcFinal }) {
             const grupos = Array.isArray(db?.grupos) ? db.grupos : [];
             const participantes = Array.isArray(db?.participantes) ? db.participantes : [];
             const participantesLista = Array.isArray(listParticipantes) ? listParticipantes : participantes;
@@ -6245,7 +6245,7 @@ María López	maria.lopez	Z9y8x7" />
                 const results = grupos.map(g => {
                     const ps = participantes.filter(p => p.grupoId === g.id);
                     const inscritos = ps.length;
-                    const atendidos = ps.filter(p => getPData(p.id).conf).length;
+                    const atendidos = ps.filter(p => getEffectiveConf(p.id)).length;
                     const acreditados = ps.filter(p => calcFinal(p.id) >= umbralAcreditacion).length;
 
                     const paCounts = {};
@@ -6260,7 +6260,7 @@ María López	maria.lopez	Z9y8x7" />
                 const sinPs = participantes.filter(p => !p.grupoId);
                 if (sinPs.length > 0) {
                     const inscritos = sinPs.length;
-                    const atendidos = sinPs.filter(p => getPData(p.id).conf).length;
+                    const atendidos = sinPs.filter(p => getEffectiveConf(p.id)).length;
                     const acreditados = sinPs.filter(p => calcFinal(p.id) >= umbralAcreditacion).length;
                     const paCounts = {};
                     for(let i=1; i<=db.info.numPA; i++) paCounts[i] = sinPs.filter(p => parseFloatSafe(getPData(p.id).paCal[i]) > 0).length;
@@ -6269,7 +6269,7 @@ María López	maria.lopez	Z9y8x7" />
                     results.push({ id: 'NONE', nombre: 'Sin Asignar', inscritos, atendidos, acreditados, paCounts, actCounts });
                 }
                 return results;
-            }, [grupos, participantes, db.info.numPA, db.info.numAct, getPData, calcFinal, umbralAcreditacion]);
+            }, [grupos, participantes, db.info.numPA, db.info.numAct, getPData, getEffectiveConf, calcFinal, umbralAcreditacion]);
 
             const total = useMemo(() => {
                 const t = { nombre: 'Total ' + db.info.siglas, inscritos: 0, atendidos: 0, acreditados: 0, paCounts: {}, actCounts: {} };
@@ -6987,6 +6987,7 @@ María López	maria.lopez	Z9y8x7" />
             const [newSemanaName, setNewSemanaName] = useState('');
             const [editingSemanaId, setEditingSemanaId] = useState(null);
             const [editingSemanaName, setEditingSemanaName] = useState('');
+            const [showSeguimientoExportMenu, setShowSeguimientoExportMenu] = useState(false);
             const datosGlobalesCursoNombre = db.info?.nombreCurso || 'Curso sin nombre';
             const datosGlobalesCursoId = db.info?.idCurso || db.info?.siglas || 'Sin ID';
 
@@ -7327,6 +7328,29 @@ María López	maria.lopez	Z9y8x7" />
                 return res;
             }, [activeSem, semanas]);
 
+            const getEffectiveConf = useCallback((pId) => {
+                if (!activeSem) return false;
+                const indexed = (semanas || []).map((s, idx) => {
+                    let ts = 0;
+                    if (s && s.id) {
+                        const parts = (s.id || '').split('-');
+                        if (parts.length > 1) {
+                            const parsed = parseInt(parts[1]);
+                            if (!isNaN(parsed)) ts = parsed;
+                        }
+                    }
+                    if (!ts && s && s.corteDate) {
+                        const parsedDate = Date.parse(s.corteDate);
+                        if (!isNaN(parsedDate)) ts = parsedDate;
+                    }
+                    return { s, idx, ts };
+                });
+                indexed.sort((a,b) => (a.ts - b.ts) || (a.idx - b.idx));
+                const activeIndex = indexed.findIndex(e => e.s && e.s.id === activeSem.id);
+                if (activeIndex === -1) return false;
+                return indexed.slice(0, activeIndex + 1).some(e => !!e.s?.data?.[pId]?.conf);
+            }, [activeSem, semanas]);
+
             const calcFinal = useCallback((pId) => {
                 const d = getPData(pId);
                 return calcularCalificacionFinal(d, db.info);
@@ -7353,7 +7377,7 @@ María López	maria.lopez	Z9y8x7" />
                 if (key === 'correo') return p.correo || '';
                 if (key === 'asesor') return g.asesor || '';
                 if (key === 'grupo') return g.nombre || '';
-                if (key === 'conf') return d.conf ? 'SI' : 'NO';
+                if (key === 'conf') return getEffectiveConf(p.id) ? 'SI' : 'NO';
                 if (key.startsWith('asis-')) {
                     const idx = parseInt(key.split('-')[1], 10);
                     return eff[idx] ? 'SI' : 'NO';
@@ -7392,7 +7416,7 @@ María López	maria.lopez	Z9y8x7" />
                 if (key === 'llamada') return d.llam ? 'SI' : 'NO';
                 if (key === 'obs') return d.obs || '';
                 return '';
-            }, [db, getPData, getEffectiveAsis, getGroupMsgStatus, calcFinal, umbralAcreditacion]);
+            }, [db, getPData, getEffectiveAsis, getEffectiveConf, getGroupMsgStatus, calcFinal, umbralAcreditacion]);
 
             const matchesColumnFilters = useCallback((p) => {
                 return Object.entries(columnFilters).every(([filterKey, filterValue]) => {
@@ -7464,8 +7488,8 @@ María López	maria.lopez	Z9y8x7" />
                     }
                     if (matrixFilterConf !== 'ALL') {
                         lista = lista.filter(p => {
-                            const d = getPData(p.id);
-                            return matrixFilterConf === 'SI' ? d.conf : !d.conf;
+                            const confirmed = getEffectiveConf(p.id);
+                            return matrixFilterConf === 'SI' ? confirmed : !confirmed;
                         });
                     }
                     if (matrixFilterEstatus !== 'ALL') {
@@ -7512,7 +7536,7 @@ María López	maria.lopez	Z9y8x7" />
                     const gB = (db.grupos.find(g=>g.id===b.grupoId)||{}).nombre||'';
                     return gA.localeCompare(gB) || a.completo.localeCompare(b.completo);
                 });
-            }, [db, isAsesor, asesorGrupoId, matrixFilterGrupo, matrixFilterConf, matrixFilterEstatus, matrixFilterAvz, matrixSort, columnFilters, columnSort, getPData, calcFinal, compareColumnValues, matchesColumnFilters]);
+            }, [db, isAsesor, asesorGrupoId, matrixFilterGrupo, matrixFilterConf, matrixFilterEstatus, matrixFilterAvz, matrixSort, columnFilters, columnSort, getPData, getEffectiveConf, calcFinal, compareColumnValues, matchesColumnFilters]);
 
             const reportParticipantes = useMemo(() => {
                 let lista = db.participantes;
@@ -7723,9 +7747,8 @@ María López	maria.lopez	Z9y8x7" />
                 setShowImport(false); setImportText('');
             };
 
-            const exportarSeguimientoXLSX = () => {
+            const obtenerDatosSeguimiento = () => {
                 if(!activeSem) return;
-                if (typeof XLSX === 'undefined') return alert("Librería de Excel cargando... Intenta en un segundo.");
                 
                 let headers = ['No', 'CURP', 'Nombre Completo', 'Usuario', 'Correo', 'Asesor', 'Grupo', 'Confirmacion'];
                 for(let i=1; i<=db.info.numSesiones; i++) headers.push(`Asistencia S${i}`);
@@ -7741,7 +7764,7 @@ María López	maria.lopez	Z9y8x7" />
                     const status = calFinal >= 80 ? 'ACREDITADO' : 'NO ACREDITADO';
 
                     let row = [
-                        idx+1, p.curp, p.completo, getMoodleUsername(p.curp), p.correo, g.asesor||'-', g.nombre||'-', d.conf?'SI':'NO'
+                        idx+1, p.curp, p.completo, getMoodleUsername(p.curp), p.correo, g.asesor||'-', g.nombre||'-', getEffectiveConf(p.id)?'SI':'NO'
                     ];
                     
                     for(let i=1; i<=db.info.numSesiones; i++) {
@@ -7758,10 +7781,47 @@ María López	maria.lopez	Z9y8x7" />
                     return row;
                 });
 
+                return { headers, data };
+            };
+
+            const exportarSeguimientoXLSX = () => {
+                if (typeof XLSX === 'undefined') return alert("Librería de Excel cargando... Intenta en un segundo.");
+                const contenido = obtenerDatosSeguimiento();
+                if (!contenido) return;
+                const { headers, data } = contenido;
                 const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
                 const wb = XLSX.utils.book_new();
                 XLSX.utils.book_append_sheet(wb, ws, "Seguimiento");
                 XLSX.writeFile(wb, `Seguimiento_${activeSem.nombre}_${db.info.siglas}.xlsx`);
+            };
+
+            const copiarContenidoSeguimiento = async () => {
+                const contenido = obtenerDatosSeguimiento();
+                if (!contenido) return;
+                const texto = [contenido.headers, ...contenido.data]
+                    .map(row => row.map(value => String(value ?? '').replace(/[\t\r\n]+/g, ' ')).join('\t'))
+                    .join('\n');
+
+                try {
+                    if (navigator.clipboard?.writeText) {
+                        await navigator.clipboard.writeText(texto);
+                    } else {
+                        const textarea = document.createElement('textarea');
+                        textarea.value = texto;
+                        textarea.style.position = 'fixed';
+                        textarea.style.opacity = '0';
+                        document.body.appendChild(textarea);
+                        textarea.select();
+                        const copied = document.execCommand('copy');
+                        document.body.removeChild(textarea);
+                        if (!copied) throw new Error('El navegador no permitió copiar al portapapeles.');
+                    }
+                    setShowSeguimientoExportMenu(false);
+                    alert('Contenido del seguimiento copiado al portapapeles.');
+                } catch (error) {
+                    console.error('Error al copiar el seguimiento:', error);
+                    alert('No se pudo copiar el contenido. Revisa los permisos del portapapeles.');
+                }
             };
 
             if (!activeSem) return <div className="p-10 text-center">Sin semanas creadas.</div>;
@@ -7783,7 +7843,7 @@ María López	maria.lopez	Z9y8x7" />
                                 <button onClick={()=>setSubView('eficiencia')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors bg-blue-600 shadow text-white`}><i className="fa-solid fa-chart-line mr-1"></i> Eficiencia y Gráficas</button>
                             </div>
                         </div>
-                        <SubTabEficiencia db={db} activeSem={activeSem} listParticipantes={db.participantes} getPData={getPData} calcFinal={calcFinal} />
+                        <SubTabEficiencia db={db} activeSem={activeSem} listParticipantes={db.participantes} getPData={getPData} getEffectiveConf={getEffectiveConf} calcFinal={calcFinal} />
                     </div>
                 );
             }
@@ -7833,7 +7893,21 @@ María López	maria.lopez	Z9y8x7" />
                                         )}
                                 </div>
                                 <div className="flex gap-3 items-center">
-                                    <button onClick={exportarSeguimientoXLSX} className="bg-blue-50 text-blue-700 border border-blue-200 px-4 py-1.5 rounded-lg font-bold shadow-sm flex items-center gap-2 hover:bg-blue-100 transition-colors"><i className="fa-solid fa-file-excel"></i> Descarga Seguimiento</button>
+                                    <div className="relative">
+                                        <button type="button" onClick={() => setShowSeguimientoExportMenu(open => !open)} aria-expanded={showSeguimientoExportMenu} aria-haspopup="menu" className="bg-blue-50 text-blue-700 border border-blue-200 px-4 py-1.5 rounded-lg font-bold shadow-sm flex items-center gap-2 hover:bg-blue-100 transition-colors">
+                                            <i className="fa-solid fa-file-excel"></i> Descarga Seguimiento <i className="fa-solid fa-chevron-down text-xs"></i>
+                                        </button>
+                                        {showSeguimientoExportMenu && (
+                                            <div role="menu" className="absolute right-0 top-full z-30 mt-2 min-w-52 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 text-left shadow-lg">
+                                                <button type="button" role="menuitem" onClick={() => { setShowSeguimientoExportMenu(false); exportarSeguimientoXLSX(); }} className="flex w-full items-center gap-3 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-blue-50 hover:text-blue-800">
+                                                    <i className="fa-solid fa-file-excel w-4 text-center text-green-700"></i> Descargar Excel
+                                                </button>
+                                                <button type="button" role="menuitem" onClick={copiarContenidoSeguimiento} className="flex w-full items-center gap-3 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-blue-50 hover:text-blue-800">
+                                                    <i className="fa-solid fa-copy w-4 text-center text-blue-700"></i> Copiar contenido
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
                                     {isAdmin && <button onClick={()=>setShowImport(true)} className="bg-green-600 text-white px-3 py-1.5 text-xs rounded-lg font-bold shadow-md flex items-center gap-2 hover:bg-green-700 transition-transform active:scale-95"><i className="fa-solid fa-upload"></i> Carga Datos</button>}
                                     <button onClick={() => resetColumnFilters()} className="text-blue-600 hover:underline font-bold ml-2">Limpiar Filtros</button>
                                     <button onClick={() => setShowDatosGlobalesModal(true)} className="text-blue-600 hover:underline font-bold ml-2">Datos Globales</button>
@@ -7946,7 +8020,7 @@ María López	maria.lopez	Z9y8x7" />
                                                     
                                                     <td className="text-[10px]">{p.correo}</td><td className="text-[10px]">{isAdmin && onEditPersonal && g.asesorId ? <button type="button" onClick={() => onEditPersonal(asesoresGlobales.find(persona => persona.id === g.asesorId) || { id: g.asesorId, nombre: g.asesor, usuario: '', password: '', roles: ['asesor'] })} className="text-left text-gray-800 hover:text-gray-900" title="Editar datos del asesor">{g.asesor}</button> : g.asesor}</td><td className="font-bold text-[10px]">{g.nombre}</td>
                                                     
-                                                    <td><input type="checkbox" disabled={!canEditCore} checked={d.conf} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>updatePData(p.id, 'conf', e.target.checked)} className={`seguimiento-checkbox w-4 h-4 ${!canEditCore?'opacity-50':''}`} /></td>
+                                                    <td><input type="checkbox" disabled={!canEditCore} checked={getEffectiveConf(p.id)} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>updatePData(p.id, 'conf', e.target.checked)} className={`seguimiento-checkbox w-4 h-4 ${!canEditCore?'opacity-50':''}`} /></td>
                                                     
                                                     {aSes.map(i => <td key={`as-${i}`}><input type="checkbox" disabled={!canEditCore} checked={!!getEffectiveAsis(p.id)[i]} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>updatePData(p.id, 'asis', e.target.checked, i)} className={`seguimiento-checkbox w-4 h-4 ${!canEditCore?'opacity-50':''}`}/></td>)}
                                                     
