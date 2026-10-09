@@ -778,6 +778,12 @@
         const normalizeText = (text) => text ? text.toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim() : '';
         const formatImportedText = (text) => text ? text.toString().toUpperCase().trim() : '';
         const getMoodleUsername = (curp) => curp ? curp.substring(0, 10).toLowerCase() : '';
+        const getMoodlePassword = (participant = {}, info = {}) => {
+            const mode = info.moodlePassMode || 'custom';
+            if (mode === 'curp') return (participant.curp || '').substring(0, 10).trim().toLowerCase();
+            if (mode === 'correo') return (participant.correo || '').split('@')[0].trim().toLowerCase();
+            return (info.moodlePass || '').trim();
+        };
         const copyToClipboard = (text) => {
             const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select();
             try { document.execCommand('copy'); alert('¡Copiado!'); } catch (err) { alert('Error al copiar'); }
@@ -1226,6 +1232,7 @@
             const [horas, setHoras] = useState('40'); // RESTAURADO
             const [modalidad, setModalidad] = useState('');
             const [moodlePass, setMoodlePass] = useState(`Epos.${new Date().getFullYear()}`);
+            const [moodlePassMode, setMoodlePassMode] = useState('custom');
             
             const [numSesiones, setNumSesiones] = useState(6);
             const [numPA, setNumPA] = useState(2);
@@ -1425,7 +1432,7 @@
                     id: Date.now().toString(),
                     info: { 
                         anio, estado: estadoSeleccionado, idEstado, sectorFormativo: sectorFormativoFinal, tipoFormacion, siglas, idCurso: idCurso||siglas, 
-                        nombreCurso, horas, modalidad, moodlePass, numSesiones: parseInt(numSesiones), numPA: parseInt(numPA), numAct: parseInt(numAct),
+                        nombreCurso, horas, modalidad, moodlePass, moodlePassMode, numSesiones: parseInt(numSesiones), numPA: parseInt(numPA), numAct: parseInt(numAct),
                         acreditacion: parseInt(acreditacion) || 80, calculoFinalTipo, coordinadorIds 
                     },
                     participantes: participantesProcesados || [], grupos: [], semanasSeguimiento: [],
@@ -2455,7 +2462,7 @@
                                             <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-[10px] text-slate-200">v11.2</div>
+                                        <div className="text-[10px] text-slate-200">v11.3</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -2463,7 +2470,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v11.2</div>
+                                        <div className="text-xs text-slate-200">v11.3</div>
                                     </div>
                                 )}
                             </div>
@@ -2752,7 +2759,17 @@
                                                             </select>
                                                         </div>
                                                         <div><label className="block text-xs font-bold text-gray-600 mb-1">Acreditación</label><input type="number" className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none" value={acreditacion} onChange={e=>setAcreditacion(e.target.value)}/></div>
-                                                        <div><label className="block text-xs font-bold text-gray-600 mb-1">Pass Moodle</label><input type="text" className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none" value={moodlePass} onChange={e=>setMoodlePass(e.target.value)}/></div>
+                                                        <div>
+                                                            <label className="block text-xs font-bold text-gray-600 mb-1">Tipo de contraseña Moodle</label>
+                                                            <select className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:border-blue-500" value={moodlePassMode} onChange={e=>setMoodlePassMode(e.target.value)}>
+                                                                <option value="custom">Personalizada</option>
+                                                                <option value="curp">CURP</option>
+                                                                <option value="correo">Correo</option>
+                                                            </select>
+                                                        </div>
+                                                        {moodlePassMode === 'custom' && (
+                                                            <div><label className="block text-xs font-bold text-gray-600 mb-1">Pass Moodle</label><input type="text" className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none" value={moodlePass} onChange={e=>setMoodlePass(e.target.value)}/></div>
+                                                        )}
                                                     </div>
                                                     <div className="mt-6 flex justify-end">
                                                         <button onClick={guardarBaseDeDatos} className="rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold uppercase tracking-wide text-white shadow-lg shadow-blue-500/20 transition hover:bg-blue-700">
@@ -4349,7 +4366,20 @@ María López	maria.lopez	Z9y8x7" />
                         <div><label className="block text-xs font-bold text-gray-600 mb-1">Año</label><input type="text" className="w-full p-3 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-blue-500" value={info.anio} onChange={e=>setInfo({...info, anio:e.target.value})} /></div>
                         <div><label className="block text-xs font-bold text-gray-600 mb-1">Siglas</label><input type="text" className="w-full p-3 bg-gray-50 border border-gray-200 rounded-lg uppercase outline-none focus:border-blue-500" value={info.siglas} onChange={e=>setInfo({...info, siglas:e.target.value})} /></div>
                         <div><label className="block text-xs font-bold text-gray-600 mb-1">ID Curso</label><input type="text" className="w-full p-3 bg-gray-50 border border-gray-200 rounded-lg uppercase outline-none focus:border-blue-500" value={info.idCurso || ''} onChange={e=>setInfo({...info, idCurso:e.target.value})} /></div>
-                        <div><label className="block text-xs font-bold text-gray-600 mb-1">Contraseña Moodle Predeterminada</label><input type="text" className="w-full p-3 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-blue-500" value={info.moodlePass} onChange={e=>setInfo({...info, moodlePass:e.target.value})} /></div>
+                        <div>
+                            <label className="block text-xs font-bold text-gray-600 mb-1">Tipo de contraseña Moodle</label>
+                            <select className="w-full p-3 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-blue-500" value={info.moodlePassMode || 'custom'} onChange={e=>setInfo({...info, moodlePassMode:e.target.value})}>
+                                <option value="custom">Personalizada</option>
+                                <option value="curp">CURP</option>
+                                <option value="correo">Correo</option>
+                            </select>
+                        </div>
+                        {(info.moodlePassMode || 'custom') === 'custom' && (
+                            <div>
+                                <label className="block text-xs font-bold text-gray-600 mb-1">Contraseña Moodle Predeterminada</label>
+                                <input type="text" className="w-full p-3 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-blue-500" value={info.moodlePass || ''} onChange={e=>setInfo({...info, moodlePass:e.target.value})} />
+                            </div>
+                        )}
                         
                         {/* V3.0 Restaurado Horas y Modalidad */}
                         <div><label className="block text-xs font-bold text-gray-600 mb-1">Horas</label><input type="number" className="w-full p-3 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-blue-500" value={info.horas || ''} onChange={e=>setInfo({...info, horas: e.target.value})} /></div>
@@ -4983,7 +5013,12 @@ María López	maria.lopez	Z9y8x7" />
 
             const openEditParticipant = (participant) => {
                 setEditingParticipant(participant);
-                setEditData({ ...participant, grupoId: participant.grupoId || '' });
+                setEditData({
+                    ...participant,
+                    usuario: participant.usuario || getMoodleUsername(participant.curp) || '',
+                    password: participant.password || getMoodlePassword(participant, db.info) || '',
+                    grupoId: participant.grupoId || ''
+                });
             };
 
             const closeEditModal = () => {
@@ -5327,6 +5362,14 @@ María López	maria.lopez	Z9y8x7" />
                                         <input className="w-full p-3 border border-gray-200 rounded-xl text-sm outline-none focus:border-blue-500" value={editData.curp || ''} onChange={e => setEditData({ ...editData, curp: e.target.value })} />
                                     </div>
                                     <div>
+                                        <label className="block text-xs font-semibold text-gray-600 mb-1">Usuario actual</label>
+                                        <input className="w-full p-3 border border-gray-200 rounded-xl text-sm outline-none focus:border-blue-500 bg-gray-50" value={editData.usuario || ''} onChange={e => setEditData({ ...editData, usuario: e.target.value })} />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-semibold text-gray-600 mb-1">Contraseña</label>
+                                        <input className="w-full p-3 border border-gray-200 rounded-xl text-sm outline-none focus:border-blue-500" value={editData.password || ''} onChange={e => setEditData({ ...editData, password: e.target.value })} />
+                                    </div>
+                                    <div>
                                         <label className="block text-xs font-semibold text-gray-600 mb-1">Correo</label>
                                         <input className="w-full p-3 border border-gray-200 rounded-xl text-sm outline-none focus:border-blue-500" value={editData.correo || ''} onChange={e => setEditData({ ...editData, correo: e.target.value })} />
                                     </div>
@@ -5617,7 +5660,7 @@ María López	maria.lopez	Z9y8x7" />
             const expMoodle = () => {
                 const head = ['username','password','email','phone1','firstname','lastname','city','course1','group1'];
                 const course = `${db.info.siglas}-${db.info.idEstado}${db.info.anio.slice(-2)}`;
-                const rows = db.participantes.map(p => [getMoodleUsername(p.curp), db.info.moodlePass, p.correo, p.telefono, p.nombre, `${p.paterno} ${p.materno}`.trim(), p.municipio, course, (db.grupos.find(g=>g.id===p.grupoId)||{}).nombre||''].map(v => `"${(v||'').toString().replace(/"/g, '""')}"`).join(','));
+                const rows = db.participantes.map(p => [getMoodleUsername(p.curp), getMoodlePassword(p, db.info), p.correo, p.telefono, p.nombre, `${p.paterno} ${p.materno}`.trim(), p.municipio, course, (db.grupos.find(g=>g.id===p.grupoId)||{}).nombre||''].map(v => `"${(v||'').toString().replace(/"/g, '""')}"`).join(','));
                 downloadCSV(`Moodle_${db.info.siglas}.csv`, [head.join(','), ...rows].join('\n'));
             };
 
@@ -5648,7 +5691,7 @@ María López	maria.lopez	Z9y8x7" />
                 const rows = db.participantes.map(p => {
                     const g = db.grupos.find(x => x.id === p.grupoId) || {};
                     return [
-                        p.completo || '', g.nombre || '', g.whatsapp || '', getMoodleUsername(p.curp), db.info.moodlePass || '', g.dia || '', g.hora || '', db.info.nombreCurso || '', g.asesor || '', g.contacto || '', p.telefono || '', p.correo || ''
+                        p.completo || '', g.nombre || '', g.whatsapp || '', getMoodleUsername(p.curp), getMoodlePassword(p, db.info), g.dia || '', g.hora || '', db.info.nombreCurso || '', g.asesor || '', g.contacto || '', p.telefono || '', p.correo || ''
                     ];
                 });
                 return { headers, rows };
@@ -6135,7 +6178,7 @@ María López	maria.lopez	Z9y8x7" />
                 };
 
                 const drawRow = (row, y) => {
-                    const values = [row.consecutivo, row.asesor, row.grupo, row.completo, row.usuario, db.info.moodlePass, row.celular, ...sessionHeaders.map(() => ''), ...paHeaders.map(() => ''), ...actHeaders.map(() => '')];
+                    const values = [row.consecutivo, row.asesor, row.grupo, row.completo, row.usuario, getMoodlePassword({ curp: row.curp, correo: row.correo }, db.info), row.celular, ...sessionHeaders.map(() => ''), ...paHeaders.map(() => ''), ...actHeaders.map(() => '')];
                     const lines = values.map((value, index) => doc.splitTextToSize(String(value || '-'), colWidths[index] - (rowPadding * 2)));
                     const rowHeight = Math.max(7, ...lines.map(cellLines => cellLines.length * lineHeight + (rowPadding * 2)));
                     let x = margin;
@@ -6163,7 +6206,7 @@ María López	maria.lopez	Z9y8x7" />
                     lista.forEach(row => {
                         doc.setFont('helvetica', 'normal');
                         doc.setFontSize(5.8);
-                        const previewLines = [row.consecutivo, row.asesor, row.grupo, row.completo, row.usuario, db.info.moodlePass, row.celular, ...sessionHeaders.map(() => ''), ...paHeaders.map(() => ''), ...actHeaders.map(() => '')]
+                        const previewLines = [row.consecutivo, row.asesor, row.grupo, row.completo, row.usuario, getMoodlePassword({ curp: row.curp, correo: row.correo }, db.info), row.celular, ...sessionHeaders.map(() => ''), ...paHeaders.map(() => ''), ...actHeaders.map(() => '')]
                             .map((value, index) => doc.splitTextToSize(String(value || '-'), colWidths[index] - (rowPadding * 2)));
                         const rowHeight = Math.max(7, ...previewLines.map(cellLines => cellLines.length * lineHeight + (rowPadding * 2)));
 
@@ -6219,7 +6262,7 @@ María López	maria.lopez	Z9y8x7" />
                                 {lista.map((row, i) => (
                                     <tr key={i}>
                                         <td className="border p-2 text-center font-bold">{row.consecutivo}</td><td className="border p-2 text-[10px]">{row.asesor}</td><td className="border p-2 font-bold">{row.grupo}</td><td className="border p-2 truncate" style={{maxWidth:'180px'}}>{row.completo}</td>
-                                        <td className="border p-2 text-gray-600 font-mono text-[10px]">{row.usuario}</td><td className="border p-2 text-gray-600 text-[10px]">{db.info.moodlePass}</td><td className="border p-2 text-[10px]">{row.celular}</td>
+                                        <td className="border p-2 text-gray-600 font-mono text-[10px]">{row.usuario}</td><td className="border p-2 text-gray-600 text-[10px]">{getMoodlePassword({ curp: row.curp, correo: row.correo }, db.info)}</td><td className="border p-2 text-[10px]">{row.celular}</td>
                                         <td className="border p-2"></td><td className="border p-2"></td><td className="border p-2"></td>
                                         <td className="border p-2"></td><td className="border p-2"></td><td className="border p-2"></td>
                                     </tr>
