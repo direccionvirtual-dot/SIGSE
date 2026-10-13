@@ -7816,11 +7816,23 @@ María López	maria.lopez	Z9y8x7" />
             const obtenerDatosSeguimiento = () => {
                 if(!activeSem) return;
                 
+                const paRemMarcados = Array.from({ length: db.info.numPA }, (_, index) =>
+                    listParticipantes.some(p => !!getPData(p.id).paRem?.[index + 1])
+                );
+                const actRemMarcados = Array.from({ length: db.info.numAct }, (_, index) =>
+                    listParticipantes.some(p => !!getPData(p.id).actRem?.[index + 1])
+                );
                 let headers = ['No', 'CURP', 'Nombre Completo', 'Usuario', 'Correo', 'Asesor', 'Grupo', 'Confirmacion'];
                 for(let i=1; i<=db.info.numSesiones; i++) headers.push(`Asistencia S${i}`);
                 headers.push('%');
-                for(let i=1; i<=db.info.numPA; i++) { headers.push(`PA ${i} Estado`); headers.push(`PA ${i} Calif`); }
-                for(let i=1; i<=db.info.numAct; i++) { headers.push(`ACT ${i} Estado`); headers.push(`ACT ${i} Calif`); }
+                for(let i=1; i<=db.info.numPA; i++) {
+                    headers.push(`PA ${i} Estado`, `PA ${i} Calif`);
+                    if (paRemMarcados[i - 1]) headers.push(`PA ${i} REM`);
+                }
+                for(let i=1; i<=db.info.numAct; i++) {
+                    headers.push(`ACT ${i} Estado`, `ACT ${i} Calif`);
+                    if (actRemMarcados[i - 1]) headers.push(`ACT ${i} REM`);
+                }
                 headers.push('Calif Final', 'Estatus', 'Encuesta Estatal', 'Encuesta Institucional', 'Mensaje Grupo', 'Mensaje Personal', 'Llamada', 'Observaciones');
 
                 const data = listParticipantes.map((p, idx) => {
@@ -7839,8 +7851,14 @@ María López	maria.lopez	Z9y8x7" />
                     }
                     const porcentajeAsis = db.info.numSesiones > 0 ? parseFloatSafe((Object.keys(getEffectiveAsis(p.id)).length / db.info.numSesiones * 100).toFixed(2)) : 0;
                     row.push(porcentajeAsis);
-                    for(let i=1; i<=db.info.numPA; i++) { row.push(d.paEst[i]?'Finalizado':'No Finalizado'); row.push(d.paCal[i]||0); }
-                    for(let i=1; i<=db.info.numAct; i++) { row.push(d.actEst[i]?'Finalizado':'No Finalizado'); row.push(d.actCal[i]||0); }
+                    for(let i=1; i<=db.info.numPA; i++) {
+                        row.push(d.paEst[i]?'Finalizado':'No Finalizado', d.paCal[i]||0);
+                        if (paRemMarcados[i - 1]) row.push(d.paRem?.[i] ? 'SI' : 'NO');
+                    }
+                    for(let i=1; i<=db.info.numAct; i++) {
+                        row.push(d.actEst[i]?'Finalizado':'No Finalizado', d.actCal[i]||0);
+                        if (actRemMarcados[i - 1]) row.push(d.actRem?.[i] ? 'SI' : 'NO');
+                    }
                     
                     row.push(calFinal, status, d.encEst?'SI':'NO', d.encInst?'SI':'NO', d.msgGrp?'SI':'NO', d.msgPer?'SI':'NO', d.llam?'SI':'NO', d.obs||'');
 
@@ -7855,7 +7873,20 @@ María López	maria.lopez	Z9y8x7" />
                 const contenido = obtenerDatosSeguimiento();
                 if (!contenido) return;
                 const { headers, data } = contenido;
-                const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
+                const estadoNombre = db.info.estado || ESTADOS.find(estado => estado.id === db.info.idEstado)?.nombre || db.info.idEstado || '';
+                const encabezado = [
+                    ['Estado', estadoNombre],
+                    ['Año', db.info.anio || ''],
+                    ['Participantes', data.length],
+                    ['Semana', activeSem.nombre || ''],
+                    ['Curso/Oferta', db.info.nombreCurso || ''],
+                    ['Periodo de Seguimiento', activeSem.fechas || ''],
+                    ['Fecha de cierre', activeSem.corteDate || ''],
+                    [],
+                    headers,
+                    ...data
+                ];
+                const ws = XLSX.utils.aoa_to_sheet(encabezado);
                 const wb = XLSX.utils.book_new();
                 XLSX.utils.book_append_sheet(wb, ws, "Seguimiento");
                 XLSX.writeFile(wb, `Seguimiento_${activeSem.nombre}_${db.info.siglas}.xlsx`);
