@@ -777,12 +777,12 @@
 
         const normalizeText = (text) => text ? text.toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim() : '';
         const formatImportedText = (text) => text ? text.toString().toUpperCase().trim() : '';
-        const getMoodleUsername = (curp) => curp ? curp.substring(0, 10).toLowerCase() : '';
+        const getMoodleUsername = (curp) => String(curp ?? '').trim().slice(0, 10).toLowerCase();
         const getMoodlePassword = (participant = {}, info = {}) => {
-            const mode = info.moodlePassMode || 'custom';
-            if (mode === 'curp') return (participant.curp || '').substring(0, 10).trim().toLowerCase();
-            if (mode === 'correo') return (participant.correo || '').split('@')[0].trim().toLowerCase();
-            return (info.moodlePass || '').trim();
+            const mode = String(info.moodlePassMode || 'custom').trim().toLowerCase();
+            if (mode === 'curp') return String(participant.curp ?? '').trim().slice(0, 10).toLowerCase();
+            if (mode === 'correo') return String(participant.correo ?? '').trim().split('@')[0].toLowerCase();
+            return String(info.moodlePass ?? '').trim();
         };
         const copyToClipboard = (text) => {
             const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select();
@@ -1058,9 +1058,6 @@
             );
         }
 
-        // ==========================================
-        // COMPONENTE PRINCIPAL
-        // ==========================================
         function App() {
             const [appView, setAppView] = useState('landing');
             const [basesDeDatos, setBasesDeDatos] = useFirestoreState('prodep_dbs', []);
@@ -1281,7 +1278,7 @@
                     'NO. CONSECUTIVO', 'CORREO ELECTRONICO', 'RFC', 'CURP', 'EDAD', 'SEXO', 
                     'NOMBRE', 'APELLIDO PATERNO', 'APELLIDO MATERNO', 'TELEFONO', 
                     'CLAVE CENTRO DE TRABAJO', 'SUBSISTEMA', 'MUNICIPIO', 'FUNCION', 
-                    'NIVEL EDUCATIVO', 'SERVICIO MODALIDAD', 'FOLIO', 'CURSO CONCLUIDO'
+                    'NIVEL EDUCATIVO', 'SERVICIO MODALIDAD', 'FOLIO', 'CURSO CONCLUIDO', 'GRUPO'
                 ];
                 const ws = XLSX.utils.aoa_to_sheet([headers]);
                 const wb = XLSX.utils.book_new();
@@ -1344,15 +1341,18 @@
                 const filas = filasOriginales.slice(headerIdx);
                 const cabeceras = filas[0].split('\t').map(c => normalizeText(c));
                 const findCol = (kw) => cabeceras.findIndex(cab => kw.some(k => cab.includes(k)));
+                const findExactCol = (label) => cabeceras.findIndex(cab => cab === normalizeText(label));
+                const exactGroupIndex = findExactCol('GRUPO');
+                const exactEmailIndex = findExactCol('CORREO ELECTRONICO');
 
                 const mapIndices = {
-                    no: findCol(['NO.', 'NUMERO', 'CONSECUTIVO']), correo: findCol(['CORREO', 'EMAIL']), rfc: findCol(['RFC']),
+                    no: findCol(['NO.', 'NUMERO', 'CONSECUTIVO']), correo: exactEmailIndex !== -1 ? exactEmailIndex : findCol(['CORREO', 'EMAIL']), rfc: findCol(['RFC']),
                     curp: findCol(['CURP']), edad: findCol(['EDAD']), sexo: findCol(['SEXO', 'GENERO']), nombre: findCol(['NOMBRE']),
                     paterno: findCol(['PATERNO', 'APELLIDO PATERNO']), materno: findCol(['MATERNO', 'APELLIDO MATERNO']),
                     telefono: findCol(['TELEFONO', 'CELULAR']), cct: findCol(['CLAVE CENTRO', 'CCT']), subsistema: findCol(['SUBSISTEMA']),
                     municipio: findCol(['MUNICIPIO']), funcion: findCol(['FUNCION']), nivel: findCol(['NIVEL EDUCATIVO', 'NIVEL']),
                     servicio: findCol(['SERVICIO', 'MODALIDAD']), folio: findCol(['FOLIO']), concluido: findCol(['CURSO CONCLUIDO', 'CONCLUIDO']),
-                    grupo: findCol(['GRUPO'])
+                    grupo: exactGroupIndex !== -1 ? exactGroupIndex : findCol(['GRUPO'])
                 };
 
                 const gruposPorNombre = new Map((gruposDisponibles || []).map(grupo => [normalizeText(grupo.nombre), grupo]));
@@ -2462,7 +2462,7 @@
                                             <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-[10px] text-slate-200">v11.6</div>
+                                        <div className="text-[10px] text-slate-200">v11.7</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -2470,7 +2470,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v11.6</div>
+                                        <div className="text-xs text-slate-200">v11.7</div>
                                     </div>
                                 )}
                             </div>
@@ -2557,7 +2557,7 @@
                         </header>
 
                         <main className="max-w-7xl mx-auto p-6 space-y-6">
-                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
                                 <button onClick={() => setAdminSection('admin')} className={`rounded-2xl p-4 shadow-sm border ${adminSection === 'admin' ? 'border-blue-600 bg-blue-50' : 'border-gray-200 bg-white'} transition-colors hover:border-blue-500 flex items-center justify-center gap-3 min-h-[90px]`}>
                                     <div className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-100 text-blue-600 shrink-0">
                                         <i className="fa-solid fa-user-shield text-lg"></i>
@@ -4189,15 +4189,46 @@ María López	maria.lopez	Z9y8x7" />
             const agregarParticipantesPegados = async () => {
                 if (!participantesProcesados.length) return;
                 const participantesConGrupoInvalido = participantesProcesados.filter(participante => participante.grupoNoEncontrado).length;
-                const nuevos = participantesProcesados.filter(nuevo => !nuevo.grupoNoEncontrado && !db.participantes.some(actual => {
+                const participantesValidos = participantesProcesados.filter(participante => !participante.grupoNoEncontrado);
+                const coincideParticipante = (actual, nuevo) => {
                     const mismoCurp = Boolean(actual.curp && nuevo.curp && actual.curp.trim().toLowerCase() === nuevo.curp.trim().toLowerCase());
                     const mismoCorreo = Boolean(actual.correo && nuevo.correo && actual.correo.trim().toLowerCase() === nuevo.correo.trim().toLowerCase());
                     return mismoCurp || mismoCorreo;
-                }));
-                const duplicados = participantesProcesados.length - participantesConGrupoInvalido - nuevos.length;
+                };
+                const duplicados = [...new Set(participantesValidos
+                    .map(nuevo => db.participantes.findIndex(actual => coincideParticipante(actual, nuevo)))
+                    .filter(indice => indice !== -1))];
+                const actualizarDuplicados = duplicados.length > 0 && window.confirm(
+                    `Se encontraron ${duplicados.length} alumno${duplicados.length === 1 ? '' : 's'} ya registrado${duplicados.length === 1 ? '' : 's'}.\n\n` +
+                    'Aceptar: actualizar sus datos con los campos que vienen llenos y conservar su seguimiento.\n' +
+                    'Cancelar: descartar esos duplicados y continuar con los alumnos nuevos.'
+                );
+                const actualizaciones = new Map();
+                const nuevos = [];
 
-                if (nuevos.length) {
-                    const saved = await onUpdate({ ...db, participantes: [...db.participantes, ...nuevos] });
+                participantesValidos.forEach(nuevo => {
+                    const indiceExistente = db.participantes.findIndex(actual => coincideParticipante(actual, nuevo));
+                    if (indiceExistente === -1) {
+                        nuevos.push(nuevo);
+                        return;
+                    }
+                    if (!actualizarDuplicados) return;
+
+                    const actual = actualizaciones.get(indiceExistente) || db.participantes[indiceExistente];
+                    const datosImportados = Object.fromEntries(
+                        Object.entries(nuevo).filter(([campo, valor]) =>
+                            !['id', 'grupoImportado', 'grupoNoEncontrado'].includes(campo) &&
+                            valor !== null && valor !== undefined && String(valor).trim() !== ''
+                        )
+                    );
+                    actualizaciones.set(indiceExistente, { ...actual, ...datosImportados, id: actual.id });
+                });
+
+                if (nuevos.length || actualizaciones.size) {
+                    const participantesActualizados = db.participantes.map((participante, index) =>
+                        actualizaciones.get(index) || participante
+                    );
+                    const saved = await onUpdate({ ...db, participantes: [...participantesActualizados, ...nuevos] });
                     if (saved === false) {
                         alert('Firebase no confirmó el guardado. Conservé la tabla pegada para que puedas intentar de nuevo.');
                         return;
@@ -4207,9 +4238,10 @@ María López	maria.lopez	Z9y8x7" />
                 setParticipantesProcesados([]);
                 const detalles = [
                     participantesConGrupoInvalido ? `${participantesConGrupoInvalido} con grupo no encontrado` : '',
-                    duplicados ? `${duplicados} duplicado(s)` : ''
+                    actualizarDuplicados && actualizaciones.size ? `Se actualizaron ${actualizaciones.size} alumno(s) existente(s)` : '',
+                    !actualizarDuplicados && duplicados.length ? `${duplicados.length} duplicado(s) descartado(s)` : ''
                 ].filter(Boolean);
-                alert(`Se han registrado ${nuevos.length} alumno${nuevos.length === 1 ? '' : 's'}.${detalles.length ? `\n\nNo se registraron: ${detalles.join(' y ')}.` : ''}${gruposNoEncontrados.length ? `\n\nGrupos no encontrados:\n${gruposNoEncontrados.join('\n')}` : ''}`);
+                alert(`Se agregaron ${nuevos.length} alumno(s) nuevo(s).${detalles.length ? `\n\n${detalles.join('\n')}.` : ''}${gruposNoEncontrados.length ? `\n\nGrupos no encontrados:\n${gruposNoEncontrados.join('\n')}` : ''}`);
             };
 
             const guardarAlumnoManual = async () => {
@@ -4319,7 +4351,13 @@ María López	maria.lopez	Z9y8x7" />
                         </div>
                     )}
 
-                    <p className="text-sm text-gray-500 mb-4">Pega aquí la información del Excel con encabezados para importar alumnos al curso actual. Incluye la columna GRUPO para asignarlos automáticamente.</p>
+                    <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-950">
+                        <p className="mb-2">Pega las filas de Excel incluyendo la primera fila de encabezados. Se reconocen estos nombres de columna:</p>
+                        <p className="font-mono text-xs leading-relaxed">
+                            NO. CONSECUTIVO, CORREO ELECTRONICO, RFC, CURP, EDAD, SEXO, NOMBRE, APELLIDO PATERNO, APELLIDO MATERNO, TELEFONO, CLAVE CENTRO DE TRABAJO, SUBSISTEMA, MUNICIPIO, FUNCION, NIVEL EDUCATIVO, SERVICIO MODALIDAD, FOLIO, CURSO CONCLUIDO, GRUPO
+                        </p>
+                        <p className="mt-2 text-xs text-blue-800">Cada fila debe incluir CURP o NOMBRE. Para asignar el grupo automáticamente, agrega la columna GRUPO y escribe el nombre tal como está registrado en el apartado de Grupos. Si hay varias columnas de correo, se usa CORREO ELECTRONICO.</p>
+                    </div>
                     <textarea className="flex-1 w-full p-4 border-dashed border-2 border-gray-300 rounded-xl bg-gray-50 text-xs font-mono outline-none focus:border-blue-500 focus:bg-white transition-colors" placeholder="Pegar aquí..." value={textoPegado} onChange={e=>procesarTextoPegado(e.target.value, db.grupos)}></textarea>
                     {gruposNoEncontrados.length > 0 && (
                         <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
