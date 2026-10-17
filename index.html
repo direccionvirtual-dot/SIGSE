@@ -1088,7 +1088,7 @@
             const [bulkSessionText, setBulkSessionText] = useState('');
             const [bulkSessionDay, setBulkSessionDay] = useState('');
             const [bulkSessionTime, setBulkSessionTime] = useState('');
-            const [editSessionModal, setEditSessionModal] = useState({ show: false, dbId: null, id: null, numero: 1, dia: '', horario: '', zoomAccountId: '', invitacion: '' });
+            const [editSessionModal, setEditSessionModal] = useState({ show: false, dbId: null, id: null, numero: 1, dia: '', horario: '', zoomAccountId: '', invitacion: '', editadaManualmente: false });
             const [expandedSessionIds, setExpandedSessionIds] = useState([]);
             const [expandedSessionHierarchy, setExpandedSessionHierarchy] = useState({});
             const [newAttendanceDbId, setNewAttendanceDbId] = useState('');
@@ -2022,13 +2022,13 @@
                 if (confirm('¿Eliminar esta sesión del control?')) setBasesDeDatos(prev => prev.map(db => db.id === dbId ? { ...db, controlSesiones: (db.controlSesiones || []).filter(session => session.id !== sessionId) } : db));
             };
 
-            const abrirEdicionSesion = (dbId, session) => setEditSessionModal({ show: true, dbId, id: session.id, numero: session.numero, dia: session.dia, horario: session.horario, zoomAccountId: session.zoomAccountId, invitacion: session.invitacion || '' });
+            const abrirEdicionSesion = (dbId, session) => setEditSessionModal({ show: true, dbId, id: session.id, numero: session.numero, dia: session.dia, horario: session.horario, zoomAccountId: session.zoomAccountId, invitacion: session.invitacion || '', editadaManualmente: !!session.editadaManualmente });
 
             const guardarEdicionSesion = () => {
                 const numero = parseInt(editSessionModal.numero, 10);
                 if (!numero || !editSessionModal.dia.trim() || !editSessionModal.horario.trim() || !editSessionModal.zoomAccountId) return alert('Completa número, día, horario y cuenta Zoom.');
-                setBasesDeDatos(prev => prev.map(db => db.id === editSessionModal.dbId ? { ...db, controlSesiones: (db.controlSesiones || []).map(session => session.id === editSessionModal.id ? { ...session, numero, dia: editSessionModal.dia.trim().toUpperCase(), horario: editSessionModal.horario.trim().toUpperCase(), zoomAccountId: editSessionModal.zoomAccountId, invitacion: editSessionModal.invitacion.trim(), editadaManualmente: (session.zoomAccountId !== editSessionModal.zoomAccountId) || session.editadaManualmente } : session) } : db));
-                setEditSessionModal({ show: false, dbId: null, id: null, numero: 1, dia: '', horario: '', zoomAccountId: '', invitacion: '' });
+                setBasesDeDatos(prev => prev.map(db => db.id === editSessionModal.dbId ? { ...db, controlSesiones: (db.controlSesiones || []).map(session => session.id === editSessionModal.id ? { ...session, numero, dia: editSessionModal.dia.trim().toUpperCase(), horario: editSessionModal.horario.trim().toUpperCase(), zoomAccountId: editSessionModal.zoomAccountId, invitacion: editSessionModal.invitacion.trim(), editadaManualmente: (session.zoomAccountId !== editSessionModal.zoomAccountId) || editSessionModal.editadaManualmente } : session) } : db));
+                setEditSessionModal({ show: false, dbId: null, id: null, numero: 1, dia: '', horario: '', zoomAccountId: '', invitacion: '', editadaManualmente: false });
             };
 
             const agregarAsistenciaControl = () => {
@@ -2462,7 +2462,7 @@
                                             <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-[10px] text-slate-200">v11.7</div>
+                                        <div className="text-[10px] text-slate-200">v11.9</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -2470,7 +2470,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v11.7</div>
+                                        <div className="text-xs text-slate-200">v11.9</div>
                                     </div>
                                 )}
                             </div>
@@ -3392,8 +3392,8 @@
                                                                     const cursoHeader = <tr key={cursoKey} className="bg-cyan-50"><td colSpan="4" className="p-0"><button type="button" onClick={() => setExpandedSessionHierarchy(prev => ({ ...prev, [cursoKey]: !cursoOpen }))} className="flex w-full items-center gap-2 p-3 pl-9 text-left font-black text-cyan-900"><i className={`fa-solid fa-chevron-${cursoOpen ? 'down' : 'right'} w-3`}></i><i className="fa-solid fa-book"></i>{curso}</button></td></tr>;
                                                                                                                                 return [
                                                                                                                                     cursoHeader,
-                                                                                                                                    <tr key={`${cursoKey}-table-head`} className="bg-amber-50 text-xs uppercase tracking-wide text-amber-800"><th className="p-3 pl-12">Grupo</th><th className="p-3">Asesor</th><th className="p-3">Carpeta</th><th className="p-3"></th></tr>,
-                                                                                                                                    ...(cursoOpen ? [
+                                                                                                                                            ...(cursoOpen ? [
+                                                                                                                                                <tr key={`${cursoKey}-table-head`} className="bg-amber-50 text-xs uppercase tracking-wide text-amber-800"><th className="p-3 pl-12">Grupo</th><th className="p-3">Asesor</th><th className="p-3">Carpeta</th><th className="p-3"></th></tr>,
                                                                                                                                         ...groups.flatMap(({ evidences }) => evidences.map(row => (
                                                                                                                                             <tr key={row.id} className="border-t border-amber-50 hover:bg-amber-50/40">
                                                                                                                                                 <td className="p-3 font-semibold text-slate-700">{row.grupo?.nombre || row.grupoNombre || 'Grupo no disponible'}</td>
@@ -3422,7 +3422,7 @@
                             <Modal show={editSessionModal.show} onClose={() => setEditSessionModal(prev => ({ ...prev, show: false }))} width="max-w-lg" ariaLabel="Editar sesión">
                                 <div className="w-full max-w-lg overflow-hidden rounded-3xl bg-white shadow-2xl" onClick={e => e.stopPropagation()}>
                                     <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5"><div><p className="text-xs font-bold uppercase tracking-wider text-cyan-600">Configuración Control</p><h3 className="text-xl font-bold text-slate-900">Editar sesión</h3></div><button onClick={() => setEditSessionModal(prev => ({ ...prev, show: false }))} className="flex h-9 w-9 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="Cerrar edición"><i className="fa-solid fa-xmark"></i></button></div>
-                                    <div className="grid grid-cols-1 gap-4 p-6 sm:grid-cols-2"><div><label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Sesión</label><input type="number" min="1" className="w-full rounded-xl border border-slate-200 p-3 outline-none focus:border-cyan-500" value={editSessionModal.numero} onChange={e => setEditSessionModal(prev => ({ ...prev, numero: e.target.value }))} /></div><div><label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Cuenta Zoom</label><select className="w-full rounded-xl border border-slate-200 bg-white p-3 outline-none focus:border-cyan-500" value={editSessionModal.zoomAccountId} onChange={e => setEditSessionModal(prev => ({ ...prev, zoomAccountId: e.target.value }))}><option value="">Seleccionar cuenta</option>{zoomAccounts.filter(account => account.estado !== 'inactiva').map(account => <option key={account.id} value={account.id}>{account.usuario}</option>)}</select></div><div><label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Día</label><input type="text" className="w-full rounded-xl border border-slate-200 p-3 uppercase outline-none focus:border-cyan-500" value={editSessionModal.dia} onChange={e => setEditSessionModal(prev => ({ ...prev, dia: e.target.value }))} /></div><div><label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Horario</label><input type="text" className="w-full rounded-xl border border-slate-200 p-3 uppercase outline-none focus:border-cyan-500" value={editSessionModal.horario} onChange={e => setEditSessionModal(prev => ({ ...prev, horario: e.target.value }))} /></div><div className="sm:col-span-2"><label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Invitación completa</label><textarea rows="7" className="w-full rounded-xl border border-slate-200 p-3 font-mono text-xs outline-none focus:border-cyan-500" value={editSessionModal.invitacion} onChange={e => setEditSessionModal(prev => ({ ...prev, invitacion: e.target.value }))}></textarea></div></div>
+                                    <div className="grid grid-cols-1 gap-4 p-6 sm:grid-cols-2"><div><label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Sesión</label><input type="number" min="1" className="w-full rounded-xl border border-slate-200 p-3 outline-none focus:border-cyan-500" value={editSessionModal.numero} onChange={e => setEditSessionModal(prev => ({ ...prev, numero: e.target.value }))} /></div><div><label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Cuenta Zoom</label><select className="w-full rounded-xl border border-slate-200 bg-white p-3 outline-none focus:border-cyan-500" value={editSessionModal.zoomAccountId} onChange={e => setEditSessionModal(prev => ({ ...prev, zoomAccountId: e.target.value }))}><option value="">Seleccionar cuenta</option>{zoomAccounts.filter(account => account.estado !== 'inactiva').map(account => <option key={account.id} value={account.id}>{account.usuario}</option>)}</select></div><div><label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Día</label><input type="text" className="w-full rounded-xl border border-slate-200 p-3 uppercase outline-none focus:border-cyan-500" value={editSessionModal.dia} onChange={e => setEditSessionModal(prev => ({ ...prev, dia: e.target.value }))} /></div><div><label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Horario</label><input type="text" className="w-full rounded-xl border border-slate-200 p-3 uppercase outline-none focus:border-cyan-500" value={editSessionModal.horario} onChange={e => setEditSessionModal(prev => ({ ...prev, horario: e.target.value }))} /></div><div className="sm:col-span-2"><label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Invitación completa</label><textarea rows="7" className="w-full rounded-xl border border-slate-200 p-3 font-mono text-xs outline-none focus:border-cyan-500" value={editSessionModal.invitacion} onChange={e => setEditSessionModal(prev => ({ ...prev, invitacion: e.target.value }))}></textarea></div><label className="sm:col-span-2 flex cursor-pointer items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4"><input type="checkbox" className="mt-1 h-4 w-4 accent-amber-600" checked={editSessionModal.editadaManualmente} onChange={e => setEditSessionModal(prev => ({ ...prev, editadaManualmente: e.target.checked }))} /><span><span className="block text-sm font-bold text-amber-950">Avisar al asesor que esta sesión tiene un cambio de cuenta Zoom</span><span className="mt-1 block text-xs text-amber-800">Mostrará la advertencia de cambio en la vista del asesor para esta sesión.</span></span></label></div>
                                     <div className="flex justify-end gap-3 border-t border-slate-100 bg-slate-50 px-6 py-4"><button onClick={() => setEditSessionModal(prev => ({ ...prev, show: false }))} className="rounded-xl px-5 py-3 font-semibold text-slate-500 hover:bg-slate-200">Cancelar</button><button onClick={guardarEdicionSesion} className="rounded-xl bg-slate-900 px-6 py-3 font-bold text-white hover:bg-cyan-700">Guardar cambios</button></div>
                                 </div>
                             </Modal>
@@ -5083,6 +5083,18 @@ María López	maria.lopez	Z9y8x7" />
                 setSelectedIds(prev => { const next = new Set(prev); next.delete(id); return next; });
                 setDuplicateGroups(prev => prev.map(group => ({ ...group, items: group.items.filter(p => p.id !== id) })).filter(group => group.items.length > 1));
             };
+            const deleteSelectedParticipants = () => {
+                const selectedParticipants = db.participantes.filter(p => selectedIds.has(p.id));
+                if (!selectedParticipants.length) return;
+                const count = selectedParticipants.length;
+                const alumnoLabel = count === 1 ? 'alumno seleccionado' : 'alumnos seleccionados';
+                if (!confirm(`¿Eliminar permanentemente a ${count} ${alumnoLabel}? Esta acción no se puede deshacer.`)) return;
+
+                const deletedIds = new Set(selectedParticipants.map(p => p.id));
+                onUpdate({ ...db, participantes: db.participantes.filter(p => !deletedIds.has(p.id)) });
+                setSelectedIds(new Set());
+                setDuplicateGroups(prev => prev.map(group => ({ ...group, items: group.items.filter(p => !deletedIds.has(p.id)) })).filter(group => group.items.length > 1));
+            };
             const funcionesUnicas = useMemo(() => [...new Set(db.participantes.map(p => p.funcion).filter(Boolean))].sort(), [db.participantes]);
             const nivelesUnicos = useMemo(() => [...new Set(db.participantes.map(p => p.nivel).filter(Boolean))].sort(), [db.participantes]);
 
@@ -5272,6 +5284,7 @@ María López	maria.lopez	Z9y8x7" />
                                 </select>
                                 <button onClick={aplicarGrupoMasivo} className="bg-green-500 hover:bg-green-400 text-white px-5 py-2 rounded-lg text-sm font-bold shadow transition-colors">Aplicar Grupo</button>
                                 <button onClick={quitarGrupoMasivo} className="bg-red-500 hover:bg-red-400 text-white px-5 py-2 rounded-lg text-sm font-bold shadow transition-colors">Quitar grupo</button>
+                                <button onClick={deleteSelectedParticipants} className="bg-red-700 hover:bg-red-800 text-white px-5 py-2 rounded-lg text-sm font-bold shadow transition-colors">Eliminar alumnos</button>
                             </div>
                         </div>
                     )}
@@ -7077,9 +7090,17 @@ María López	maria.lopez	Z9y8x7" />
             const [newSemanaName, setNewSemanaName] = useState('');
             const [editingSemanaId, setEditingSemanaId] = useState(null);
             const [editingSemanaName, setEditingSemanaName] = useState('');
+            const [showUnlockConfigModal, setShowUnlockConfigModal] = useState(false);
+            const [unlockConfigDraft, setUnlockConfigDraft] = useState({ scope: 'ALL', groupIds: [], until: '' });
+            const [currentTime, setCurrentTime] = useState(Date.now());
             const [showSeguimientoExportMenu, setShowSeguimientoExportMenu] = useState(false);
             const datosGlobalesCursoNombre = db.info?.nombreCurso || 'Curso sin nombre';
             const datosGlobalesCursoId = db.info?.idCurso || db.info?.siglas || 'Sin ID';
+
+            useEffect(() => {
+                const timer = setInterval(() => setCurrentTime(Date.now()), 30000);
+                return () => clearInterval(timer);
+            }, []);
 
             const exportarDatosGlobalesComoImagen = async () => {
                 const target = document.getElementById('datos-globales-popup-content');
@@ -7189,20 +7210,67 @@ María López	maria.lopez	Z9y8x7" />
             const umbralAcreditacion = Number(db.info?.acreditacion ?? 80);
             const activeSem = semanas.find(s => s.id === activeSemId);
 
-            let isLockedForAsesor = false;
-            if (activeSem) {
-                if (activeSem.lockStatus === 'LOCKED') isLockedForAsesor = true;
-                else if (activeSem.lockStatus === 'UNLOCKED') isLockedForAsesor = false;
-                else { 
-                    if (activeSem.corteDate) {
-                        const cutOff = new Date(activeSem.corteDate + 'T23:59:59'); 
-                        if (new Date() > cutOff) isLockedForAsesor = true;
-                    }
-                }
-            }
+            const isPastAutomaticCutoff = () => {
+                if (!activeSem?.corteDate) return false;
+                const cutOff = new Date(`${activeSem.corteDate}T23:59:59`);
+                return Date.now() > cutOff.getTime();
+            };
+            const unlockUntilTime = activeSem?.unlockUntil ? new Date(activeSem.unlockUntil).getTime() : null;
+            const isLockedForGroup = groupId => {
+                if (!activeSem || activeSem.lockStatus === 'LOCKED') return !!activeSem;
+                if (activeSem.lockStatus !== 'UNLOCKED') return isPastAutomaticCutoff();
 
+                if (unlockUntilTime === null || Number.isNaN(unlockUntilTime)) return true;
+                if (Date.now() > unlockUntilTime) return isPastAutomaticCutoff();
+
+                const selectedGroups = Array.isArray(activeSem.unlockGroupIds) ? activeSem.unlockGroupIds : [];
+                const groupIsIncluded = activeSem.unlockGroupScope !== 'SELECTED' || selectedGroups.includes(groupId);
+                return !groupIsIncluded && isPastAutomaticCutoff();
+            };
+            const canEditParticipant = participant => isAdmin || (
+                (isAsesor || isCoordinador) && !isLockedForGroup(participant?.grupoId)
+            );
+            const isLockedForAsesor = isAsesor && asesorGrupoId
+                ? isLockedForGroup(asesorGrupoId)
+                : isLockedForGroup(null);
             const canEditCore = isAdmin;
-            const canEditManual = isAdmin || ((isAsesor || isCoordinador) && !isLockedForAsesor);
+            const abrirConfiguracionDesbloqueo = () => {
+                const savedScope = activeSem?.unlockGroupScope === 'SELECTED' ? 'SELECTED' : 'ALL';
+                setUnlockConfigDraft({
+                    scope: savedScope,
+                    groupIds: Array.isArray(activeSem?.unlockGroupIds) ? activeSem.unlockGroupIds : [],
+                    until: activeSem?.unlockUntil || ''
+                });
+                setShowUnlockConfigModal(true);
+            };
+            const guardarConfiguracionDesbloqueo = () => {
+                if (!activeSem) return;
+                if (!unlockConfigDraft.until || Number.isNaN(new Date(unlockConfigDraft.until).getTime())) {
+                    alert('Selecciona una fecha y hora de cierre válidas.');
+                    return;
+                }
+                if (new Date(unlockConfigDraft.until).getTime() <= currentTime) {
+                    alert('La fecha y hora de cierre deben ser posteriores al momento actual.');
+                    return;
+                }
+                if (unlockConfigDraft.scope === 'SELECTED' && !unlockConfigDraft.groupIds.length) {
+                    alert('Selecciona al menos un grupo o elige todos los grupos.');
+                    return;
+                }
+
+                const semanasActualizadas = semanas.map(semana => semana.id === activeSem.id
+                    ? {
+                        ...semana,
+                        lockStatus: 'UNLOCKED',
+                        unlockGroupScope: unlockConfigDraft.scope,
+                        unlockGroupIds: unlockConfigDraft.scope === 'SELECTED' ? unlockConfigDraft.groupIds : [],
+                        unlockUntil: unlockConfigDraft.until
+                    }
+                    : semana
+                );
+                onUpdate({ ...db, semanasSeguimiento: semanasActualizadas });
+                setShowUnlockConfigModal(false);
+            };
             const mensajes = db.mensajes || [];
             const [showMessageModal, setShowMessageModal] = useState(false);
             const [showMessageDetailModal, setShowMessageDetailModal] = useState(false);
@@ -7232,6 +7300,9 @@ María López	maria.lopez	Z9y8x7" />
                 setSelectedMessageParticipantId(participantId);
                 setShowMessageDetailModal(true);
             };
+            const canEditSelectedParticipantMessages = canEditParticipant(
+                db.participantes.find(participant => participant.id === selectedMessageParticipantId)
+            );
 
             const abrirEdicionParticipante = participant => {
                 if (!isAdmin) return;
@@ -7278,6 +7349,9 @@ María López	maria.lopez	Z9y8x7" />
             };
 
             const actualizarMensaje = (mensajeId, changes) => {
+                const mensaje = mensajes.find(item => item.id === mensajeId);
+                const participant = db.participantes.find(item => item.id === mensaje?.participantId);
+                if (!canEditParticipant(participant)) return;
                 const updatedMessages = mensajes.map(mensaje => mensaje.id === mensajeId ? {
                     ...mensaje,
                     ...changes,
@@ -7693,7 +7767,7 @@ María López	maria.lopez	Z9y8x7" />
             }, [listParticipantes, aPA, aAct, getPData, calcFinal]);
 
             const updatePData = (pId, field, value, subField = null) => {
-                if (!activeSem) return Promise.resolve(false);
+                if (!activeSem || !canEditParticipant(db.participantes.find(participant => participant.id === pId))) return Promise.resolve(false);
                 return onUpdate(currentDb => {
                     const currentWeeks = currentDb.semanasSeguimiento || [];
                     const currentSem = currentWeeks.find(week => week.id === activeSem.id);
@@ -7735,8 +7809,9 @@ María López	maria.lopez	Z9y8x7" />
             };
 
             const toggleVisibleMessageGroups = () => {
-                if (!activeSem || !canEditManual || listParticipantes.length === 0) return;
-                const groupIds = [...new Set(listParticipantes.map(p => p.grupoId || 'NONE'))];
+                const editableParticipants = listParticipantes.filter(canEditParticipant);
+                if (!activeSem || editableParticipants.length === 0) return;
+                const groupIds = [...new Set(editableParticipants.map(p => p.grupoId || 'NONE'))];
                 const allMarked = groupIds.every(groupId => getGroupMsgStatus(groupId));
                 const nextValue = !allMarked;
                 const msgGrpGroups = { ...(activeSem.msgGrpGroups || {}) };
@@ -8020,12 +8095,32 @@ María López	maria.lopez	Z9y8x7" />
                                     <input type="date" disabled={!isAdmin} className="border border-gray-300 rounded-lg p-1.5 bg-gray-50 focus:bg-white outline-none focus:border-red-500 disabled:opacity-70 disabled:bg-gray-100" value={activeSem.corteDate || ''} onChange={e=>{ const ns=semanas.map(s=>s.id===activeSem.id?{...s,corteDate:e.target.value}:s); onUpdate({ ...db, semanasSeguimiento:ns }); }}/>
                                 </div>
                                 {isAdmin && (
-                                            <select className={`border border-gray-300 rounded-lg p-1.5 outline-none font-bold ${activeSem.lockStatus === 'UNLOCKED' ? 'bg-green-100 text-green-700 border-green-300' : activeSem.lockStatus === 'LOCKED' ? 'bg-red-100 text-red-700 border-red-300' : 'bg-gray-50 text-gray-600'}`} value={activeSem.lockStatus || 'AUTO'} onChange={e=>{ const ns=semanas.map(s=>s.id===activeSem.id?{...s,lockStatus:e.target.value}:s); onUpdate({ ...db, semanasSeguimiento:ns }); }}>
-                                                <option value="AUTO">Bloqueo Automático (Por Fecha)</option>
-                                                <option value="LOCKED">Forzar Bloqueo de Asesores Ahora</option>
-                                                <option value="UNLOCKED">Permitir Edición Extemporánea</option>
-                                            </select>
-                                        )}
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <select className={`border border-gray-300 rounded-lg p-1.5 outline-none font-bold ${activeSem.lockStatus === 'UNLOCKED' ? 'bg-green-100 text-green-700 border-green-300' : activeSem.lockStatus === 'LOCKED' ? 'bg-red-100 text-red-700 border-red-300' : 'bg-gray-50 text-gray-600'}`} value={activeSem.lockStatus || 'AUTO'} onChange={e => {
+                                            const status = e.target.value;
+                                            if (status === 'UNLOCKED') {
+                                                abrirConfiguracionDesbloqueo();
+                                                return;
+                                            }
+                                            const semanasActualizadas = semanas.map(semana => semana.id === activeSem.id ? { ...semana, lockStatus: status } : semana);
+                                            onUpdate({ ...db, semanasSeguimiento: semanasActualizadas });
+                                        }}>
+                                            <option value="AUTO">Bloqueo Automático (Por Fecha)</option>
+                                            <option value="LOCKED">Forzar Bloqueo de Asesores Ahora</option>
+                                            <option value="UNLOCKED">Permitir Edición Extemporánea</option>
+                                        </select>
+                                        {activeSem.lockStatus === 'UNLOCKED' && <button type="button" onClick={abrirConfiguracionDesbloqueo} className="rounded-lg border border-green-300 bg-green-50 px-2 py-1.5 font-bold text-green-800 hover:bg-green-100">Configurar permiso</button>}
+                                    </div>
+                                )}
+                                {isAdmin && activeSem.lockStatus === 'UNLOCKED' && (
+                                    <p className={`text-[11px] font-semibold ${unlockUntilTime === null || Number.isNaN(unlockUntilTime) || currentTime > unlockUntilTime ? 'text-red-700' : 'text-green-700'}`}>
+                                        {unlockUntilTime === null || Number.isNaN(unlockUntilTime)
+                                            ? 'Configura una fecha de cierre para habilitar; sin ella los asesores permanecen bloqueados.'
+                                            : currentTime > unlockUntilTime
+                                                ? 'Permiso vencido; aplica el bloqueo automático por fecha.'
+                                                : `Edición habilitada hasta ${new Date(unlockUntilTime).toLocaleString('es-MX')} · ${activeSem.unlockGroupScope === 'SELECTED' ? `${activeSem.unlockGroupIds?.length || 0} grupo(s)` : 'todos los grupos'}.`}
+                                    </p>
+                                )}
                                 </div>
                                 <div className="flex gap-3 items-center">
                                     <div className="relative">
@@ -8126,8 +8221,8 @@ María López	maria.lopez	Z9y8x7" />
                                                 <select className="w-full text-[10px] p-1 border border-gray-200 rounded" value={columnFilters.msgGrp} onChange={e => setColumnFilters(prev => ({ ...prev, msgGrp: e.target.value }))}>
                                                     <option value="ALL">Todos</option><option value="SI">SI</option><option value="NO">NO</option>
                                                 </select>
-                                                <button type="button" disabled={!canEditManual || listParticipantes.length === 0} onClick={toggleVisibleMessageGroups} className={`mt-1 block w-full whitespace-normal rounded border px-1 py-1 text-[9px] font-bold leading-tight ${canEditManual && listParticipantes.length > 0 ? 'border-yellow-300 bg-yellow-100 text-yellow-900 hover:bg-yellow-200' : 'cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400'}`} title="Marca o desmarca todos los grupos visibles con una sola actualización">
-                                                    <i className="fa-solid fa-layer-group mr-1"></i>{listParticipantes.length > 0 && listParticipantes.every(p => getGroupMsgStatus(p.grupoId)) ? 'Desmarcar grupos' : 'Mensaje Grupal'}
+                                                <button type="button" disabled={!listParticipantes.some(canEditParticipant)} onClick={toggleVisibleMessageGroups} className={`mt-1 block w-full whitespace-normal rounded border px-1 py-1 text-[9px] font-bold leading-tight ${listParticipantes.some(canEditParticipant) ? 'border-yellow-300 bg-yellow-100 text-yellow-900 hover:bg-yellow-200' : 'cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400'}`} title="Marca o desmarca los grupos editables visibles con una sola actualización">
+                                                    <i className="fa-solid fa-layer-group mr-1"></i>{listParticipantes.length > 0 && listParticipantes.filter(canEditParticipant).every(p => getGroupMsgStatus(p.grupoId)) ? 'Desmarcar grupos' : 'Mensaje Grupal'}
                                                 </button>
                                             </th>
                                             <th><select className="w-full text-[10px] p-1 border border-gray-200 rounded" value={columnFilters.msgPer} onChange={e => setColumnFilters(prev => ({ ...prev, msgPer: e.target.value }))}><option value="ALL">Todos</option><option value="SI">SI</option><option value="NO">NO</option></select></th>
@@ -8140,6 +8235,7 @@ María López	maria.lopez	Z9y8x7" />
                                             const d = getPData(p.id);
                                             const g = db.grupos.find(x=>x.id===p.grupoId)||{};
                                             const calFinal = calcFinal(p.id);
+                                            const canEditRow = canEditParticipant(p);
                                             const status = calFinal >= umbralAcreditacion ? 'ACREDITADO' : 'NO ACREDITADO';
                                             return (
                                                 <tr key={p.id} className="hover:bg-blue-50/50 group">
@@ -8181,7 +8277,7 @@ María López	maria.lopez	Z9y8x7" />
                                                                 <input type="number" disabled={!canEditCore} className={`w-full h-full min-h-[30px] text-center outline-none bg-transparent font-bold text-gray-700 transition-colors ${canEditCore?'focus:bg-white focus:ring-2 focus:ring-blue-500':'opacity-80 cursor-not-allowed'}`} value={d.paCal[i]!==undefined?d.paCal[i]:''} onBlur={e=>updatePData(p.id, 'paCal', parseFloatSafe(e.target.value), i)} onChange={e=>updatePData(p.id, 'paCal', e.target.value, i)} />
                                                             </td>
                                                             <td className="text-center p-0">
-                                                                <input type="checkbox" disabled={!canEditManual} checked={!!(d.paRem && d.paRem[i])} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>updatePData(p.id, 'paRem', e.target.checked, i)} className={`seguimiento-checkbox w-4 h-4 cursor-pointer ${!canEditManual?'opacity-50 cursor-not-allowed':''}`}/>
+                                                                <input type="checkbox" disabled={!canEditRow} checked={!!(d.paRem && d.paRem[i])} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>updatePData(p.id, 'paRem', e.target.checked, i)} className={`seguimiento-checkbox w-4 h-4 cursor-pointer ${!canEditRow?'opacity-50 cursor-not-allowed':''}`}/>
                                                             </td>
                                                         </React.Fragment>
                                                     ))}
@@ -8206,7 +8302,7 @@ María López	maria.lopez	Z9y8x7" />
                                                                 <input type="number" disabled={!canEditCore} className={`w-full h-full min-h-[30px] text-center outline-none bg-transparent font-bold text-gray-700 transition-colors ${canEditCore?'focus:bg-white focus:ring-2 focus:ring-blue-500':'opacity-80 cursor-not-allowed'}`} value={d.actCal[i]!==undefined?d.actCal[i]:''} onBlur={e=>updatePData(p.id, 'actCal', parseFloatSafe(e.target.value), i)} onChange={e=>updatePData(p.id, 'actCal', e.target.value, i)} />
                                                             </td>
                                                             <td className="text-center p-0">
-                                                                <input type="checkbox" disabled={!canEditManual} checked={!!(d.actRem && d.actRem[i])} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>updatePData(p.id, 'actRem', e.target.checked, i)} className={`seguimiento-checkbox w-4 h-4 cursor-pointer ${!canEditManual?'opacity-50 cursor-not-allowed':''}`}/>
+                                                                <input type="checkbox" disabled={!canEditRow} checked={!!(d.actRem && d.actRem[i])} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>updatePData(p.id, 'actRem', e.target.checked, i)} className={`seguimiento-checkbox w-4 h-4 cursor-pointer ${!canEditRow?'opacity-50 cursor-not-allowed':''}`}/>
                                                             </td>
                                                         </React.Fragment>
                                                     ))}
@@ -8218,15 +8314,15 @@ María López	maria.lopez	Z9y8x7" />
                                                     <td><input type="checkbox" disabled={!canEditCore} checked={d.encInst} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>updatePData(p.id, 'encInst', e.target.checked)} className={`seguimiento-checkbox w-4 h-4 ${!canEditCore?'opacity-50':''}`}/></td>
 
                                                     <td className="bg-yellow-50" title="MSJ GRUPO se controla por grupo"><input type="checkbox" disabled checked={getGroupMsgStatus(p.grupoId)} className="seguimiento-checkbox w-4 h-4 cursor-not-allowed opacity-70" /></td>
-                                                    <td className="bg-yellow-50"><input type="checkbox" disabled={!canEditManual} checked={d.msgPer} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>updatePData(p.id, 'msgPer', e.target.checked)} className={`seguimiento-checkbox w-4 h-4 ${!canEditManual?'opacity-50 cursor-not-allowed':''}`}/></td>
-                                                    <td className="bg-yellow-50"><input type="checkbox" disabled={!canEditManual} checked={d.llam} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>updatePData(p.id, 'llam', e.target.checked)} className={`seguimiento-checkbox w-4 h-4 ${!canEditManual?'opacity-50 cursor-not-allowed':''}`}/></td>
+                                                    <td className="bg-yellow-50"><input type="checkbox" disabled={!canEditRow} checked={d.msgPer} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>updatePData(p.id, 'msgPer', e.target.checked)} className={`seguimiento-checkbox w-4 h-4 ${!canEditRow?'opacity-50 cursor-not-allowed':''}`}/></td>
+                                                    <td className="bg-yellow-50"><input type="checkbox" disabled={!canEditRow} checked={d.llam} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>updatePData(p.id, 'llam', e.target.checked)} className={`seguimiento-checkbox w-4 h-4 ${!canEditRow?'opacity-50 cursor-not-allowed':''}`}/></td>
                                                     <td className="bg-yellow-50 p-0">
                                                         <div className="flex items-center gap-1 px-1">
                                                             <textarea
                                                                 rows={2}
-                                                                disabled={!canEditManual}
-                                                                className={`flex-1 min-h-[38px] px-3 py-2 text-xs outline-none bg-transparent border-none resize-y transition-colors ${canEditManual ? 'focus:bg-white focus:ring-2 focus:ring-yellow-500' : 'opacity-50 bg-gray-50 cursor-not-allowed'}`}
-                                                                placeholder={canEditManual ? 'Escribir observación...' : 'Bloqueado...'}
+                                                                disabled={!canEditRow}
+                                                                className={`flex-1 min-h-[38px] px-3 py-2 text-xs outline-none bg-transparent border-none resize-y transition-colors ${canEditRow ? 'focus:bg-white focus:ring-2 focus:ring-yellow-500' : 'opacity-50 bg-gray-50 cursor-not-allowed'}`}
+                                                                placeholder={canEditRow ? 'Escribir observación...' : 'Bloqueado...'}
                                                                 value={obsDrafts[p.id] ?? d.obs ?? ''}
                                                                 onChange={e => {
                                                                     const value = e.target.value;
@@ -8240,7 +8336,7 @@ María López	maria.lopez	Z9y8x7" />
                                                                     }
                                                                 }}
                                                             />
-                                                            {canEditManual && (savingObs[p.id] || String(obsDrafts[p.id] ?? d.obs ?? '') !== String(d.obs ?? '')) && (
+                                                            {canEditRow && (savingObs[p.id] || String(obsDrafts[p.id] ?? d.obs ?? '') !== String(d.obs ?? '')) && (
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => saveObservation(p.id, obsDrafts[p.id] ?? d.obs ?? '')}
@@ -8310,7 +8406,7 @@ María López	maria.lopez	Z9y8x7" />
                                                             {mensaje.atendidoPor && <p className="mt-1 text-[10px] opacity-75">Última actualización por {mensaje.atendidoPor}</p>}
                                                         </div>
                                                         <div className="flex shrink-0 flex-col items-end gap-2">
-                                                            <select value={mensaje.estado === 'atendido' ? 'atendido' : 'pendiente'} onChange={e => actualizarMensaje(mensaje.id, { estado: e.target.value })} disabled={!canEditManual} className="rounded-lg border border-current bg-white/70 px-2 py-1.5 text-[10px] font-black uppercase outline-none">
+                                                            <select value={mensaje.estado === 'atendido' ? 'atendido' : 'pendiente'} onChange={e => actualizarMensaje(mensaje.id, { estado: e.target.value })} disabled={!canEditSelectedParticipantMessages} className="rounded-lg border border-current bg-white/70 px-2 py-1.5 text-[10px] font-black uppercase outline-none">
                                                                 <option value="pendiente">Pendiente</option>
                                                                 <option value="atendido">Atendido</option>
                                                             </select>
@@ -8528,6 +8624,59 @@ María López	maria.lopez	Z9y8x7" />
                                 )}
                             </div>
                         </div>
+                    )}
+
+                    {showUnlockConfigModal && isAdmin && activeSem && (
+                        <Modal show={showUnlockConfigModal} onClose={() => setShowUnlockConfigModal(false)} width="max-w-xl" ariaLabel="Configurar edición extemporánea">
+                            <div className="w-full max-w-xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+                                <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5">
+                                    <div>
+                                        <p className="text-xs font-bold uppercase tracking-wider text-green-700">Permiso temporal · {activeSem.nombre}</p>
+                                        <h3 className="mt-1 text-xl font-black text-slate-900">Configurar edición extemporánea</h3>
+                                    </div>
+                                    <button type="button" onClick={() => setShowUnlockConfigModal(false)} className="text-slate-400 hover:text-slate-700" aria-label="Cerrar configuración"><i className="fa-solid fa-xmark text-xl"></i></button>
+                                </div>
+                                <div className="space-y-5 p-6">
+                                    <fieldset className="space-y-3">
+                                        <legend className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-600">¿A qué grupos se permitirá editar?</legend>
+                                        <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-green-200 bg-green-50 p-3">
+                                            <input type="radio" name="unlock-group-scope" checked={unlockConfigDraft.scope === 'ALL'} onChange={() => setUnlockConfigDraft(prev => ({ ...prev, scope: 'ALL' }))} />
+                                            <span className="text-sm font-bold text-green-900">Todos los grupos del curso</span>
+                                        </label>
+                                        <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                            <input type="radio" name="unlock-group-scope" checked={unlockConfigDraft.scope === 'SELECTED'} onChange={() => setUnlockConfigDraft(prev => ({ ...prev, scope: 'SELECTED' }))} />
+                                            <span className="text-sm font-bold text-slate-800">Solo los grupos que seleccione</span>
+                                        </label>
+                                        {unlockConfigDraft.scope === 'SELECTED' && (
+                                            <div className="max-h-52 space-y-1 overflow-y-auto rounded-xl border border-slate-200 p-3">
+                                                {(db.grupos || []).map(group => (
+                                                    <label key={group.id} className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 text-sm hover:bg-slate-50">
+                                                        <input type="checkbox" checked={unlockConfigDraft.groupIds.includes(group.id)} onChange={event => setUnlockConfigDraft(prev => ({
+                                                            ...prev,
+                                                            groupIds: event.target.checked
+                                                                ? [...new Set([...prev.groupIds, group.id])]
+                                                                : prev.groupIds.filter(id => id !== group.id)
+                                                        }))} />
+                                                        <span className="font-semibold text-slate-700">{group.nombre}</span>
+                                                        <span className="ml-auto text-xs text-slate-500">{group.asesor || 'Sin asesor'}</span>
+                                                    </label>
+                                                ))}
+                                                {!db.grupos?.length && <p className="p-2 text-sm text-slate-500">Este curso no tiene grupos registrados.</p>}
+                                            </div>
+                                        )}
+                                    </fieldset>
+                                    <div>
+                                        <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-slate-600">Fecha y hora de cierre</label>
+                                        <input type="datetime-local" required value={unlockConfigDraft.until} onChange={event => setUnlockConfigDraft(prev => ({ ...prev, until: event.target.value }))} className="w-full rounded-xl border border-slate-200 p-3 text-sm outline-none focus:border-green-500 focus:ring-2 focus:ring-green-100" />
+                                        <p className="mt-2 text-xs text-slate-500">Al llegar al cierre, termina el permiso y vuelve a aplicarse el bloqueo automático según la fecha de corte de esta semana.</p>
+                                    </div>
+                                </div>
+                                <div className="flex justify-end gap-3 border-t border-slate-100 bg-slate-50 px-6 py-4">
+                                    <button type="button" onClick={() => setShowUnlockConfigModal(false)} className="rounded-xl px-5 py-2.5 font-semibold text-slate-600 hover:bg-slate-200">Cancelar</button>
+                                    <button type="button" onClick={guardarConfiguracionDesbloqueo} className="rounded-xl bg-green-700 px-5 py-2.5 font-bold text-white hover:bg-green-800">Guardar permiso</button>
+                                </div>
+                            </div>
+                        </Modal>
                     )}
 
                     {showNewSemanaModal && (
