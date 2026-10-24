@@ -1199,7 +1199,7 @@
                 if (!dbId) return;
                 setRecentOfferIds(prev => {
                     const filtered = prev.filter(id => id !== dbId);
-                    const next = [dbId, ...filtered].slice(0, 5);
+                    const next = [dbId, ...filtered].slice(0, 6);
                     try {
                         window.localStorage.setItem('prodep_recent_offers', JSON.stringify(next));
                     } catch (error) {}
@@ -1211,7 +1211,7 @@
                 recentOfferIds
                     .map(id => basesDeDatos.find(db => db.id === id))
                     .filter(Boolean)
-                    .slice(0, 5),
+                    .slice(0, 6),
                 [basesDeDatos, recentOfferIds]
             );
 
@@ -2462,7 +2462,7 @@
                                             <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-[10px] text-slate-200">v11.9</div>
+                                        <div className="text-[10px] text-slate-200">v12.0</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -2470,7 +2470,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v11.9</div>
+                                        <div className="text-xs text-slate-200">v12.0</div>
                                     </div>
                                 )}
                             </div>
@@ -4064,8 +4064,6 @@ María López	maria.lopez	Z9y8x7" />
                                 const sessionCopyText = [
                                     `${group?.nombre || 'Grupo'} · Sesión ${session.numero}`,
                                     `${session.dia} · ${session.horario}`,
-                                    account?.usuario ? `Usuario Zoom: ${account.usuario}` : '',
-                                    account?.password ? `Contraseña Zoom: ${account.password}` : '',
                                     session.invitacion || ''
                                 ].filter(Boolean).join('\n');
                                 return (
@@ -4081,7 +4079,7 @@ María López	maria.lopez	Z9y8x7" />
                                             </div>
                                             <div className="flex items-center gap-3">
                                                 <span className="rounded-lg bg-white px-3 py-2 text-xs font-bold text-slate-600">{session.dia} · {session.horario}</span>
-                                                <button type="button" onClick={() => copyToClipboard(sessionCopyText)} className="rounded-full p-2 text-cyan-600 hover:bg-cyan-50 hover:text-cyan-800" title="Copiar información de la sesión" aria-label={`Copiar información de la sesión ${session.numero}`}>
+                                                <button type="button" onClick={() => copyToClipboard(sessionCopyText)} className="rounded-full p-2 text-cyan-600 hover:bg-cyan-50 hover:text-cyan-800" title="Copiar invitación para compartir con el grupo" aria-label={`Copiar invitación para compartir de la sesión ${session.numero}`}>
                                                     <i className="fa-solid fa-copy"></i>
                                                 </button>
                                                 <button onClick={() => setExpandedIds(prev => prev.includes(session.id) ? prev.filter(x => x !== session.id) : [...prev, session.id])} className="rounded-full p-2 text-slate-600 hover:bg-slate-100">
@@ -5599,7 +5597,11 @@ María López	maria.lopez	Z9y8x7" />
                     const src = sd.asis;
                     if (!src) return;
                     if (Array.isArray(src)) {
-                        src.forEach((v, idx) => { if (v === true || v === 'true') res[idx+1] = true; });
+                        src.forEach((v, idx) => {
+                            if (v === true || v === false || v === 'true' || v === 'false') {
+                                res[idx + 1] = v === true || v === 'true';
+                            }
+                        });
                     } else {
                         Object.keys(src).forEach(key => {
                             const digits = (key || '').toString().replace(/[^0-9]/g, '');
@@ -7086,6 +7088,9 @@ María López	maria.lopez	Z9y8x7" />
             const [importTarget, setImportTarget] = useState('masivo-estados'); 
             const [importText, setImportText] = useState('');
             const [showDatosGlobalesModal, setShowDatosGlobalesModal] = useState(false);
+            const [isEditingAttendance, setIsEditingAttendance] = useState(false);
+            const [attendanceDraft, setAttendanceDraft] = useState({});
+            const [isSavingAttendance, setIsSavingAttendance] = useState(false);
             const [showNewSemanaModal, setShowNewSemanaModal] = useState(false);
             const [newSemanaName, setNewSemanaName] = useState('');
             const [editingSemanaId, setEditingSemanaId] = useState(null);
@@ -7455,14 +7460,15 @@ María López	maria.lopez	Z9y8x7" />
                     const currentValue = getPData(participantId)?.obs || '';
                     return String(value ?? '') !== String(currentValue ?? '');
                 });
+                const hasPendingAttendance = Object.keys(attendanceDraft).length > 0;
                 const handleBeforeUnload = event => {
-                    if (!pendingObs) return;
+                    if (!pendingObs && !hasPendingAttendance) return;
                     event.preventDefault();
                     event.returnValue = '';
                 };
                 window.addEventListener('beforeunload', handleBeforeUnload);
                 return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-            }, [obsDrafts, getPData]);
+            }, [obsDrafts, attendanceDraft, getPData]);
 
             const getEffectiveAsis = useCallback((pId) => {
                 if (!activeSem) return {};
@@ -7499,12 +7505,60 @@ María López	maria.lopez	Z9y8x7" />
                             const digits = (key || '').toString().replace(/[^0-9]/g, '');
                             const k = digits ? parseInt(digits,10) : parseInt(key,10);
                             const val = src[key];
-                            if (val === true || val === 'true') res[k] = true;
+                            if (val === true || val === false || val === 'true' || val === 'false') {
+                                res[k] = val === true || val === 'true';
+                            }
                         });
                     }
                 });
                 return res;
             }, [activeSem, semanas]);
+
+            const guardarAsistencias = async () => {
+                if (!activeSem || isSavingAttendance) return;
+                const changes = Object.entries(attendanceDraft);
+                if (!changes.length) {
+                    setAttendanceDraft({});
+                    setIsEditingAttendance(false);
+                    return;
+                }
+
+                setIsSavingAttendance(true);
+                try {
+                    const saved = await onUpdate(currentDb => {
+                        const currentWeeks = currentDb.semanasSeguimiento || [];
+                        const currentSem = currentWeeks.find(week => week.id === activeSem.id);
+                        if (!currentSem) throw new Error('La semana seleccionada ya no está disponible.');
+
+                        const newData = { ...(currentSem.data || {}) };
+                        changes.forEach(([participantId, sessionChanges]) => {
+                            const participantData = { ...(newData[participantId] || {}) };
+                            const attendance = { ...(participantData.asis || {}) };
+                            Object.entries(sessionChanges).forEach(([sessionId, attended]) => {
+                                attendance[sessionId] = attended;
+                            });
+                            newData[participantId] = normalizeSeguimientoParticipant({ ...participantData, asis: attendance });
+                        });
+
+                        return {
+                            semanasSeguimiento: currentWeeks.map(week => week.id === activeSem.id
+                                ? { ...week, data: newData }
+                                : week)
+                        };
+                    });
+                    if (saved === false) {
+                        alert('No se pudieron guardar las asistencias. Intenta nuevamente.');
+                        return;
+                    }
+                    setAttendanceDraft({});
+                    setIsEditingAttendance(false);
+                } catch (error) {
+                    console.error('Error al guardar las asistencias:', error);
+                    alert('No se pudieron guardar las asistencias. Intenta nuevamente.');
+                } finally {
+                    setIsSavingAttendance(false);
+                }
+            };
 
             const getEffectiveConf = useCallback((pId) => {
                 if (!activeSem) return false;
@@ -7585,7 +7639,7 @@ María López	maria.lopez	Z9y8x7" />
                     return d.actRem[idx] ? 'SI' : 'NO';
                 }
                 if (key === 'calif') return calcFinal(p.id);
-                if (key === 'porcentajeAsis') return db.info.numSesiones > 0 ? parseFloatSafe((Object.keys(getEffectiveAsis(p.id)).length / db.info.numSesiones * 100).toFixed(2)) : 0;
+                if (key === 'porcentajeAsis') return db.info.numSesiones > 0 ? parseFloatSafe((Object.values(getEffectiveAsis(p.id)).filter(Boolean).length / db.info.numSesiones * 100).toFixed(2)) : 0;
                 if (key === 'estatus') return status;
                 if (key === 'estatal') return d.encEst ? 'SI' : 'NO';
                 if (key === 'institucion') return d.encInst ? 'SI' : 'NO';
@@ -7682,7 +7736,7 @@ María López	maria.lopez	Z9y8x7" />
                             if (matrixFilterAvz === 'PA_INC') return Array.from({length: db.info.numPA}, (_,i)=>i+1).some(i => !d.paEst[i]);
                             if (matrixFilterAvz === 'ACT_INC') return Array.from({length: db.info.numAct}, (_,i)=>i+1).some(i => !d.actEst[i]);
                             if (matrixFilterAvz === 'ASIS_INC') {
-                                const eff = getEffectiveAsis(p.id);
+                                const eff = { ...getEffectiveAsis(p.id), ...(attendanceDraft[p.id] || {}) };
                                 return Array.from({length: db.info.numSesiones}, (_,i)=>i+1).some(i => !eff[i]);
                             }
                             if (matrixFilterAvz === 'ENC_INC') return !d.encEst || !d.encInst;
@@ -7962,7 +8016,7 @@ María López	maria.lopez	Z9y8x7" />
                         const eff = getEffectiveAsis(p.id);
                         row.push(eff[i] ? 'SI' : 'NO');
                     }
-                    const porcentajeAsis = db.info.numSesiones > 0 ? parseFloatSafe((Object.keys(getEffectiveAsis(p.id)).length / db.info.numSesiones * 100).toFixed(2)) : 0;
+                    const porcentajeAsis = db.info.numSesiones > 0 ? parseFloatSafe((Object.values(getEffectiveAsis(p.id)).filter(Boolean).length / db.info.numSesiones * 100).toFixed(2)) : 0;
                     row.push(porcentajeAsis);
                     for(let i=1; i<=db.info.numPA; i++) {
                         row.push(d.paEst[i]?'Finalizado':'No Finalizado', d.paCal[i]||0);
@@ -8063,7 +8117,7 @@ María López	maria.lopez	Z9y8x7" />
                     <div className="bg-gray-800 text-white p-4 flex justify-between items-center no-print">
                         <div className="flex items-center gap-2">
                             <span className="font-bold text-gray-300 uppercase tracking-wider text-xs mr-2">Ciclo Operativo:</span>
-                            <select className="bg-gray-700 text-white border border-gray-600 rounded-lg p-2 text-sm outline-none focus:border-cyan-400 font-bold" value={activeSemId} onChange={e=>setActiveSemId(e.target.value)}>
+                            <select disabled={isEditingAttendance} className="bg-gray-700 text-white border border-gray-600 rounded-lg p-2 text-sm outline-none focus:border-cyan-400 font-bold disabled:opacity-60" value={activeSemId} onChange={e=>setActiveSemId(e.target.value)}>
                                 {semanas.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
                             </select>
                             {isAdmin && <button onClick={renameSemana} className="text-gray-400 hover:text-white px-2 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 ml-1" title="Renombrar Semana"><i className="fa-solid fa-pen text-xs"></i></button>}
@@ -8140,6 +8194,13 @@ María López	maria.lopez	Z9y8x7" />
                                     </div>
                                     {isAdmin && <button onClick={()=>setShowImport(true)} className="bg-green-600 text-white px-3 py-1.5 text-xs rounded-lg font-bold shadow-md flex items-center gap-2 hover:bg-green-700 transition-transform active:scale-95"><i className="fa-solid fa-upload"></i> Carga Datos</button>}
                                     <button onClick={() => resetColumnFilters()} className="text-blue-600 hover:underline font-bold ml-2">Limpiar Filtros</button>
+                                    {isAsesor && <button
+                                        type="button"
+                                        disabled={(!isEditingAttendance && (!asesorGrupoId || isLockedForAsesor)) || isSavingAttendance}
+                                        onClick={() => isEditingAttendance ? guardarAsistencias() : (setAttendanceDraft({}), setIsEditingAttendance(true))}
+                                        className={`font-bold ml-2 ${isEditingAttendance ? 'text-green-700 hover:text-green-800' : 'text-blue-600 hover:text-blue-700'} disabled:opacity-50 disabled:cursor-not-allowed`}
+                                        title={!isEditingAttendance && !asesorGrupoId ? 'No hay un grupo asignado a este asesor.' : !isEditingAttendance && isLockedForAsesor ? 'La edición está bloqueada por la fecha de corte.' : ''}
+                                    >{isSavingAttendance ? 'Guardando asistencias...' : isEditingAttendance ? 'Guardar asistencias' : 'Edición de Asistencias'}</button>}
                                     <button onClick={() => setShowDatosGlobalesModal(true)} className="text-blue-600 hover:underline font-bold ml-2">Datos Globales</button>
                                 </div>
                         </div>
@@ -8236,6 +8297,8 @@ María López	maria.lopez	Z9y8x7" />
                                             const g = db.grupos.find(x=>x.id===p.grupoId)||{};
                                             const calFinal = calcFinal(p.id);
                                             const canEditRow = canEditParticipant(p);
+                                            const attendance = { ...getEffectiveAsis(p.id), ...(attendanceDraft[p.id] || {}) };
+                                            const canEditAttendance = canEditCore || (isAsesor && isEditingAttendance && p.grupoId === asesorGrupoId && canEditRow);
                                             const status = calFinal >= umbralAcreditacion ? 'ACREDITADO' : 'NO ACREDITADO';
                                             return (
                                                 <tr key={p.id} className="hover:bg-blue-50/50 group">
@@ -8253,9 +8316,11 @@ María López	maria.lopez	Z9y8x7" />
                                                     
                                                     <td><input type="checkbox" disabled={!canEditCore} checked={getEffectiveConf(p.id)} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>updatePData(p.id, 'conf', e.target.checked)} className={`seguimiento-checkbox w-4 h-4 ${!canEditCore?'opacity-50':''}`} /></td>
                                                     
-                                                    {aSes.map(i => <td key={`as-${i}`}><input type="checkbox" disabled={!canEditCore} checked={!!getEffectiveAsis(p.id)[i]} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>updatePData(p.id, 'asis', e.target.checked, i)} className={`seguimiento-checkbox w-4 h-4 ${!canEditCore?'opacity-50':''}`}/></td>)}
+                                                    {aSes.map(i => <td key={`as-${i}`}><input type="checkbox" disabled={!canEditAttendance} checked={!!attendance[i]} onKeyDown={moveSeguimientoCheckboxFocus} onChange={e=>isAsesor && isEditingAttendance
+                                                        ? setAttendanceDraft(prev => ({ ...prev, [p.id]: { ...(prev[p.id] || {}), [i]: e.target.checked } }))
+                                                        : updatePData(p.id, 'asis', e.target.checked, i)} className={`seguimiento-checkbox w-4 h-4 ${!canEditAttendance?'opacity-50':''}`}/></td>)}
                                                     
-                                                    <td className="font-bold text-center bg-cyan-100 text-cyan-900">{db.info.numSesiones > 0 ? formatPercent((Object.keys(getEffectiveAsis(p.id)).length / db.info.numSesiones * 100).toFixed(2)) : '0%'}</td>
+                                                    <td className="font-bold text-center bg-cyan-100 text-cyan-900">{db.info.numSesiones > 0 ? formatPercent((Object.values(attendance).filter(Boolean).length / db.info.numSesiones * 100).toFixed(2)) : '0%'}</td>
                                                     
                                                     {aPA.map(i => (
                                                         <React.Fragment key={`pa-${i}`}>
