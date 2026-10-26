@@ -2462,7 +2462,7 @@
                                             <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-[10px] text-slate-200">v12.0</div>
+                                        <div className="text-[10px] text-slate-200">v12.3</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -2470,7 +2470,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v12.0</div>
+                                        <div className="text-xs text-slate-200">v12.3</div>
                                     </div>
                                 )}
                             </div>
@@ -3004,7 +3004,16 @@
                             )}
 
                             {adminSection === 'students' && (
-                                <BusquedaGlobalAlumnos basesDeDatos={basesDeDatos} setBasesDeDatos={setBasesDeDatos} onBack={() => setAdminSection('menu')} />
+                                <BusquedaGlobalAlumnos
+                                    basesDeDatos={basesDeDatos}
+                                    setBasesDeDatos={setBasesDeDatos}
+                                    onBack={() => setAdminSection('menu')}
+                                    onSelectCourse={db => {
+                                        setActiveDbId(db.id);
+                                        trackRecentOffer(db.id);
+                                        setAppView('workspace');
+                                    }}
+                                />
                             )}
 
                             {adminSection === 'offers-search' && (
@@ -4899,13 +4908,95 @@ María López	maria.lopez	Z9y8x7" />
             );
         }
 
-        function BusquedaGlobalAlumnos({ basesDeDatos, setBasesDeDatos, onBack }) {
+        function BusquedaGlobalAlumnos({ basesDeDatos, setBasesDeDatos, onBack, onSelectCourse }) {
             const [search, setSearch] = useState('');
             const [editingStudent, setEditingStudent] = useState(null);
             const [editData, setEditData] = useState(null);
+            const [viewingStudent, setViewingStudent] = useState(null);
+            const [multipleCoursesOnly, setMultipleCoursesOnly] = useState(false);
+
+            const getIdentity = participant => ({
+                strong: [...new Set([
+                    participant.curp,
+                    participant.correo,
+                    participant.usuario,
+                    getMoodleUsername(participant.curp)
+                ].map(value => normalizeText(value || '')).filter(Boolean))],
+                phones: [...new Set([participant.telefono, participant.celular]
+                    .map(value => String(value || '').replace(/\D/g, ''))
+                    .filter(Boolean))],
+                name: normalizeText(participant.completo || `${participant.paterno || ''} ${participant.materno || ''} ${participant.nombre || ''}`)
+            });
+            const matchesSameStudent = (left, right) => {
+                const leftIdentity = getIdentity(left);
+                const rightIdentity = getIdentity(right);
+                if (leftIdentity.strong.some(value => rightIdentity.strong.includes(value))) return true;
+                if (leftIdentity.strong.length && rightIdentity.strong.length) return false;
+                if (leftIdentity.phones.some(value => rightIdentity.phones.includes(value))) return true;
+                return !leftIdentity.strong.length && !rightIdentity.strong.length
+                    && !leftIdentity.phones.length && !rightIdentity.phones.length
+                    && leftIdentity.name && leftIdentity.name === rightIdentity.name;
+            };
+
+            const multipleCourseStudents = useMemo(() => {
+                if (!multipleCoursesOnly) return [];
+                const groups = [];
+                const identityIndex = new Map();
+
+                const indexIdentity = (identity, group) => {
+                    const keys = [
+                        ...identity.strong.map(value => `strong:${value}`),
+                        ...identity.phones.map(value => `phone:${value}`),
+                        ...(!identity.strong.length && !identity.phones.length && identity.name ? [`name:${identity.name}`] : [])
+                    ];
+                    keys.forEach(key => {
+                        const matches = identityIndex.get(key) || [];
+                        if (!matches.includes(group)) matches.push(group);
+                        identityIndex.set(key, matches);
+                    });
+                };
+
+                basesDeDatos.forEach(db => {
+                    const groupById = new Map((db.grupos || []).map(group => [group.id, group]));
+                    (db.participantes || []).forEach(participant => {
+                        const identity = getIdentity(participant);
+                        const keys = [
+                            ...identity.strong.map(value => `strong:${value}`),
+                            ...identity.phones.map(value => `phone:${value}`),
+                            ...(!identity.strong.length && !identity.phones.length && identity.name ? [`name:${identity.name}`] : [])
+                        ];
+                        const candidates = [...new Set(keys.flatMap(key => identityIndex.get(key) || []))]
+                            .sort((a, b) => a.order - b.order);
+                        const existing = candidates.find(group => matchesSameStudent(group.participant, participant));
+                        const enrollment = { db, participant, group: groupById.get(participant.grupoId) };
+
+                        if (existing) {
+                            if (!existing.courses.some(course => course.db.id === db.id)) existing.courses.push(enrollment);
+                            indexIdentity(identity, existing);
+                        } else {
+                            const newGroup = { ...enrollment, courses: [enrollment], order: groups.length };
+                            groups.push(newGroup);
+                            indexIdentity(identity, newGroup);
+                        }
+                    });
+                });
+                return groups.filter(group => group.courses.length >= 2);
+            }, [basesDeDatos, multipleCoursesOnly]);
 
             const resultados = useMemo(() => {
                 const query = normalizeText(search.trim());
+                if (multipleCoursesOnly) {
+                    return multipleCourseStudents
+                        .filter(student => !query || student.courses.some(({ db, participant, group }) => {
+                            const searchable = [
+                                participant.completo, participant.nombre, participant.paterno, participant.materno,
+                                participant.curp, participant.usuario, getMoodleUsername(participant.curp), participant.correo, participant.telefono, participant.celular,
+                                group?.nombre, db.info?.nombreCurso, db.info?.siglas, db.info?.idCurso
+                            ].map(value => normalizeText(value || '')).join(' ');
+                            return searchable.includes(query);
+                        }))
+                        .sort((a, b) => normalizeText(a.participant.completo || '').localeCompare(normalizeText(b.participant.completo || ''), 'es', { sensitivity: 'base' }));
+                }
                 if (!query) return [];
 
                 return basesDeDatos.flatMap(db => (db.participantes || []).map(participant => {
@@ -4918,7 +5009,111 @@ María López	maria.lopez	Z9y8x7" />
 
                     return searchable.includes(query) ? { db, participant, group } : null;
                 }).filter(Boolean)).sort((a, b) => normalizeText(a.participant.completo || '').localeCompare(normalizeText(b.participant.completo || ''), 'es', { sensitivity: 'base' }));
-            }, [basesDeDatos, search]);
+            }, [basesDeDatos, multipleCourseStudents, multipleCoursesOnly, search]);
+
+            const descargarAlumnosMultiplesXLSX = () => {
+                if (typeof XLSX === 'undefined') return alert('Librería de Excel cargando... Intenta nuevamente en un segundo.');
+                const rows = resultados.map(student => {
+                    const states = [...new Map(student.courses.map(({ db }) => {
+                        const stateName = db.info?.estado
+                            || ESTADOS.find(state => state.id === db.info?.idEstado)?.nombre
+                            || db.info?.idEstado
+                            || '-';
+                        return [normalizeText(stateName), stateName];
+                    })).values()];
+                    const courses = student.courses.map(({ db, group }) => {
+                        const stateCode = db.info?.idEstado
+                            || ESTADOS.find(state => normalizeText(state.nombre) === normalizeText(db.info?.estado || ''))?.id
+                            || db.info?.estado
+                            || '-';
+                        return `${db.info?.siglas || 'Sin siglas'} - ${stateCode} - ${group?.nombre || 'Sin grupo'}`;
+                    });
+                    return [
+                        student.participant.completo || `${student.participant.paterno || ''} ${student.participant.materno || ''} ${student.participant.nombre || ''}`.trim(),
+                        student.participant.usuario || getMoodleUsername(student.participant.curp) || '',
+                        student.participant.correo || '',
+                        student.participant.curp || '',
+                        student.participant.telefono || student.participant.celular || '',
+                        courses.length,
+                        states.join(' | '),
+                        courses.join(' | ')
+                    ];
+                });
+                const headers = ['Alumno', 'Usuario', 'Correo', 'CURP', 'Teléfono', 'Cursos inscritos', 'Estado', 'Curso - Estado - Grupo'];
+                const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+                worksheet['!cols'] = [{ wch: 36 }, { wch: 18 }, { wch: 32 }, { wch: 20 }, { wch: 16 }, { wch: 16 }, { wch: 24 }, { wch: 80 }];
+                const workbook = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(workbook, worksheet, 'Inscritos en varios cursos');
+                XLSX.writeFile(workbook, `Alumnos_Multiples_Cursos_${new Date().toISOString().slice(0, 10)}.xlsx`);
+            };
+
+            const resumenInscripciones = useMemo(() => {
+                if (!viewingStudent) return [];
+
+                const sourceDb = basesDeDatos.find(db => db.id === viewingStudent.dbId);
+                const sourceParticipant = sourceDb?.participantes?.find(participant => participant.id === viewingStudent.participantId);
+                if (!sourceParticipant) return [];
+
+                const fields = ['asis', 'paEst', 'paCal', 'actEst', 'actCal'];
+
+                return basesDeDatos.flatMap(db => (db.participantes || [])
+                    .filter(candidate => {
+                        if (db.id === sourceDb.id && candidate.id === sourceParticipant.id) return true;
+                        return matchesSameStudent(sourceParticipant, candidate);
+                    })
+                    .map(participant => {
+
+                    const data = { asis: {}, paEst: {}, paCal: {}, actEst: {}, actCal: {} };
+                    const weeks = (db.semanasSeguimiento || []).map((week, index) => {
+                        let timestamp = 0;
+                        const idParts = String(week?.id || '').split('-');
+                        if (idParts.length > 1) timestamp = parseInt(idParts[1], 10) || 0;
+                        if (!timestamp && week?.corteDate) timestamp = Date.parse(week.corteDate) || 0;
+                        return { week, index, timestamp };
+                    }).sort((a, b) => (a.timestamp - b.timestamp) || (a.index - b.index));
+
+                    weeks.forEach(({ week }) => {
+                        const record = week?.data?.[participant.id];
+                        if (!record) return;
+                        fields.forEach(field => {
+                            const values = record[field];
+                            if (!values || typeof values !== 'object') return;
+                            const entries = Array.isArray(values) ? values.map((value, index) => [index + 1, value]) : Object.entries(values);
+                            entries.forEach(([rawKey, rawValue]) => {
+                                const digits = String(rawKey).replace(/[^0-9]/g, '');
+                                const key = digits ? parseInt(digits, 10) : parseInt(rawKey, 10);
+                                if (!Number.isFinite(key)) return;
+                                data[field][key] = field === 'paCal' || field === 'actCal'
+                                    ? parseFloatSafe(rawValue)
+                                    : rawValue === true || rawValue === 'true';
+                            });
+                        });
+                    });
+
+                    const products = [
+                        ...Array.from({ length: Number(db.info?.numPA || 0) }, (_, index) => ({ label: `PA ${index + 1}`, submitted: data.paEst[index + 1], grade: parseFloatSafe(data.paCal[index + 1]) })),
+                        ...Array.from({ length: Number(db.info?.numAct || 0) }, (_, index) => ({ label: `ACT ${index + 1}`, submitted: data.actEst[index + 1], grade: parseFloatSafe(data.actCal[index + 1]) }))
+                    ];
+                    const attendanceTotal = Number(db.info?.numSesiones || 0);
+                    const attendedSessions = Array.from({ length: attendanceTotal }, (_, index) => index + 1)
+                        .filter(session => data.asis[session]);
+                    const finalGrade = calcularCalificacionFinal(data, db.info);
+                    const threshold = Number(db.info?.acreditacion ?? 80);
+
+                    return {
+                        db,
+                        participant,
+                        group: (db.grupos || []).find(item => item.id === participant.grupoId),
+                        products,
+                        submittedCount: products.filter(product => product.submitted).length,
+                        gradedCount: products.filter(product => product.grade > 0).length,
+                        finalGrade,
+                        status: finalGrade >= threshold ? 'ACREDITADO' : 'NO ACREDITADO',
+                        attendedSessions,
+                        attendanceTotal
+                    };
+                }));
+            }, [basesDeDatos, viewingStudent]);
 
             const openEdit = result => {
                 setEditingStudent({ dbId: result.db.id, participantId: result.participant.id });
@@ -4949,7 +5144,13 @@ María López	maria.lopez	Z9y8x7" />
                             <h2 className="text-xl font-bold text-gray-900"><i className="fa-solid fa-user-magnifying-glass text-emerald-600 mr-2"></i>Búsqueda Global de Alumnos</h2>
                             <p className="text-sm text-gray-600 mt-1">Busca en todos los cursos por nombre, CURP, correo, teléfono, grupo o curso.</p>
                         </div>
-                        <button onClick={onBack} className="self-start md:self-auto bg-gray-100 text-gray-700 px-4 py-2 rounded-xl hover:bg-gray-200 transition-colors"><i className="fa-solid fa-arrow-left mr-2"></i>Volver al menú</button>
+                        <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
+                            <button type="button" onClick={() => setMultipleCoursesOnly(value => !value)} aria-pressed={multipleCoursesOnly} className={`rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${multipleCoursesOnly ? 'bg-emerald-700 text-white hover:bg-emerald-800' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'}`}>
+                                <i className="fa-solid fa-users mr-2"></i>Inscritos en 2+ cursos{multipleCoursesOnly ? ` (${multipleCourseStudents.length})` : ''}
+                            </button>
+                            {multipleCoursesOnly && <button type="button" onClick={descargarAlumnosMultiplesXLSX} className="rounded-xl bg-green-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-green-800"><i className="fa-solid fa-file-excel mr-2"></i>Descargar Excel</button>}
+                            <button onClick={onBack} className="rounded-xl bg-gray-100 px-4 py-2 text-gray-700 transition-colors hover:bg-gray-200"><i className="fa-solid fa-arrow-left mr-2"></i>Volver al menú</button>
+                        </div>
                     </div>
 
                     <div className="p-6 bg-emerald-50 border-b border-emerald-100">
@@ -4961,10 +5162,10 @@ María López	maria.lopez	Z9y8x7" />
                     </div>
 
                     <div className="p-6">
-                        {!search.trim() ? (
+                        {!search.trim() && !multipleCoursesOnly ? (
                             <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center text-sm text-gray-500">Escribe un dato del alumno para comenzar la búsqueda.</div>
                         ) : resultados.length === 0 ? (
-                            <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center text-sm text-gray-500">No se encontraron alumnos con ese criterio.</div>
+                            <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center text-sm text-gray-500">{multipleCoursesOnly ? 'No se encontraron alumnos inscritos en 2 o más cursos con ese criterio.' : 'No se encontraron alumnos con ese criterio.'}</div>
                         ) : (
                             <div className="overflow-x-auto">
                                 <table className="w-full text-left text-sm">
@@ -4974,11 +5175,11 @@ María López	maria.lopez	Z9y8x7" />
                                     <tbody>
                                         {resultados.map(result => (
                                             <tr key={`${result.db.id}-${result.participant.id}`} className="border-b border-gray-100 hover:bg-emerald-50/50">
-                                                <td className="p-3 font-semibold text-gray-800">{result.participant.completo || `${result.participant.nombre || ''} ${result.participant.paterno || ''}`.trim() || 'Sin nombre'}</td>
+                                                <td className="p-3 font-semibold text-gray-800"><button type="button" onClick={() => setViewingStudent({ dbId: result.db.id, participantId: result.participant.id })} className="text-left text-emerald-800 hover:text-emerald-950 hover:underline focus:outline-none focus:ring-2 focus:ring-emerald-500 rounded">{result.participant.completo || `${result.participant.nombre || ''} ${result.participant.paterno || ''}`.trim() || 'Sin nombre'}</button></td>
                                                 <td className="p-3 font-mono text-xs text-gray-700">{result.participant.usuario || getMoodleUsername(result.participant.curp) || '-'}</td>
                                                 <td className="p-3 text-xs text-gray-600">{result.participant.correo || '-'}</td>
                                                 <td className="p-3 text-xs text-gray-600"><div>{result.participant.curp || 'Sin CURP'}</div><div>{result.participant.telefono || result.participant.celular || '-'}</div></td>
-                                                <td className="p-3 text-gray-700"><div className="font-semibold">{result.db.info?.siglas || 'Sin sigla'}</div><div className="text-xs text-gray-500">{result.db.info?.nombreCurso || 'Curso sin nombre'}</div></td>
+                                                <td className="p-3 text-gray-700">{result.courses ? <div className="flex flex-col items-start gap-1">{result.courses.map(course => { const stateCode = course.db.info?.idEstado || ESTADOS.find(state => normalizeText(state.nombre) === normalizeText(course.db.info?.estado || ''))?.id || course.db.info?.estado || '-'; return <button key={course.db.id} type="button" onClick={() => onSelectCourse(course.db)} className="text-left font-semibold text-cyan-700 hover:text-cyan-900 hover:underline">{course.db.info?.siglas || 'Sin sigla'} <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs font-bold text-slate-600">{stateCode}</span><span className="font-normal text-gray-500">· {course.group?.nombre || 'Sin grupo'}</span></button>; })}</div> : <><button type="button" onClick={() => onSelectCourse(result.db)} className="text-left font-semibold text-cyan-700 hover:text-cyan-900 hover:underline focus:outline-none focus:ring-2 focus:ring-cyan-500 rounded">{result.db.info?.siglas || 'Sin sigla'}</button><div className="text-xs text-gray-500">{result.db.info?.nombreCurso || 'Curso sin nombre'}</div></>}</td>
                                                 <td className="p-3 text-gray-600">{result.group?.nombre || 'Sin grupo'}</td>
                                                 <td className="p-3 text-center"><button onClick={() => openEdit(result)} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-700 transition-colors"><i className="fa-solid fa-pen mr-1"></i>Editar</button></td>
                                             </tr>
@@ -4988,6 +5189,43 @@ María López	maria.lopez	Z9y8x7" />
                             </div>
                         )}
                     </div>
+
+                    {viewingStudent && (
+                        <Modal show={Boolean(viewingStudent)} onClose={() => setViewingStudent(null)} width="max-w-5xl" ariaLabel="Resumen del alumno">
+                            <div className="max-h-[90vh] overflow-auto rounded-3xl bg-white p-6 shadow-2xl">
+                                <div className="mb-5 flex items-start justify-between gap-4">
+                                    <div>
+                                        <h3 className="text-xl font-bold text-gray-900">Resumen del alumno</h3>
+                                        <p className="mt-1 text-sm text-gray-600">{resumenInscripciones[0]?.participant.completo || 'Sin nombre'} · {resumenInscripciones.length} curso(s) inscrito(s)</p>
+                                    </div>
+                                    <button type="button" onClick={() => setViewingStudent(null)} className="text-gray-500 hover:text-gray-900" aria-label="Cerrar resumen"><i className="fa-solid fa-xmark text-lg"></i></button>
+                                </div>
+                                <div className="space-y-4">
+                                    {resumenInscripciones.map(({ db, participant, group, products, submittedCount, gradedCount, finalGrade, status, attendedSessions, attendanceTotal }) => (
+                                        <section key={`${db.id}-${participant.id}`} className="rounded-xl border border-gray-200 p-4">
+                                            <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                                                <div>
+                                                    <button type="button" onClick={() => onSelectCourse(db)} className="font-bold text-cyan-700 hover:underline">{db.info?.siglas || 'Curso sin siglas'}</button>
+                                                    <p className="text-sm text-gray-600">{db.info?.nombreCurso || 'Curso sin nombre'} · {group?.nombre || 'Sin grupo'}</p>
+                                                </div>
+                                                <span className={`rounded-full px-3 py-1 text-xs font-bold ${status === 'ACREDITADO' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>{status}</span>
+                                            </div>
+                                            <div className="grid gap-3 sm:grid-cols-3">
+                                                <div className="rounded-lg bg-gray-50 p-3"><div className="text-xs font-semibold uppercase text-gray-500">Productos entregados</div><div className="mt-1 font-bold text-gray-900">{submittedCount} de {products.length} · {gradedCount} calificados</div></div>
+                                                <div className="rounded-lg bg-gray-50 p-3"><div className="text-xs font-semibold uppercase text-gray-500">Calificación final</div><div className="mt-1 font-bold text-gray-900">{finalGrade.toFixed(2)}</div></div>
+                                                <div className="rounded-lg bg-gray-50 p-3"><div className="text-xs font-semibold uppercase text-gray-500">Asistencias</div><div className="mt-1 font-bold text-gray-900">{attendedSessions.length} de {attendanceTotal}{attendanceTotal ? ` (${Math.round(attendedSessions.length / attendanceTotal * 100)}%)` : ''}</div></div>
+                                            </div>
+                                            <div className="mt-3 grid gap-3 md:grid-cols-2">
+                                                <div><h4 className="mb-1 text-xs font-bold uppercase text-gray-500">Entregas y calificaciones</h4><div className="flex flex-wrap gap-2">{products.map(product => <span key={product.label} className="rounded-lg bg-gray-100 px-2.5 py-1 text-xs text-gray-700">{product.label}: {product.submitted ? (product.grade > 0 ? product.grade : 'Por revisar') : 'Pendiente'}</span>)}</div></div>
+                                                <div><h4 className="mb-1 text-xs font-bold uppercase text-gray-500">Asistencia por sesión</h4><div className="flex flex-wrap gap-2">{Array.from({ length: attendanceTotal }, (_, index) => index + 1).map(session => <span key={session} className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${attendedSessions.includes(session) ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-600'}`}>S{session}: {attendedSessions.includes(session) ? 'Sí' : 'No'}</span>)}</div></div>
+                                            </div>
+                                        </section>
+                                    ))}
+                                    {!resumenInscripciones.length && <p className="rounded-lg bg-gray-50 p-4 text-sm text-gray-600">No se encontraron inscripciones para este alumno.</p>}
+                                </div>
+                            </div>
+                        </Modal>
+                    )}
 
                     {editingStudent && editData && (
                         <Modal show={Boolean(editingStudent && editData)} onClose={closeEdit} width="max-w-3xl" ariaLabel="Editar alumno desde búsqueda global">
@@ -6415,7 +6653,7 @@ María López	maria.lopez	Z9y8x7" />
                             deliveries,
                             reviewing,
                             graded,
-                            missing: groupParticipants.length - graded
+                            missing: groupParticipants.length - deliveries
                         };
                     })
                 });
