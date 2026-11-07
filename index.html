@@ -2462,7 +2462,7 @@
                                             <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-[10px] text-slate-200">v12.3</div>
+                                        <div className="text-[10px] text-slate-200">v12.5</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -2470,7 +2470,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v12.3</div>
+                                        <div className="text-xs text-slate-200">v12.5</div>
                                     </div>
                                 )}
                             </div>
@@ -3888,6 +3888,7 @@ María López	maria.lopez	Z9y8x7" />
             const isCoordinador = isPersonal && currentModoPersonal.roleInProject === 'coordinador';
             const isManager = isPersonal && currentModoPersonal.roleInProject === 'manager';
             const isAdmin = !isPersonal || isManager;
+            const canViewFollowupInfo = !isPersonal || isCoordinador;
             const canEditStaff = !isPersonal;
 
             const coordinadoresDelCurso = (db.info.coordinadorIds || (db.info.coordinadorId ? [db.info.coordinadorId] : []))
@@ -4019,7 +4020,7 @@ María López	maria.lopez	Z9y8x7" />
                         {tab === 'grupos' && isAdmin && <TabGrupos db={db} onUpdate={onUpdate} asesoresGlobales={asesoresGlobales} onEditPersonal={canEditStaff ? abrirEdicionPersonalWorkspace : null} />}
                         {tab === 'datos' && isAdmin && <TabDatos db={db} onUpdate={onUpdate} />}
                         {tab === 'exportar' && (isAdmin || isCoordinador || isAsesor) && <TabExportar db={db} onUpdate={onUpdate} isAdmin={isAdmin} isCoordinador={isCoordinador} isAsesor={isAsesor} asesorGrupoId={currentModoPersonal.grupoId} asesoresGlobales={asesoresGlobales} />}
-                        {tab === 'seguimiento' && <TabSeguimiento db={db} onUpdate={onUpdate} asesoresGlobales={asesoresGlobales} isAsesor={isAsesor} isCoordinador={isCoordinador} isAdmin={isAdmin} asesorGrupoId={currentModoPersonal.grupoId} personalName={currentModoPersonal.personalName} onEditPersonal={canEditStaff ? abrirEdicionPersonalWorkspace : null} />}
+                        {tab === 'seguimiento' && <TabSeguimiento db={db} onUpdate={onUpdate} asesoresGlobales={asesoresGlobales} isAsesor={isAsesor} isCoordinador={isCoordinador} isAdmin={isAdmin} canViewFollowupInfo={canViewFollowupInfo} asesorGrupoId={currentModoPersonal.grupoId} personalName={currentModoPersonal.personalName} onEditPersonal={canEditStaff ? abrirEdicionPersonalWorkspace : null} />}
                         {tab === 'control' && isPersonal && <ControlConsulta db={db} zoomAccounts={zoomAccounts} isAsesor={isAsesor} grupoId={currentModoPersonal.grupoId} />}
                     </div>
                     {editingWorkspacePersonal && workspacePersonalData && (
@@ -6574,6 +6575,465 @@ María López	maria.lopez	Z9y8x7" />
             );
         }
 
+        function SubTabInformacionSeguimiento({ db, activeSem, getPData, getEffectiveConf }) {
+            const [showDownloadMenu, setShowDownloadMenu] = useState(false);
+            const participantes = Array.isArray(db?.participantes) ? db.participantes : [];
+            const grupos = Array.isArray(db?.grupos) ? db.grupos : [];
+            const participantesConDatos = participantes.map(participante => ({
+                participante,
+                datos: getPData(participante.id),
+                confirmado: getEffectiveConf(participante.id)
+            }));
+            const actividades = [
+                ...Array.from({ length: Number(db.info?.numPA) || 0 }, (_, index) => ({ tipo: 'pa', indice: index + 1, nombre: `PA${index + 1}` })),
+                ...Array.from({ length: Number(db.info?.numAct) || 0 }, (_, index) => ({ tipo: 'act', indice: index + 1, nombre: `ACT${index + 1}` }))
+            ];
+            const entregasPorActividad = actividades.map(actividad => ({
+                ...actividad,
+                entregas: participantesConDatos.filter(({ datos }) => {
+                    return actividad.tipo === 'pa' ? datos.paEst[actividad.indice] : datos.actEst[actividad.indice];
+                }).length
+            }));
+            const actividadPrincipal = entregasPorActividad.reduce(
+                (principal, actividad) => !principal || actividad.entregas > principal.entregas ? actividad : principal,
+                null
+            );
+            const porcentajePrincipal = participantes.length && actividadPrincipal
+                ? Math.round((actividadPrincipal.entregas / participantes.length) * 100)
+                : 0;
+            const gruposConParticipantes = grupos.map(grupo => ({
+                id: grupo.id,
+                nombre: grupo.nombre || 'Grupo sin nombre',
+                participantes: participantesConDatos.filter(({ participante }) => participante.grupoId === grupo.id)
+            }));
+            const sinGrupo = participantesConDatos.filter(({ participante }) => !participante.grupoId);
+            if (sinGrupo.length) gruposConParticipantes.push({ id: 'NONE', nombre: 'Sin grupo asignado', participantes: sinGrupo });
+
+            const estado = ESTADOS.find(item => item.id === db.info?.idEstado)?.id || db.info?.idEstado || db.info?.estado || '';
+            const nombreCurso = [db.info?.siglas, estado, db.info?.anio].filter(Boolean).join(' ');
+            const productosAprendizaje = [1, 2].filter(indice => indice <= (Number(db.info?.numPA) || 0));
+            const groupReportRows = gruposConParticipantes.map(grupo => {
+                const inscritos = grupo.participantes.length;
+                const participantesActivos = actividadPrincipal
+                    ? grupo.participantes.filter(({ datos }) => actividadPrincipal.tipo === 'pa'
+                        ? datos.paEst[actividadPrincipal.indice]
+                        : datos.actEst[actividadPrincipal.indice])
+                    : [];
+                return {
+                    nombre: grupo.nombre,
+                    inscritos,
+                    activos: participantesActivos.length,
+                    porcentaje: inscritos ? Math.round((participantesActivos.length / inscritos) * 100) : 0,
+                    observaciones: inscritos - participantesActivos.length,
+                    faltantesPA: Object.fromEntries(productosAprendizaje.map(indice => [
+                        indice,
+                        participantesActivos.filter(({ datos }) => !datos.paEst[indice]).length
+                    ])),
+                    faltantesConfirmacion: participantesActivos.filter(({ confirmado }) => !confirmado).length
+                };
+            });
+            const safeFilePart = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+            const reportFileBase = `Informacion_Seguimiento_${safeFilePart(db.info?.siglas || 'curso')}_${safeFilePart(estado || 'estado')}_${safeFilePart(db.info?.anio || new Date().getFullYear())}_${safeFilePart(activeSem?.nombre || 'semana')}`;
+
+            const copiarBloqueComoImagen = async event => {
+                const target = event.currentTarget.closest('[data-copy-block]');
+                if (!target) return alert('No se encontró el bloque que se desea copiar.');
+                if (!window.html2canvas) return alert('La captura de imagen no está disponible en este navegador.');
+
+                try {
+                    const canvas = await window.html2canvas(target, {
+                        backgroundColor: '#ffffff',
+                        scale: 2,
+                        useCORS: true,
+                        scrollX: 0,
+                        scrollY: 0,
+                        ignoreElements: element => element.classList?.contains('no-print')
+                    });
+                    const blob = await new Promise((resolve, reject) => {
+                        canvas.toBlob(imageBlob => imageBlob ? resolve(imageBlob) : reject(new Error('No se pudo generar la imagen.')), 'image/png');
+                    });
+                    if (navigator.clipboard?.write && typeof ClipboardItem !== 'undefined') {
+                        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+                        alert('El bloque se copió como imagen al portapapeles.');
+                    } else {
+                        const link = document.createElement('a');
+                        link.href = canvas.toDataURL('image/png');
+                        link.download = `${reportFileBase}_${safeFilePart(target.dataset.copyBlock)}.png`;
+                        link.click();
+                        alert('La imagen se descargó porque este navegador no permite copiarla directamente.');
+                    }
+                } catch (error) {
+                    console.error('Error al copiar el bloque del reporte:', error);
+                    alert('No se pudo copiar el bloque como imagen. Revisa los permisos del portapapeles e intenta nuevamente.');
+                }
+            };
+
+            const exportarReporteExcel = () => {
+                if (typeof XLSX === 'undefined') return alert('La librería de Excel no está disponible en este navegador.');
+                const headers = [
+                    'Grupo',
+                    'Inscritos',
+                    'Participantes activos',
+                    'Porcentaje de participantes activos',
+                    'Registros de observación / Inactivos',
+                    ...productosAprendizaje.map(indice => `Faltantes de entrega PA${indice}`),
+                    'Faltantes de confirmar participación'
+                ];
+                const rows = groupReportRows.map(grupo => [
+                    grupo.nombre,
+                    grupo.inscritos,
+                    grupo.activos,
+                    `${grupo.porcentaje}%`,
+                    grupo.observaciones,
+                    ...productosAprendizaje.map(indice => grupo.faltantesPA[indice]),
+                    grupo.faltantesConfirmacion
+                ]);
+                const worksheet = XLSX.utils.aoa_to_sheet([
+                    [`Interpretación de datos - ${nombreCurso || db.info?.nombreCurso || 'Curso'}`],
+                    [`Semana: ${activeSem.nombre}`],
+                    [`Actividad con más entregas: ${actividadPrincipal?.nombre || 'Sin actividades configuradas'}`],
+                    [`Entregas: ${actividadPrincipal?.entregas || 0}`, `Porcentaje: ${porcentajePrincipal}%`],
+                    [],
+                    headers,
+                    ...rows
+                ]);
+                worksheet['!cols'] = headers.map((header, index) => ({
+                    wch: Math.max(header.length, ...rows.map(row => String(row[index] ?? '').length), 12) + 2
+                }));
+                const workbook = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(workbook, worksheet, 'Seguimiento');
+                XLSX.writeFile(workbook, `${reportFileBase}.xlsx`);
+            };
+
+            const exportarReportePdf = async () => {
+                const target = document.getElementById('informacion-seguimiento-contenido');
+                if (!target) return alert('No se pudo preparar la exportación del PDF del reporte.');
+                if (!window.html2canvas || !window.jspdf) return alert('La exportación a PDF no está disponible en este navegador.');
+
+                const originalWidth = target.style.width;
+                const originalMaxWidth = target.style.maxWidth;
+                try {
+                    target.style.width = '900px';
+                    target.style.maxWidth = '900px';
+                    const { jsPDF } = window.jspdf;
+                    const pdf = new jsPDF('p', 'pt', 'a4');
+                    const pageWidth = pdf.internal.pageSize.getWidth();
+                    const pageHeight = pdf.internal.pageSize.getHeight();
+                    const margin = 24;
+                    const contentWidth = pageWidth - (margin * 2);
+                    const firstPageHeaderOffset = 110;
+                    const regularPageHeaderOffset = 24;
+                    const ofertaNombre = String(db.info?.nombreCurso || db.info?.siglas || 'OFERTA').trim();
+                    const ofertaId = String(db.info?.idCurso || db.info?.siglas || 'SIN ID').trim();
+                    const semanaHeader = String(activeSem?.nombre || 'Semana activa').replace(/^SEMANA\s*/i, '').trim();
+                    const semanaHeaderDisplay = semanaHeader.match(/^\d+\.?\s*/)
+                        ? `Semana ${semanaHeader}`
+                        : semanaHeader;
+                    const institucionNombre = 'ESCUELA DE POSGRADOS EN EDUCACIÓN VIRTUAL S.C.';
+                    const maxTitleWidth = pageWidth - (margin * 2) - 24;
+                    const lineHeight = 1.15;
+                    const buildWrappedHeader = (text, maxWidth, startSize) => {
+                        let fontSize = startSize;
+                        let lines = [];
+                        while (fontSize >= 11) {
+                            pdf.setFontSize(fontSize);
+                            const candidate = [];
+                            let current = '';
+                            for (const word of text.split(/\s+/).filter(Boolean)) {
+                                const next = current ? `${current} ${word}` : word;
+                                if (pdf.getTextWidth(next) <= maxWidth || !current) current = next;
+                                else {
+                                    candidate.push(current);
+                                    current = word;
+                                }
+                            }
+                            if (current) candidate.push(current);
+                            if (candidate.every(line => pdf.getTextWidth(line) <= maxWidth)) {
+                                lines = candidate;
+                                break;
+                            }
+                            fontSize -= 1;
+                        }
+                        return { lines, fontSize };
+                    };
+                    const { lines: nombreLineas, fontSize: nombreFontSize } = buildWrappedHeader(ofertaNombre.toUpperCase(), maxTitleWidth, 14);
+                    const { lines: institucionLineas, fontSize: institucionFontSize } = buildWrappedHeader(institucionNombre.toUpperCase(), maxTitleWidth, 12);
+                    const logoUrl = 'https://secure.gravatar.com/avatar/ed4e9795c26c0428f3dbd13932cfd6277a83bdaed6e57d30370e6865f0e628bc?s=250&d=mm&r=g';
+                    const img = await new Promise((resolve, reject) => {
+                        const image = new Image();
+                        image.crossOrigin = 'anonymous';
+                        image.onload = () => resolve(image);
+                        image.onerror = reject;
+                        image.src = logoUrl;
+                    });
+                    const canvasLogo = document.createElement('canvas');
+                    canvasLogo.width = img.naturalWidth || 250;
+                    canvasLogo.height = img.naturalHeight || 250;
+                    const contextLogo = canvasLogo.getContext('2d');
+                    if (!contextLogo) throw new Error('No se pudo preparar el logotipo institucional.');
+                    contextLogo.drawImage(img, 0, 0, canvasLogo.width, canvasLogo.height);
+                    const logoData = canvasLogo.toDataURL('image/png');
+
+                    const logoWidth = 36;
+                    const logoHeight = 36;
+                    pdf.addImage(logoData, 'PNG', margin, 16, logoWidth, logoHeight, undefined, 'FAST');
+                    pdf.setFontSize(institucionFontSize);
+                    pdf.setFont(undefined, 'normal');
+                    pdf.text(pdf.splitTextToSize(institucionNombre.toUpperCase(), pageWidth - (margin * 2) - logoWidth - 20), pageWidth / 2, 35, { align: 'center' });
+                    pdf.setFontSize(nombreFontSize);
+                    pdf.setFont(undefined, 'bold');
+                    const titleStartY = 40 + (institucionLineas.length * (institucionFontSize * lineHeight)) + 20;
+                    pdf.text(nombreLineas, margin, titleStartY);
+                    pdf.setFontSize(10);
+                    pdf.setFont(undefined, 'normal');
+                    const idY = titleStartY + (nombreLineas.length * (nombreFontSize * lineHeight)) + 8;
+                    pdf.text(ofertaId, margin, idY);
+                    pdf.text(semanaHeaderDisplay, margin, idY + (10 * lineHeight));
+
+                    let currentPage = 0;
+                    let currentY = margin + firstPageHeaderOffset;
+                    const addPage = () => {
+                        pdf.addPage();
+                        currentPage += 1;
+                        currentY = margin + regularPageHeaderOffset;
+                    };
+                    const captureElement = element => window.html2canvas(element, {
+                        backgroundColor: '#ffffff',
+                        scale: 2,
+                        useCORS: true,
+                        scrollX: 0,
+                        scrollY: 0,
+                        windowWidth: element.scrollWidth,
+                        windowHeight: element.scrollHeight,
+                        ignoreElements: child => child.classList?.contains('no-print')
+                    });
+                    const addCanvas = (canvas, { keepTogether = true } = {}) => {
+                        const naturalHeight = (canvas.height * contentWidth) / canvas.width;
+                        const pageBottom = pageHeight - margin;
+                        let availableHeight = pageBottom - currentY;
+                        let imageHeight = naturalHeight;
+
+                        if (keepTogether && imageHeight > availableHeight && currentY > margin + (currentPage === 0 ? firstPageHeaderOffset : regularPageHeaderOffset)) {
+                            addPage();
+                            availableHeight = pageBottom - currentY;
+                        }
+                        if (imageHeight > availableHeight) imageHeight = availableHeight;
+                        if (imageHeight <= 0) {
+                            addPage();
+                            availableHeight = pageBottom - currentY;
+                            imageHeight = Math.min(naturalHeight, availableHeight);
+                        }
+
+                        pdf.addImage(canvas.toDataURL('image/png'), 'PNG', margin, currentY, contentWidth, imageHeight, undefined, 'FAST');
+                        currentY += imageHeight + 10;
+                    };
+
+                    const overview = target.querySelector('[data-pdf-section="overview"]');
+                    const tableTitle = target.querySelector('[data-pdf-section="table-title"]');
+                    const table = target.querySelector('[data-pdf-table]');
+                    const tableHeader = table?.querySelector('thead');
+                    const tableRows = Array.from(table?.querySelectorAll('tbody tr') || []);
+                    const groupDetailCards = Array.from(target.querySelectorAll('[data-pdf-group-card]'));
+                    const footnote = target.querySelector('[data-pdf-section="footnote"]');
+                    if (!overview || !tableTitle || !tableHeader) throw new Error('No se encontró el resumen o la tabla del reporte.');
+
+                    addCanvas(await captureElement(overview));
+                    addCanvas(await captureElement(tableTitle));
+                    const tableHeaderCanvas = await captureElement(tableHeader);
+                    const tableHeaderHeight = (tableHeaderCanvas.height * contentWidth) / tableHeaderCanvas.width;
+                    let tableHeaderPage = -1;
+                    for (const row of tableRows) {
+                        const rowCanvas = await captureElement(row);
+                        const rowHeight = (rowCanvas.height * contentWidth) / rowCanvas.width;
+                        const pageBottom = pageHeight - margin;
+                        const pageTop = margin + (currentPage === 0 ? firstPageHeaderOffset : regularPageHeaderOffset);
+                        const needsTableHeader = tableHeaderPage !== currentPage;
+                        const requiredHeight = rowHeight + (needsTableHeader ? tableHeaderHeight + 10 : 0) + 10;
+
+                        if (currentY + requiredHeight > pageBottom && currentY > pageTop) {
+                            addPage();
+                        }
+                        if (tableHeaderPage !== currentPage) {
+                            addCanvas(tableHeaderCanvas, { keepTogether: false });
+                            tableHeaderPage = currentPage;
+                        }
+                        if (currentY + rowHeight > pageBottom && currentY > margin + regularPageHeaderOffset) {
+                            addPage();
+                            addCanvas(tableHeaderCanvas, { keepTogether: false });
+                            tableHeaderPage = currentPage;
+                        }
+                        addCanvas(rowCanvas, { keepTogether: false });
+                    }
+                    for (const card of groupDetailCards) {
+                        addCanvas(await captureElement(card));
+                    }
+                    if (footnote) addCanvas(await captureElement(footnote));
+                    target.style.width = originalWidth;
+                    target.style.maxWidth = originalMaxWidth;
+                    pdf.save(`${reportFileBase}.pdf`);
+                } catch (error) {
+                    target.style.width = originalWidth;
+                    target.style.maxWidth = originalMaxWidth;
+                    console.error('Error al exportar el reporte de seguimiento a PDF:', error);
+                    alert('No se pudo exportar el PDF. Verifica tu conexión y vuelve a intentarlo.');
+                }
+            };
+
+            return (
+                <div className="flex-1 min-h-0 overflow-auto bg-slate-50 p-4 sm:p-6">
+                    <div id="informacion-seguimiento-reporte" className="mx-auto max-w-7xl space-y-6">
+                        <div className="mb-2 flex flex-wrap items-start justify-between gap-4 rounded-2xl border-b border-gray-200 bg-white p-6 shadow-sm">
+                            <div>
+                                <h2 className="flex items-center gap-3 text-2xl font-bold text-gray-800">
+                                    <i className="fa-solid fa-chart-line text-blue-600"></i>
+                                    Interpretación de datos - {nombreCurso || db.info?.nombreCurso || 'Curso'}
+                                </h2>
+                                <p className="mt-2 text-gray-500">Cálculos basados en el estatus de la <strong>{activeSem.nombre}</strong></p>
+                                <p className="mt-2 text-sm text-gray-500">
+                                    La actividad con más entregas se usa como referencia para identificar participantes activos en cada grupo.
+                                </p>
+                            </div>
+                            <div className="relative no-print">
+                                <button type="button" onClick={() => setShowDownloadMenu(open => !open)} aria-expanded={showDownloadMenu} aria-haspopup="menu" className="flex items-center gap-3 rounded-xl bg-gray-900 px-6 py-3 font-bold text-white shadow-lg transition-transform hover:bg-black active:scale-95">
+                                    <i className="fa-solid fa-download"></i> Descargar reporte <i className="fa-solid fa-chevron-down text-xs"></i>
+                                </button>
+                                {showDownloadMenu && (
+                                    <div role="menu" className="absolute right-0 top-full z-30 mt-2 min-w-52 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 text-left shadow-lg">
+                                        <button type="button" role="menuitem" onClick={() => { setShowDownloadMenu(false); exportarReportePdf(); }} className="flex w-full items-center gap-3 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-blue-50 hover:text-blue-800">
+                                            <i className="fa-solid fa-file-pdf w-4 text-center text-red-600"></i> Descargar PDF
+                                        </button>
+                                        <button type="button" role="menuitem" onClick={() => { setShowDownloadMenu(false); exportarReporteExcel(); }} className="flex w-full items-center gap-3 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-blue-50 hover:text-blue-800">
+                                            <i className="fa-solid fa-file-excel w-4 text-center text-green-700"></i> Descargar Excel
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        <div id="informacion-seguimiento-contenido" className="space-y-6">
+                        <section data-pdf-section="overview" data-copy-block="Mayor_Numero_Entregas" className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm sm:p-7" aria-label="Actividad con más entregas">
+                            <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+                                <div>
+                                    <p className="text-xs font-bold uppercase tracking-wider text-blue-700">Mayor número de entregas</p>
+                                    <h3 className="mt-1 text-xl font-black text-slate-900">
+                                        {actividadPrincipal?.nombre || 'Sin actividades configuradas'}
+                                    </h3>
+                                </div>
+                                <div className="flex flex-wrap gap-3">
+                                    <button type="button" onClick={copiarBloqueComoImagen} className="no-print self-start rounded-xl border border-gray-200 bg-white p-2.5 text-gray-500 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700" title="Copiar bloque como imagen" aria-label="Copiar bloque de mayor número de entregas">
+                                        <i className="fa-solid fa-copy"></i>
+                                    </button>
+                                    <div className="min-w-36 rounded-xl bg-blue-50 px-5 py-4 text-center">
+                                        <p className="text-3xl font-black text-blue-900">{porcentajePrincipal}%</p>
+                                        <p className="mt-1 text-xs font-bold uppercase tracking-wide text-blue-700">de inscritos</p>
+                                    </div>
+                                    <div className="min-w-36 rounded-xl bg-cyan-50 px-5 py-4 text-center">
+                                        <p className="text-3xl font-black text-cyan-900">{actividadPrincipal?.entregas || 0}</p>
+                                        <p className="mt-1 text-xs font-bold uppercase tracking-wide text-cyan-700">entregas</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+
+                        <section data-copy-block="Resumen_Por_Grupo" className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" aria-label="Resumen de seguimiento por grupo">
+                            <div data-pdf-section="table-title" className="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
+                                <div>
+                                    <h3 className="text-lg font-bold text-slate-900">Resumen por grupo</h3>
+                                    <p className="mt-1 text-sm text-slate-500">Los faltantes se calculan entre los participantes activos según la actividad de referencia.</p>
+                                </div>
+                                <button type="button" onClick={copiarBloqueComoImagen} className="no-print shrink-0 rounded-xl border border-gray-200 bg-white p-2.5 text-gray-500 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700" title="Copiar bloque como imagen" aria-label="Copiar resumen por grupo como imagen">
+                                    <i className="fa-solid fa-copy"></i>
+                                </button>
+                            </div>
+                            <div className="overflow-x-auto">
+                                <table data-pdf-table className="w-full min-w-[900px] table-fixed border-collapse text-left text-xs">
+                                    <thead className="bg-slate-800 text-white">
+                                        <tr>
+                                            <th className="w-[16%] px-3 py-3 font-bold uppercase tracking-wide">Grupo</th>
+                                            <th className="w-[8%] px-3 py-3 text-center font-bold uppercase tracking-wide">Inscritos</th>
+                                            <th className="w-[12%] px-3 py-3 text-center font-bold uppercase tracking-wide">Participantes activos</th>
+                                            <th className="w-[8%] px-3 py-3 text-center font-bold uppercase tracking-wide">% activos</th>
+                                            <th className="w-[14%] px-3 py-3 text-center font-bold uppercase tracking-wide">Registros de observación / Inactivos</th>
+                                            {productosAprendizaje.map(indice => (
+                                                <th key={indice} className="w-[10%] px-3 py-3 text-center font-bold uppercase tracking-wide">Faltantes PA{indice}</th>
+                                            ))}
+                                            <th className="w-[22%] px-3 py-3 text-center font-bold uppercase tracking-wide">Faltantes de confirmar</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {groupReportRows.map((grupo, index) => (
+                                            <tr key={grupo.nombre} className={index % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                                                <td className="px-3 py-3 font-bold text-slate-900">{grupo.nombre}</td>
+                                                <td className="px-3 py-3 text-center font-semibold text-slate-700">{grupo.inscritos}</td>
+                                                <td className="px-3 py-3 text-center font-semibold text-slate-700">{grupo.activos}</td>
+                                                <td className="px-3 py-3 text-center">
+                                                    <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 font-bold text-emerald-700">{grupo.porcentaje}%</span>
+                                                </td>
+                                                <td className="px-3 py-3 text-center font-bold text-amber-700">{grupo.observaciones}</td>
+                                                {productosAprendizaje.map(indice => (
+                                                    <td key={indice} className="px-3 py-3 text-center font-bold text-rose-700">{grupo.faltantesPA[indice]}</td>
+                                                ))}
+                                                <td className="px-3 py-3 text-center font-bold text-violet-700">{grupo.faltantesConfirmacion}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                            </section>
+                        <section aria-label="Detalle de seguimiento por grupo">
+                            <div className="mb-4">
+                                <h3 className="text-lg font-bold text-slate-900">Detalle por grupo</h3>
+                                <p className="mt-1 text-sm text-slate-500">Indicadores individuales de participantes activos, observación y pendientes.</p>
+                            </div>
+                            <div className="grid gap-4 lg:grid-cols-2">
+                                {groupReportRows.map(grupo => (
+                                    <article key={`detalle-${grupo.nombre}`} data-pdf-group-card data-copy-block={`Detalle_${safeFilePart(grupo.nombre)}`} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                                        <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-4">
+                                            <div>
+                                                <h4 className="text-lg font-black text-slate-900">{grupo.nombre}</h4>
+                                                <p className="mt-1 text-sm text-slate-600">
+                                                    <strong className="text-slate-900">{grupo.activos}</strong> participantes activos de <strong className="text-slate-900">{grupo.inscritos}</strong> inscritos
+                                                </p>
+                                            </div>
+                                            <div className="flex shrink-0 items-start gap-2">
+                                                <button type="button" onClick={copiarBloqueComoImagen} className="no-print rounded-xl border border-gray-200 bg-white p-2.5 text-gray-500 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700" title="Copiar bloque como imagen" aria-label={`Copiar detalle de ${grupo.nombre} como imagen`}>
+                                                    <i className="fa-solid fa-copy"></i>
+                                                </button>
+                                                <div className="rounded-xl bg-emerald-50 px-4 py-2 text-center">
+                                                    <p className="text-2xl font-black text-emerald-700">{grupo.porcentaje}%</p>
+                                                    <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-700">activos</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="grid gap-3 p-4 sm:grid-cols-2">
+                                            <div className="rounded-xl bg-amber-50 p-4">
+                                                <p className="text-xs font-bold uppercase tracking-wide text-amber-800">Registros de observación / Inactivos</p>
+                                                <p className="mt-2 text-2xl font-black text-amber-900">{grupo.observaciones}</p>
+                                            </div>
+                                            {productosAprendizaje.map(indice => (
+                                                <div key={indice} className="rounded-xl bg-rose-50 p-4">
+                                                    <p className="text-xs font-bold uppercase tracking-wide text-rose-800">Faltantes de entrega PA{indice}</p>
+                                                    <p className="mt-2 text-2xl font-black text-rose-900">{grupo.faltantesPA[indice]}</p>
+                                                </div>
+                                            ))}
+                                            <div className="rounded-xl bg-violet-50 p-4">
+                                                <p className="text-xs font-bold uppercase tracking-wide text-violet-800">Faltantes de confirmar participación</p>
+                                                <p className="mt-2 text-2xl font-black text-violet-900">{grupo.faltantesConfirmacion}</p>
+                                            </div>
+                                        </div>
+                                    </article>
+                                ))}
+                            </div>
+                        </section>
+                        <p data-pdf-section="footnote" className="text-xs leading-5 text-slate-500">
+                            Los registros de observación representan la diferencia entre inscritos y participantes activos. Los faltantes de PA y de confirmación se calculan únicamente entre los participantes activos.
+                        </p>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
         function SubTabEficiencia({ db, activeSem, listParticipantes, getPData, getEffectiveConf, calcFinal }) {
             const grupos = Array.isArray(db?.grupos) ? db.grupos : [];
             const participantes = Array.isArray(db?.participantes) ? db.participantes : [];
@@ -7309,7 +7769,7 @@ María López	maria.lopez	Z9y8x7" />
         // ==========================================
         // MACRO-MÓDULO: SEGUIMIENTO
         // ==========================================
-        function TabSeguimiento({ db, onUpdate, isAsesor, isCoordinador, isAdmin, asesorGrupoId, personalName, onEditPersonal }) {
+        function TabSeguimiento({ db, onUpdate, isAsesor, isCoordinador, isAdmin, canViewFollowupInfo, asesorGrupoId, personalName, onEditPersonal }) {
             const semanas = db.semanasSeguimiento || [];
             
             useEffect(() => {
@@ -7323,7 +7783,7 @@ María López	maria.lopez	Z9y8x7" />
             const [subView, setSubView] = useState('matriz'); 
             
             const [showImport, setShowImport] = useState(false);
-            const [importTarget, setImportTarget] = useState('masivo-estados'); 
+            const [importTarget, setImportTarget] = useState(''); 
             const [importText, setImportText] = useState('');
             const [showDatosGlobalesModal, setShowDatosGlobalesModal] = useState(false);
             const [isEditingAttendance, setIsEditingAttendance] = useState(false);
@@ -8128,6 +8588,7 @@ María López	maria.lopez	Z9y8x7" />
 
             const procesarImportacion = () => {
                 if(!activeSem || !importText.trim()) return;
+                if (!importTarget) return alert("Selecciona los datos que deseas cargar.");
                 
                 const filas = importText.split('\n').filter(f => f.trim() !== '');
                 if (filas.length < 2 && importTarget.startsWith('masivo')) return alert("Faltan datos o encabezados para la carga masiva.");
@@ -8198,7 +8659,13 @@ María López	maria.lopez	Z9y8x7" />
                     filas.forEach(val => {
                         const idBuscado = normalizeText(val);
                         const userBuscado = getMoodleUsername(val);
-                        const p = db.participantes.find(x => (importTarget.startsWith('asis') ? x.curp === idBuscado : getMoodleUsername(x.curp) === userBuscado));
+                        const p = db.participantes.find(x => {
+                            if (importTarget.startsWith('asis')) return normalizeText(x.curp) === idBuscado;
+                            if (importTarget === 'encEst' || importTarget === 'encInst') {
+                                return normalizeText(x.curp) === idBuscado || normalizeText(getMoodleUsername(x.curp)) === idBuscado;
+                            }
+                            return getMoodleUsername(x.curp) === userBuscado;
+                        });
                         if(p) {
                             ensureP(p.id);
                             if(importTarget === 'conf') newData[p.id].conf = true;
@@ -8328,31 +8795,34 @@ María López	maria.lopez	Z9y8x7" />
 
             if (!activeSem) return <div className="p-10 text-center">Sin semanas creadas.</div>;
 
-            if (subView === 'eficiencia' && (isAdmin || isCoordinador)) {
+            if ((subView === 'eficiencia' && (isAdmin || isCoordinador)) || (subView === 'informacion' && canViewFollowupInfo)) {
                 return (
                 <div className="seguimiento-panel flex flex-col h-full min-h-0 min-w-0 bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-100">
-                        <div className="bg-gray-800 text-white p-4 flex justify-between items-center no-print">
+                        <div className="bg-gray-800 text-white p-4 flex flex-wrap justify-between items-center gap-2 no-print">
                             <div className="flex items-center gap-2">
                                 <span className="font-bold text-gray-300 uppercase tracking-wider text-xs mr-2">Ciclo Operativo:</span>
                                 <select className="bg-gray-700 text-white border border-gray-600 rounded-lg p-2 text-sm outline-none focus:border-cyan-400 font-bold" value={activeSemId} onChange={e=>setActiveSemId(e.target.value)}>
                                     {semanas.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
                                 </select>
                             </div>
-                            <div className="flex gap-2 p-1 bg-gray-900 rounded-xl">
-                                <button onClick={()=>setSubView('matriz')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors text-gray-400 hover:text-white hover:bg-gray-700`}><i className="fa-solid fa-table-cells mr-1"></i> Matriz Principal</button>
-                                <button onClick={()=>setSubView('faltantes')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors text-gray-400 hover:text-white hover:bg-gray-700`}><i className="fa-solid fa-file-signature mr-1"></i> Por Revisar</button>
-                                <button onClick={()=>setSubView('seguimiento')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors text-gray-400 hover:text-white hover:bg-gray-700`}><i className="fa-solid fa-triangle-exclamation mr-1"></i> Alerta</button>
-                                <button onClick={()=>setSubView('eficiencia')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors bg-blue-600 shadow text-white`}><i className="fa-solid fa-chart-line mr-1"></i> Eficiencia y Gráficas</button>
+                            <div className="flex flex-wrap justify-end gap-2 p-1 bg-gray-900 rounded-xl">
+                                <button onClick={()=>setSubView('matriz')} className="px-4 py-2 rounded-lg text-xs font-bold transition-colors text-gray-400 hover:text-white hover:bg-gray-700"><i className="fa-solid fa-table-cells mr-1"></i> Matriz Principal</button>
+                                <button onClick={()=>setSubView('faltantes')} className="px-4 py-2 rounded-lg text-xs font-bold transition-colors text-gray-400 hover:text-white hover:bg-gray-700"><i className="fa-solid fa-file-signature mr-1"></i> Por Revisar</button>
+                                <button onClick={()=>setSubView('seguimiento')} className="px-4 py-2 rounded-lg text-xs font-bold transition-colors text-gray-400 hover:text-white hover:bg-gray-700"><i className="fa-solid fa-triangle-exclamation mr-1"></i> Alerta</button>
+                                {(isAdmin || isCoordinador) && <button onClick={()=>setSubView('eficiencia')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${subView === 'eficiencia' ? 'bg-blue-600 shadow text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`}><i className="fa-solid fa-chart-line mr-1"></i> Eficiencia y Gráficas</button>}
+                                {canViewFollowupInfo && <button onClick={()=>setSubView('informacion')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${subView === 'informacion' ? 'bg-cyan-600 shadow text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`}><i className="fa-solid fa-circle-info mr-1"></i> Información para Seguimiento</button>}
                             </div>
                         </div>
-                        <SubTabEficiencia db={db} activeSem={activeSem} listParticipantes={db.participantes} getPData={getPData} getEffectiveConf={getEffectiveConf} calcFinal={calcFinal} />
+                        {subView === 'informacion'
+                            ? <SubTabInformacionSeguimiento db={db} activeSem={activeSem} getPData={getPData} getEffectiveConf={getEffectiveConf} />
+                            : <SubTabEficiencia db={db} activeSem={activeSem} listParticipantes={db.participantes} getPData={getPData} getEffectiveConf={getEffectiveConf} calcFinal={calcFinal} />}
                     </div>
                 );
             }
 
             return (
                 <div className="flex flex-col h-full min-h-0 min-w-0 bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-100">
-                    <div className="bg-gray-800 text-white p-4 flex justify-between items-center no-print">
+                    <div className="bg-gray-800 text-white p-4 flex flex-wrap justify-between items-center gap-2 no-print">
                         <div className="flex items-center gap-2">
                             <span className="font-bold text-gray-300 uppercase tracking-wider text-xs mr-2">Ciclo Operativo:</span>
                             <select disabled={isEditingAttendance} className="bg-gray-700 text-white border border-gray-600 rounded-lg p-2 text-sm outline-none focus:border-cyan-400 font-bold disabled:opacity-60" value={activeSemId} onChange={e=>setActiveSemId(e.target.value)}>
@@ -8361,11 +8831,12 @@ María López	maria.lopez	Z9y8x7" />
                             {isAdmin && <button onClick={renameSemana} className="text-gray-400 hover:text-white px-2 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 ml-1" title="Renombrar Semana"><i className="fa-solid fa-pen text-xs"></i></button>}
                             {isAdmin && <button onClick={addSemana} className="bg-cyan-600 text-cyan-50 px-3 py-2 rounded-lg text-xs hover:bg-cyan-500 font-bold transition-colors shadow-sm ml-2"><i className="fa-solid fa-plus"></i> Nueva</button>}
                         </div>
-                        <div className="flex gap-2 p-1 bg-gray-900 rounded-xl">
+                        <div className="flex flex-wrap justify-end gap-2 p-1 bg-gray-900 rounded-xl">
                             <button onClick={()=>setSubView('matriz')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${subView==='matriz'?'bg-blue-600 shadow text-white':'text-gray-400 hover:text-white hover:bg-gray-700'}`}><i className="fa-solid fa-table-cells mr-1"></i> Matriz Principal</button>
                             <button onClick={()=>setSubView('faltantes')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${subView==='faltantes'?'bg-blue-600 shadow text-white':'text-gray-400 hover:text-white hover:bg-gray-700'}`}><i className="fa-solid fa-file-signature mr-1"></i> Por Revisar</button>
                             <button onClick={()=>setSubView('seguimiento')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${subView==='seguimiento'?'bg-blue-600 shadow text-white':'text-gray-400 hover:text-white hover:bg-gray-700'}`}><i className="fa-solid fa-triangle-exclamation mr-1"></i> Alerta</button>
                             {(isAdmin || isCoordinador) && <button onClick={()=>setSubView('eficiencia')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors text-gray-400 hover:text-white hover:bg-gray-700`}><i className="fa-solid fa-chart-line mr-1"></i> Eficiencia y Gráficas</button>}
+                            {canViewFollowupInfo && <button onClick={()=>setSubView('informacion')} className="px-4 py-2 rounded-lg text-xs font-bold transition-colors text-gray-400 hover:text-white hover:bg-gray-700"><i className="fa-solid fa-circle-info mr-1"></i> Información para Seguimiento</button>}
                         </div>
                     </div>
 
@@ -8430,7 +8901,7 @@ María López	maria.lopez	Z9y8x7" />
                                             </div>
                                         )}
                                     </div>
-                                    {isAdmin && <button onClick={()=>setShowImport(true)} className="bg-green-600 text-white px-3 py-1.5 text-xs rounded-lg font-bold shadow-md flex items-center gap-2 hover:bg-green-700 transition-transform active:scale-95"><i className="fa-solid fa-upload"></i> Carga Datos</button>}
+                                    {isAdmin && <button onClick={()=>{setImportTarget(''); setImportText(''); setShowImport(true);}} className="bg-green-600 text-white px-3 py-1.5 text-xs rounded-lg font-bold shadow-md flex items-center gap-2 hover:bg-green-700 transition-transform active:scale-95"><i className="fa-solid fa-upload"></i> Carga Datos</button>}
                                     <button onClick={() => resetColumnFilters()} className="text-blue-600 hover:underline font-bold ml-2">Limpiar Filtros</button>
                                     {isAsesor && <button
                                         type="button"
@@ -9017,6 +9488,7 @@ María López	maria.lopez	Z9y8x7" />
                                     
                                     <label className="block text-sm font-bold text-gray-700 mb-2 uppercase tracking-wider text-xs">Selecciona los datos a cargar</label>
                                     <select className="w-full p-3.5 border border-gray-300 rounded-xl mb-6 bg-white shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-shadow" value={importTarget} onChange={e=>setImportTarget(e.target.value)}>
+                                        <option value="">Selecciona una opción</option>
                                         <optgroup label="¡NUEVO! Importación Masiva Inteligente (Moodle Completo)">
                                             <option value="masivo-estados">Todos los Estados de Entrega (Busca automáticamente todas las PA y Actividades)</option>
                                             <option value="masivo-calif">Todas las Calificaciones (Convierte guiones a 0 automáticamente)</option>
@@ -9024,6 +9496,8 @@ María López	maria.lopez	Z9y8x7" />
                                         <optgroup label="Opciones Manuales / Individuales">
                                             <option value="conf">Confirmación (Requiere 1 Columna: Usuarios o CURP)</option>
                                             {aSes.map(i => <option key={`oi-a-${i}`} value={`asis-${i}`}>Asistencia Sesión {i} (Requiere 1 Columna: CURPs o Usuarios)</option>)}
+                                            <option value="encEst">Encuesta Estatal (Requiere CURP o Usuario)</option>
+                                            <option value="encInst">Encuesta Institucional (Requiere CURP o Usuario)</option>
                                         </optgroup>
                                     </select>
 
