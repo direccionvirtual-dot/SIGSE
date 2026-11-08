@@ -2462,7 +2462,7 @@
                                             <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-[10px] text-slate-200">v12.6</div>
+                                        <div className="text-[10px] text-slate-200">v12.7</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -2470,7 +2470,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v12.6</div>
+                                        <div className="text-xs text-slate-200">v12.7</div>
                                     </div>
                                 )}
                             </div>
@@ -8810,8 +8810,7 @@ María López	maria.lopez	Z9y8x7" />
                 XLSX.writeFile(wb, `Seguimiento_${activeSem.nombre}_${db.info.siglas}.xlsx`);
             };
 
-            const exportarObservacionesXLSX = () => {
-                if (typeof XLSX === 'undefined') return alert("Librería de Excel cargando... Intenta en un segundo.");
+            const obtenerDatosObservaciones = () => {
                 const headers = ['No.', 'CURP', 'NOMBRE COMPLETO', 'USUARIO', 'CORREO', 'TELEFONO', 'GRUPO', 'OBSERVACIONES'];
                 const data = listParticipantes
                     .filter(p => String(getPData(p.id).obs || '').trim())
@@ -8828,6 +8827,12 @@ María López	maria.lopez	Z9y8x7" />
                             getPData(p.id).obs || ''
                         ];
                     });
+                return { headers, data };
+            };
+
+            const exportarObservacionesXLSX = () => {
+                if (typeof XLSX === 'undefined') return alert("Librería de Excel cargando... Intenta en un segundo.");
+                const { headers, data } = obtenerDatosObservaciones();
                 const estadoNombre = db.info.estado || ESTADOS.find(estado => estado.id === db.info.idEstado)?.nombre || db.info.idEstado || '';
                 const encabezado = [
                     ['Estado', estadoNombre],
@@ -8853,13 +8858,7 @@ María López	maria.lopez	Z9y8x7" />
                 XLSX.writeFile(wb, `Observaciones_${activeSem.nombre}_${db.info.siglas}.xlsx`);
             };
 
-            const copiarContenidoSeguimiento = async () => {
-                const contenido = obtenerDatosSeguimiento();
-                if (!contenido) return;
-                const texto = [contenido.headers, ...contenido.data]
-                    .map(row => row.map(value => String(value ?? '').replace(/[\t\r\n]+/g, ' ')).join('\t'))
-                    .join('\n');
-
+            const copiarTextoSeguimiento = async (texto, mensajeExito, contextoError) => {
                 try {
                     if (navigator.clipboard?.writeText) {
                         await navigator.clipboard.writeText(texto);
@@ -8875,11 +8874,28 @@ María López	maria.lopez	Z9y8x7" />
                         if (!copied) throw new Error('El navegador no permitió copiar al portapapeles.');
                     }
                     setShowSeguimientoExportMenu(false);
-                    alert('Contenido del seguimiento copiado al portapapeles.');
+                    alert(mensajeExito);
                 } catch (error) {
-                    console.error('Error al copiar el seguimiento:', error);
+                    console.error(`Error al copiar ${contextoError}:`, error);
                     alert('No se pudo copiar el contenido. Revisa los permisos del portapapeles.');
                 }
+            };
+
+            const copiarContenidoSeguimiento = async () => {
+                const contenido = obtenerDatosSeguimiento();
+                if (!contenido) return;
+                const texto = [contenido.headers, ...contenido.data]
+                    .map(row => row.map(value => String(value ?? '').replace(/[\t\r\n]+/g, ' ')).join('\t'))
+                    .join('\n');
+                await copiarTextoSeguimiento(texto, 'Contenido del seguimiento copiado al portapapeles.', 'el seguimiento');
+            };
+
+            const copiarObservaciones = async () => {
+                const contenido = obtenerDatosObservaciones();
+                const texto = [contenido.headers, ...contenido.data]
+                    .map(row => row.map(value => String(value ?? '').replace(/[\t\r\n]+/g, ' ')).join('\t'))
+                    .join('\n');
+                await copiarTextoSeguimiento(texto, 'Observaciones copiadas al portapapeles.', 'las observaciones');
             };
 
             if (!activeSem) return <div className="p-10 text-center">Sin semanas creadas.</div>;
@@ -8982,13 +8998,16 @@ María López	maria.lopez	Z9y8x7" />
                                         {showSeguimientoExportMenu && (
                                             <div role="menu" className="absolute right-0 top-full z-30 mt-2 min-w-52 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 text-left shadow-lg">
                                                 <button type="button" role="menuitem" onClick={() => { setShowSeguimientoExportMenu(false); exportarSeguimientoXLSX(); }} className="flex w-full items-center gap-3 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-blue-50 hover:text-blue-800">
-                                                    <i className="fa-solid fa-file-excel w-4 text-center text-green-700"></i> Descargar Excel
+                                                    <i className="fa-solid fa-file-excel w-4 text-center text-green-700"></i> Seguimiento Excel
                                                 </button>
                                                 <button type="button" role="menuitem" onClick={() => { setShowSeguimientoExportMenu(false); exportarObservacionesXLSX(); }} className="flex w-full items-center gap-3 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-blue-50 hover:text-blue-800">
-                                                    <i className="fa-solid fa-file-excel w-4 text-center text-green-700"></i> Descargar observaciones
+                                                    <i className="fa-solid fa-file-excel w-4 text-center text-green-700"></i> Observaciones
                                                 </button>
                                                 <button type="button" role="menuitem" onClick={copiarContenidoSeguimiento} className="flex w-full items-center gap-3 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-blue-50 hover:text-blue-800">
-                                                    <i className="fa-solid fa-copy w-4 text-center text-blue-700"></i> Copiar contenido
+                                                    <i className="fa-solid fa-copy w-4 text-center text-blue-700"></i> Copiar seguimiento
+                                                </button>
+                                                <button type="button" role="menuitem" onClick={copiarObservaciones} className="flex w-full items-center gap-3 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-blue-50 hover:text-blue-800">
+                                                    <i className="fa-solid fa-copy w-4 text-center text-blue-700"></i> Copiar observaciones
                                                 </button>
                                             </div>
                                         )}
