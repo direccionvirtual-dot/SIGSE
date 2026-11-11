@@ -2462,7 +2462,7 @@
                                             <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-[10px] text-slate-200">v12.7</div>
+                                        <div className="text-[10px] text-slate-200">v12.9</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -2470,7 +2470,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v12.7</div>
+                                        <div className="text-xs text-slate-200">v12.9</div>
                                     </div>
                                 )}
                             </div>
@@ -4915,28 +4915,47 @@ María López	maria.lopez	Z9y8x7" />
             const [editData, setEditData] = useState(null);
             const [viewingStudent, setViewingStudent] = useState(null);
             const [multipleCoursesOnly, setMultipleCoursesOnly] = useState(false);
+            const [multipleCoursesStateFilter, setMultipleCoursesStateFilter] = useState('');
+            const [multipleCoursesYearFilter, setMultipleCoursesYearFilter] = useState('');
+
+            const getCourseState = db => {
+                const state = ESTADOS.find(item => item.id === db.info?.idEstado)
+                    || ESTADOS.find(item => normalizeText(item.nombre) === normalizeText(db.info?.estado || ''));
+                const rawValue = db.info?.idEstado || db.info?.estado || '';
+                return {
+                    value: state?.id || normalizeText(rawValue) || '__SIN_ESTADO__',
+                    label: db.info?.estado || state?.nombre || db.info?.idEstado || 'Sin estado'
+                };
+            };
+            const stateFilterOptions = useMemo(() => [...new Map(basesDeDatos.map(db => {
+                const state = getCourseState(db);
+                return [state.value, state];
+            })).values()].sort((left, right) => left.label.localeCompare(right.label, 'es', { sensitivity: 'base' })), [basesDeDatos]);
+            const yearFilterOptions = useMemo(() => [...new Set(basesDeDatos.map(db => String(db.info?.anio || '').trim() || '__SIN_ANIO__'))]
+                .sort((left, right) => left === '__SIN_ANIO__' ? 1 : right === '__SIN_ANIO__' ? -1 : right.localeCompare(left, 'es', { numeric: true })), [basesDeDatos]);
 
             const getIdentity = participant => ({
-                strong: [...new Set([
-                    participant.curp,
-                    participant.correo,
-                    participant.usuario,
-                    getMoodleUsername(participant.curp)
-                ].map(value => normalizeText(value || '')).filter(Boolean))],
+                curp: normalizeText(participant.curp || '').replace(/\s/g, ''),
+                username: normalizeText(participant.usuario || getMoodleUsername(participant.curp) || ''),
+                email: normalizeText(participant.correo || ''),
+                name: normalizeText(participant.completo || `${participant.paterno || ''} ${participant.materno || ''} ${participant.nombre || ''}`).replace(/\s+/g, ' '),
                 phones: [...new Set([participant.telefono, participant.celular]
                     .map(value => String(value || '').replace(/\D/g, ''))
-                    .filter(Boolean))],
-                name: normalizeText(participant.completo || `${participant.paterno || ''} ${participant.materno || ''} ${participant.nombre || ''}`)
+                    .filter(Boolean))]
             });
             const matchesSameStudent = (left, right) => {
                 const leftIdentity = getIdentity(left);
                 const rightIdentity = getIdentity(right);
-                if (leftIdentity.strong.some(value => rightIdentity.strong.includes(value))) return true;
-                if (leftIdentity.strong.length && rightIdentity.strong.length) return false;
-                if (leftIdentity.phones.some(value => rightIdentity.phones.includes(value))) return true;
-                return !leftIdentity.strong.length && !rightIdentity.strong.length
-                    && !leftIdentity.phones.length && !rightIdentity.phones.length
-                    && leftIdentity.name && leftIdentity.name === rightIdentity.name;
+                const sameNameAndPhone = leftIdentity.name
+                    && leftIdentity.name === rightIdentity.name
+                    && leftIdentity.phones.some(phone => rightIdentity.phones.includes(phone));
+                if (leftIdentity.curp && rightIdentity.curp) {
+                    return leftIdentity.curp === rightIdentity.curp || sameNameAndPhone;
+                }
+                if (sameNameAndPhone) return true;
+                if (leftIdentity.username && rightIdentity.username) return leftIdentity.username === rightIdentity.username;
+                return !leftIdentity.username && !rightIdentity.username
+                    && leftIdentity.email && leftIdentity.email === rightIdentity.email;
             };
 
             const multipleCourseStudents = useMemo(() => {
@@ -4946,10 +4965,11 @@ María López	maria.lopez	Z9y8x7" />
 
                 const indexIdentity = (identity, group) => {
                     const keys = [
-                        ...identity.strong.map(value => `strong:${value}`),
-                        ...identity.phones.map(value => `phone:${value}`),
-                        ...(!identity.strong.length && !identity.phones.length && identity.name ? [`name:${identity.name}`] : [])
-                    ];
+                        identity.curp && `curp:${identity.curp}`,
+                        identity.username && `username:${identity.username}`,
+                        identity.email && `email:${identity.email}`,
+                        ...identity.phones.map(phone => identity.name && `name-phone:${identity.name}:${phone}`).filter(Boolean)
+                    ].filter(Boolean);
                     keys.forEach(key => {
                         const matches = identityIndex.get(key) || [];
                         if (!matches.includes(group)) matches.push(group);
@@ -4962,13 +4982,14 @@ María López	maria.lopez	Z9y8x7" />
                     (db.participantes || []).forEach(participant => {
                         const identity = getIdentity(participant);
                         const keys = [
-                            ...identity.strong.map(value => `strong:${value}`),
-                            ...identity.phones.map(value => `phone:${value}`),
-                            ...(!identity.strong.length && !identity.phones.length && identity.name ? [`name:${identity.name}`] : [])
-                        ];
+                            identity.curp && `curp:${identity.curp}`,
+                            identity.username && `username:${identity.username}`,
+                            identity.email && `email:${identity.email}`,
+                            ...identity.phones.map(phone => identity.name && `name-phone:${identity.name}:${phone}`).filter(Boolean)
+                        ].filter(Boolean);
                         const candidates = [...new Set(keys.flatMap(key => identityIndex.get(key) || []))]
                             .sort((a, b) => a.order - b.order);
-                        const existing = candidates.find(group => matchesSameStudent(group.participant, participant));
+                        const existing = candidates.find(group => group.courses.some(course => matchesSameStudent(course.participant, participant)));
                         const enrollment = { db, participant, group: groupById.get(participant.grupoId) };
 
                         if (existing) {
@@ -4984,10 +5005,21 @@ María López	maria.lopez	Z9y8x7" />
                 return groups.filter(group => group.courses.length >= 2);
             }, [basesDeDatos, multipleCoursesOnly]);
 
+            const filteredMultipleCourseStudents = useMemo(() => multipleCourseStudents.flatMap(student => {
+                const courses = student.courses.filter(({ db }) => {
+                    const state = getCourseState(db);
+                    const year = String(db.info?.anio || '').trim() || '__SIN_ANIO__';
+                    return (!multipleCoursesStateFilter || state.value === multipleCoursesStateFilter)
+                        && (!multipleCoursesYearFilter || year === multipleCoursesYearFilter);
+                });
+                if (courses.length < 2) return [];
+                return [{ ...student, ...courses[0], courses }];
+            }), [multipleCourseStudents, multipleCoursesStateFilter, multipleCoursesYearFilter]);
+
             const resultados = useMemo(() => {
                 const query = normalizeText(search.trim());
                 if (multipleCoursesOnly) {
-                    return multipleCourseStudents
+                    return filteredMultipleCourseStudents
                         .filter(student => !query || student.courses.some(({ db, participant, group }) => {
                             const searchable = [
                                 participant.completo, participant.nombre, participant.paterno, participant.materno,
@@ -5010,42 +5042,44 @@ María López	maria.lopez	Z9y8x7" />
 
                     return searchable.includes(query) ? { db, participant, group } : null;
                 }).filter(Boolean)).sort((a, b) => normalizeText(a.participant.completo || '').localeCompare(normalizeText(b.participant.completo || ''), 'es', { sensitivity: 'base' }));
-            }, [basesDeDatos, multipleCourseStudents, multipleCoursesOnly, search]);
+            }, [basesDeDatos, filteredMultipleCourseStudents, multipleCoursesOnly, search]);
 
             const descargarAlumnosMultiplesXLSX = () => {
                 if (typeof XLSX === 'undefined') return alert('Librería de Excel cargando... Intenta nuevamente en un segundo.');
-                const rows = resultados.map(student => {
-                    const states = [...new Map(student.courses.map(({ db }) => {
+                const rows = resultados.flatMap(student => {
+                    const participantName = student.participant.completo
+                        || `${student.participant.paterno || ''} ${student.participant.materno || ''} ${student.participant.nombre || ''}`.trim();
+                    return student.courses.map(({ db, group }) => {
                         const stateName = db.info?.estado
                             || ESTADOS.find(state => state.id === db.info?.idEstado)?.nombre
                             || db.info?.idEstado
                             || '-';
-                        return [normalizeText(stateName), stateName];
-                    })).values()];
-                    const courses = student.courses.map(({ db, group }) => {
                         const stateCode = db.info?.idEstado
                             || ESTADOS.find(state => normalizeText(state.nombre) === normalizeText(db.info?.estado || ''))?.id
                             || db.info?.estado
                             || '-';
-                        return `${db.info?.siglas || 'Sin siglas'} - ${stateCode} - ${group?.nombre || 'Sin grupo'}`;
+                        return [
+                            participantName,
+                            student.participant.usuario || getMoodleUsername(student.participant.curp) || '',
+                            student.participant.correo || '',
+                            student.participant.curp || '',
+                            student.participant.telefono || student.participant.celular || '',
+                            student.courses.length,
+                            stateName,
+                            `${db.info?.siglas || 'Sin siglas'} - ${stateCode} - ${group?.nombre || 'Sin grupo'}`
+                        ];
                     });
-                    return [
-                        student.participant.completo || `${student.participant.paterno || ''} ${student.participant.materno || ''} ${student.participant.nombre || ''}`.trim(),
-                        student.participant.usuario || getMoodleUsername(student.participant.curp) || '',
-                        student.participant.correo || '',
-                        student.participant.curp || '',
-                        student.participant.telefono || student.participant.celular || '',
-                        courses.length,
-                        states.join(' | '),
-                        courses.join(' | ')
-                    ];
                 });
                 const headers = ['Alumno', 'Usuario', 'Correo', 'CURP', 'Teléfono', 'Cursos inscritos', 'Estado', 'Curso - Estado - Grupo'];
                 const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
                 worksheet['!cols'] = [{ wch: 36 }, { wch: 18 }, { wch: 32 }, { wch: 20 }, { wch: 16 }, { wch: 16 }, { wch: 24 }, { wch: 80 }];
                 const workbook = XLSX.utils.book_new();
                 XLSX.utils.book_append_sheet(workbook, worksheet, 'Inscritos en varios cursos');
-                XLSX.writeFile(workbook, `Alumnos_Multiples_Cursos_${new Date().toISOString().slice(0, 10)}.xlsx`);
+                const stateFilePart = multipleCoursesStateFilter ? `_${multipleCoursesStateFilter}` : '';
+                const yearFilePart = multipleCoursesYearFilter
+                    ? `_${multipleCoursesYearFilter === '__SIN_ANIO__' ? 'Sin_anio' : multipleCoursesYearFilter}`
+                    : '';
+                XLSX.writeFile(workbook, `Alumnos_Multiples_Cursos${stateFilePart}${yearFilePart}_${new Date().toISOString().slice(0, 10)}.xlsx`);
             };
 
             const resumenInscripciones = useMemo(() => {
@@ -5147,7 +5181,7 @@ María López	maria.lopez	Z9y8x7" />
                         </div>
                         <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
                             <button type="button" onClick={() => setMultipleCoursesOnly(value => !value)} aria-pressed={multipleCoursesOnly} className={`rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${multipleCoursesOnly ? 'bg-emerald-700 text-white hover:bg-emerald-800' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'}`}>
-                                <i className="fa-solid fa-users mr-2"></i>Inscritos en 2+ cursos{multipleCoursesOnly ? ` (${multipleCourseStudents.length})` : ''}
+                                <i className="fa-solid fa-users mr-2"></i>Inscritos en 2+ cursos{multipleCoursesOnly ? ` (${filteredMultipleCourseStudents.length})` : ''}
                             </button>
                             {multipleCoursesOnly && <button type="button" onClick={descargarAlumnosMultiplesXLSX} className="rounded-xl bg-green-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-green-800"><i className="fa-solid fa-file-excel mr-2"></i>Descargar Excel</button>}
                             <button onClick={onBack} className="rounded-xl bg-gray-100 px-4 py-2 text-gray-700 transition-colors hover:bg-gray-200"><i className="fa-solid fa-arrow-left mr-2"></i>Volver al menú</button>
@@ -5161,6 +5195,35 @@ María López	maria.lopez	Z9y8x7" />
                             <input type="search" autoFocus className="w-full rounded-xl border border-emerald-200 bg-white py-3 pl-11 pr-4 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200" value={search} onChange={e => setSearch(e.target.value)} placeholder="Ej. América, CURP, teléfono o correo..." />
                         </div>
                     </div>
+
+                    {multipleCoursesOnly && (
+                        <div className="border-b border-gray-100 px-6 pt-5">
+                            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                                <div className="mb-3">
+                                    <h3 className="text-sm font-bold text-gray-800">Filtrar cursos incluidos</h3>
+                                    <p className="mt-1 text-xs text-gray-600">Solo se cuentan y muestran cursos del estado y año seleccionados. Se requiere tener 2 o más cursos dentro de esos filtros.</p>
+                                </div>
+                                <div className="flex flex-wrap items-end gap-3">
+                                    <label className="flex min-w-[220px] flex-1 flex-col gap-1 text-xs font-semibold text-gray-600">
+                                        Estado
+                                        <select value={multipleCoursesStateFilter} onChange={event => setMultipleCoursesStateFilter(event.target.value)} className="rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm font-normal text-gray-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100">
+                                            <option value="">Todos los estados</option>
+                                            {stateFilterOptions.map(state => <option key={state.value} value={state.value}>{state.label}</option>)}
+                                        </select>
+                                    </label>
+                                    <label className="flex min-w-[160px] flex-1 flex-col gap-1 text-xs font-semibold text-gray-600">
+                                        Año
+                                        <select value={multipleCoursesYearFilter} onChange={event => setMultipleCoursesYearFilter(event.target.value)} className="rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm font-normal text-gray-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100">
+                                            <option value="">Todos los años</option>
+                                            {yearFilterOptions.map(year => <option key={year} value={year}>{year === '__SIN_ANIO__' ? 'Sin año' : year}</option>)}
+                                        </select>
+                                    </label>
+                                    <button type="button" onClick={() => { setMultipleCoursesStateFilter(''); setMultipleCoursesYearFilter(''); }} disabled={!multipleCoursesStateFilter && !multipleCoursesYearFilter} className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50">Limpiar filtros</button>
+                                    <span className="rounded-full bg-emerald-100 px-4 py-2 text-sm font-bold text-emerald-800">{filteredMultipleCourseStudents.length} participantes</span>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     <div className="p-6">
                         {!search.trim() && !multipleCoursesOnly ? (
@@ -8525,6 +8588,129 @@ María López	maria.lopez	Z9y8x7" />
                 });
             }, [db, isAsesor, asesorGrupoId, reportFilterGrupo]);
 
+            const generarReporteSeguimientoPdf = () => {
+                if (!window.jspdf) return alert('La exportación a PDF no está disponible en este navegador.');
+
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF('l', 'mm', 'a4');
+                const pageWidth = doc.internal.pageSize.getWidth();
+                const pageHeight = doc.internal.pageSize.getHeight();
+                const margin = 12;
+                const colWidths = [155, 50, 80];
+                const headers = ['NOMBRE COMPLETO', 'GRUPO', 'ASESOR TITULAR'];
+                const title = subView === 'faltantes'
+                    ? 'FALTANTES DE CALIFICACIÓN (POR REVISAR)'
+                    : 'PARTICIPANTES PARA SEGUIMIENTO (NO FINALIZADOS)';
+                let y = 12;
+
+                const drawPageTitle = () => {
+                    doc.setFillColor(12, 25, 51);
+                    doc.rect(0, 0, pageWidth, 20, 'F');
+                    doc.setTextColor(255, 255, 255);
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(13);
+                    doc.text(title, margin, 13);
+                };
+                const drawTableHeader = () => {
+                    let x = margin;
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(8);
+                    headers.forEach((header, index) => {
+                        doc.setFillColor(229, 236, 255);
+                        doc.rect(x, y, colWidths[index], 8, 'FD');
+                        doc.setTextColor(0, 0, 0);
+                        doc.text(header, x + 2, y + 5.5);
+                        x += colWidths[index];
+                    });
+                    y += 8;
+                };
+
+                drawPageTitle();
+                y = 28;
+                doc.setTextColor(60, 60, 60);
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9);
+                doc.text(`Curso: ${db.info?.nombre || db.info?.siglas || 'PRODEP'}`, margin, y);
+                y += 8;
+
+                const sections = [
+                    ...aPA.map(i => ({
+                        filter: `PA-${i}`,
+                        title: `Producto de Aprendizaje ${i}`,
+                        records: reportParticipantes.filter(p => {
+                            const data = getPData(p.id);
+                            return subView === 'faltantes'
+                                ? data.paEst[i] === true && parseFloatSafe(data.paCal[i]) === 0
+                                : data.paEst[i] !== true && parseFloatSafe(data.paCal[i]) === 0;
+                        })
+                    })),
+                    ...aAct.map(i => ({
+                        filter: `ACT-${i}`,
+                        title: `Actividad ${i}`,
+                        records: reportParticipantes.filter(p => {
+                            const data = getPData(p.id);
+                            return subView === 'faltantes'
+                                ? data.actEst[i] === true && parseFloatSafe(data.actCal[i]) === 0
+                                : data.actEst[i] !== true && parseFloatSafe(data.actCal[i]) === 0;
+                        })
+                    }))
+                ].filter(section => reportFilter === 'ALL' || reportFilter === section.filter)
+                    .filter(section => section.records.length > 0);
+
+                if (sections.length === 0) {
+                    doc.setFontSize(10);
+                    doc.text('No hay registros que coincidan con los filtros seleccionados.', margin, y);
+                }
+
+                sections.forEach(section => {
+                    if (y + 22 > pageHeight - margin) {
+                        doc.addPage();
+                        drawPageTitle();
+                        y = 28;
+                    }
+
+                    doc.setTextColor(30, 30, 30);
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(10);
+                    doc.text(`${section.title} (${section.records.length} registros)`, margin, y + 5);
+                    y += 8;
+                    drawTableHeader();
+
+                    section.records.forEach(participant => {
+                        const group = db.grupos.find(item => item.id === participant.grupoId) || {};
+                        const values = [participant.completo || '-', group.nombre || '-', group.asesor || '-'];
+                        doc.setFont('helvetica', 'normal');
+                        doc.setFontSize(8);
+                        const lines = values.map((value, index) => doc.splitTextToSize(String(value), colWidths[index] - 4));
+                        const rowHeight = Math.max(8, ...lines.map(value => value.length * 4 + 3));
+
+                        if (y + rowHeight > pageHeight - margin) {
+                            doc.addPage();
+                            drawPageTitle();
+                            y = 28;
+                            doc.setFont('helvetica', 'bold');
+                            doc.setFontSize(10);
+                            doc.text(`${section.title} (continuación)`, margin, y + 5);
+                            y += 8;
+                            drawTableHeader();
+                        }
+
+                        let x = margin;
+                        values.forEach((value, index) => {
+                            doc.rect(x, y, colWidths[index], rowHeight);
+                            doc.setTextColor(0, 0, 0);
+                            doc.text(lines[index], x + 2, y + 5);
+                            x += colWidths[index];
+                        });
+                        y += rowHeight;
+                    });
+                    y += 6;
+                });
+
+                const suffix = db.info?.siglas || 'curso';
+                doc.save(`Reporte_Seguimiento_${suffix}.pdf`);
+            };
+
             const datosGlobales = useMemo(() => {
                 const totalParticipantes = listParticipantes.length;
                 const datos = listParticipantes.map(p => getPData(p.id));
@@ -9463,7 +9649,7 @@ María López	maria.lopez	Z9y8x7" />
                                         )}
                                     </div>
                                 </div>
-                                <button onClick={()=>window.print()} className="bg-gray-900 text-white px-6 py-3 rounded-xl shadow-lg hover:bg-black font-bold flex items-center gap-3 transition-transform active:scale-95"><i className="fa-solid fa-print"></i> Imprimir Reporte</button>
+                                <button onClick={generarReporteSeguimientoPdf} className="bg-gray-900 text-white px-6 py-3 rounded-xl shadow-lg hover:bg-black font-bold flex items-center gap-3 transition-transform active:scale-95"><i className="fa-solid fa-file-pdf"></i> Generar Reporte</button>
                             </div>
                             
                             <div className="space-y-8 print-only max-w-5xl mx-auto">
