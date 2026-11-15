@@ -38,10 +38,17 @@
 
     <style>
         /* Estilos de tabla para Seguimiento */
+        .seguimiento-table {
+            --seguimiento-col-no: 40px;
+            --seguimiento-col-curp: 150px;
+            --seguimiento-col-nombre: 350px;
+            --seguimiento-col-usuario: 120px;
+        }
         .seguimiento-table th, .seguimiento-table td { border: 1px solid #e5e7eb; padding: 4px 8px; text-align: center; vertical-align: middle; }
         .seguimiento-table th { background-color: #f3f4f6; position: sticky; top: 0; z-index: 10; font-size: 0.7rem; }
-        .seguimiento-table thead tr:nth-child(2) th { top: 38px; z-index: 9; }
-        .seguimiento-table thead tr:first-child th { z-index: 12; }
+        .seguimiento-table thead tr:first-child th { height: 38px; z-index: 12; }
+        .seguimiento-table thead tr:nth-child(2) th { top: 38px; height: 38px; z-index: 9; }
+        .seguimiento-table thead tr:nth-child(3) th { top: 76px; z-index: 12; }
 
         .asignar-table { border-collapse: separate; border-spacing: 0; }
         .asignar-table thead th {
@@ -63,6 +70,10 @@
         /* Sistema de columnas ancladas */
         .seguimiento-table .col-sticky { position: sticky; background-color: #fff; z-index: 11; text-align: left; }
         .seguimiento-table th.col-sticky { z-index: 14 !important; background-color: #f3f4f6; }
+        .seguimiento-table .col-sticky-no { left: 0; width: var(--seguimiento-col-no); min-width: var(--seguimiento-col-no); max-width: var(--seguimiento-col-no); }
+        .seguimiento-table .col-sticky-curp { left: var(--seguimiento-col-no); width: var(--seguimiento-col-curp); min-width: var(--seguimiento-col-curp); max-width: var(--seguimiento-col-curp); }
+        .seguimiento-table .col-sticky-nombre { left: calc(var(--seguimiento-col-no) + var(--seguimiento-col-curp)); width: var(--seguimiento-col-nombre); min-width: var(--seguimiento-col-nombre); max-width: var(--seguimiento-col-nombre); }
+        .seguimiento-table .col-sticky-usuario { left: calc(var(--seguimiento-col-no) + var(--seguimiento-col-curp) + var(--seguimiento-col-nombre)); width: var(--seguimiento-col-usuario); min-width: var(--seguimiento-col-usuario); max-width: var(--seguimiento-col-usuario); }
         .seguimiento-scroll {
             min-width: 0;
             min-height: 0;
@@ -79,6 +90,15 @@
         .seguimiento-scroll .seguimiento-table {
             width: max-content;
             min-width: 100%;
+        }
+
+        @media (min-width: 769px) and (max-width: 1200px) {
+            .seguimiento-table {
+                --seguimiento-col-no: 36px;
+                --seguimiento-col-curp: 120px;
+                --seguimiento-col-nombre: 240px;
+                --seguimiento-col-usuario: 100px;
+            }
         }
 
         @media (max-width: 768px) {
@@ -140,10 +160,8 @@
                 min-height: 24px;
             }
 
-            .workspace-content .seguimiento-table .col-sticky[style*="350px"] {
-                width: 260px !important;
-                min-width: 260px !important;
-                max-width: 260px !important;
+            .workspace-content .seguimiento-table {
+                --seguimiento-col-nombre: 260px;
             }
 
             .workspace-content {
@@ -2462,7 +2480,7 @@
                                             <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-[10px] text-slate-200">v12.9</div>
+                                        <div className="text-[10px] text-slate-200">v13.1</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -2470,7 +2488,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v12.9</div>
+                                        <div className="text-xs text-slate-200">v13.1</div>
                                     </div>
                                 )}
                             </div>
@@ -8015,6 +8033,20 @@ María López	maria.lopez	Z9y8x7" />
 
             const umbralAcreditacion = Number(db.info?.acreditacion ?? 80);
             const activeSem = semanas.find(s => s.id === activeSemId);
+            const lastMatrixImportDate = activeSem?.lastDataImportAt ? new Date(activeSem.lastDataImportAt) : null;
+            const lastMatrixImportLabel = lastMatrixImportDate && !Number.isNaN(lastMatrixImportDate.getTime())
+                ? `${lastMatrixImportDate.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })}, ${lastMatrixImportDate.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false })} h`
+                : 'Sin registro';
+            const lastMatrixImportDisplay = (
+                <div
+                    className="flex min-w-[150px] flex-col justify-center px-2 text-right text-[10px] leading-tight text-gray-300"
+                    title={`Última carga de datos a la matriz para ${activeSem?.nombre || 'la semana activa'}`}
+                    aria-label={`Última carga de datos a la matriz: ${lastMatrixImportLabel}. ${activeSem?.nombre || 'Semana activa'}`}
+                >
+                    <span>Actualizado al: {lastMatrixImportLabel}</span>
+                    <span className="mt-1 text-[9px] text-gray-400">{activeSem?.nombre || 'Semana activa'}</span>
+                </div>
+            );
 
             const isPastAutomaticCutoff = () => {
                 if (!activeSem?.corteDate) return false;
@@ -8812,7 +8844,7 @@ María López	maria.lopez	Z9y8x7" />
                 nextCheckbox.focus();
             };
 
-            const procesarImportacion = () => {
+            const procesarImportacion = async () => {
                 if(!activeSem || !importText.trim()) return;
                 if (!importTarget) return alert("Selecciona los datos que deseas cargar.");
                 
@@ -8820,6 +8852,7 @@ María López	maria.lopez	Z9y8x7" />
                 if (filas.length < 2 && importTarget.startsWith('masivo')) return alert("Faltan datos o encabezados para la carga masiva.");
 
                 let actualizados = 0;
+                let mensajeImportacion = '';
                 const newData = JSON.parse(JSON.stringify(activeSem.data || {}));
                 const ensureP = (id) => { if(!newData[id]) newData[id] = { conf:false, asis:{}, paEst:{}, paCal:{}, actEst:{}, actCal:{}, encEst:false, encInst:false, msgGrp:false, msgPer:false, llam:false, obs:'' }; };
 
@@ -8864,7 +8897,8 @@ María López	maria.lopez	Z9y8x7" />
                             }
                         }
                     });
-                    alert(`Importación Masiva Exitosa.\nSe detectaron ${mappings.length} columnas de actividades.\nSe actualizaron los datos de ${alumnosEncontrados} participantes.\n${participantesConDatos.size} participantes tienen al menos un dato en esas columnas.`);
+                    actualizados = alumnosEncontrados;
+                    mensajeImportacion = `Importación Masiva Exitosa.\nSe detectaron ${mappings.length} columnas de actividades.\nSe actualizaron los datos de ${alumnosEncontrados} participantes.\n${participantesConDatos.size} participantes tienen al menos un dato en esas columnas.`;
                 } else if (importTarget.includes('Cal')) {
                     filas.forEach(fila => {
                         const cols = fila.split(/[\t,;]/); 
@@ -8880,7 +8914,7 @@ María López	maria.lopez	Z9y8x7" />
                             }
                         }
                     });
-                    alert(`Importación individual exitosa. ${actualizados} registros actualizados.`);
+                    mensajeImportacion = `Importación individual exitosa. ${actualizados} registros actualizados.`;
                 } else {
                     filas.forEach(val => {
                         const idBuscado = normalizeText(val);
@@ -8904,10 +8938,30 @@ María López	maria.lopez	Z9y8x7" />
                             actualizados++;
                         }
                     });
-                    alert(`Importación individual exitosa. ${actualizados} registros actualizados.`);
+                    mensajeImportacion = `Importación individual exitosa. ${actualizados} registros actualizados.`;
                 }
-                const newSemanas = semanas.map(s => s.id === activeSem.id ? { ...s, data: newData } : s);
-                onUpdate({ ...db, semanasSeguimiento: newSemanas });
+                if (actualizados === 0) {
+                    alert(mensajeImportacion);
+                    setShowImport(false);
+                    setImportText('');
+                    return;
+                }
+
+                const newSemanas = semanas.map(s => s.id === activeSem.id
+                    ? { ...s, data: newData, lastDataImportAt: new Date().toISOString() }
+                    : s);
+                try {
+                    const saved = await onUpdate({ ...db, semanasSeguimiento: newSemanas });
+                    if (saved === false) {
+                        alert('No se pudo guardar la carga de datos. Intenta nuevamente.');
+                        return;
+                    }
+                } catch (error) {
+                    console.error('Error al guardar la carga de datos de seguimiento:', error);
+                    alert('No se pudo guardar la carga de datos. Intenta nuevamente.');
+                    return;
+                }
+                alert(mensajeImportacion);
                 setShowImport(false); setImportText('');
             };
 
@@ -9097,6 +9151,7 @@ María López	maria.lopez	Z9y8x7" />
                                 </select>
                             </div>
                             <div className="flex flex-wrap justify-end gap-2 p-1 bg-gray-900 rounded-xl">
+                                {lastMatrixImportDisplay}
                                 <button onClick={()=>setSubView('matriz')} className="px-4 py-2 rounded-lg text-xs font-bold transition-colors text-gray-400 hover:text-white hover:bg-gray-700"><i className="fa-solid fa-table-cells mr-1"></i> Matriz Principal</button>
                                 <button onClick={()=>setSubView('faltantes')} className="px-4 py-2 rounded-lg text-xs font-bold transition-colors text-gray-400 hover:text-white hover:bg-gray-700"><i className="fa-solid fa-file-signature mr-1"></i> Por Revisar</button>
                                 <button onClick={()=>setSubView('seguimiento')} className="px-4 py-2 rounded-lg text-xs font-bold transition-colors text-gray-400 hover:text-white hover:bg-gray-700"><i className="fa-solid fa-triangle-exclamation mr-1"></i> Alerta</button>
@@ -9123,6 +9178,7 @@ María López	maria.lopez	Z9y8x7" />
                             {isAdmin && <button onClick={addSemana} className="bg-cyan-600 text-cyan-50 px-3 py-2 rounded-lg text-xs hover:bg-cyan-500 font-bold transition-colors shadow-sm ml-2"><i className="fa-solid fa-plus"></i> Nueva</button>}
                         </div>
                         <div className="flex flex-wrap justify-end gap-2 p-1 bg-gray-900 rounded-xl">
+                            {lastMatrixImportDisplay}
                             <button onClick={()=>setSubView('matriz')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${subView==='matriz'?'bg-blue-600 shadow text-white':'text-gray-400 hover:text-white hover:bg-gray-700'}`}><i className="fa-solid fa-table-cells mr-1"></i> Matriz Principal</button>
                             <button onClick={()=>setSubView('faltantes')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${subView==='faltantes'?'bg-blue-600 shadow text-white':'text-gray-400 hover:text-white hover:bg-gray-700'}`}><i className="fa-solid fa-file-signature mr-1"></i> Por Revisar</button>
                             <button onClick={()=>setSubView('seguimiento')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${subView==='seguimiento'?'bg-blue-600 shadow text-white':'text-gray-400 hover:text-white hover:bg-gray-700'}`}><i className="fa-solid fa-triangle-exclamation mr-1"></i> Alerta</button>
@@ -9218,7 +9274,8 @@ María López	maria.lopez	Z9y8x7" />
                                 <table className="seguimiento-table w-full whitespace-nowrap">
                                     <thead className="bg-white sticky top-0 z-20">
                                         <tr>
-                                            <th colSpan="8" className="col-sticky" style={{left:0}}>DATOS DEL PARTICIPANTE</th>
+                                            <th colSpan="4" className="col-sticky" style={{left:0}}>DATOS DEL PARTICIPANTE</th>
+                                            <th colSpan="3" aria-hidden="true"></th>
                                             <th colSpan="1">PLATAFORMA</th>
                                             <th colSpan={db.info.numSesiones + 1}>ASISTENCIA SESIONES</th>
                                             <th colSpan={db.info.numPA * 3}>PRODUCTOS DE APRENDIZAJE</th>
@@ -9228,10 +9285,10 @@ María López	maria.lopez	Z9y8x7" />
                                             <th colSpan="4" className="bg-yellow-100 text-yellow-800">ESPACIO EXCLUSIVO ASESOR</th>
                                         </tr>
                                         <tr>
-                                            <th className="col-sticky" style={{left: 0, width: '40px', minWidth: '40px', maxWidth: '40px'}}>No</th>
-                                            <th className="col-sticky" style={{left: '40px', width: '150px', minWidth: '150px', maxWidth: '150px'}}>{renderHeaderLabel('curp', 'CURP')}</th>
-                                            <th className="col-sticky" style={{left: '190px', width: '350px', minWidth: '350px', maxWidth: '350px'}}>{renderHeaderLabel('nombre', 'NOMBRE COMPLETO')}</th>
-                                            <th className="col-sticky shadow-[2px_0_5px_rgba(0,0,0,0.05)]" style={{left: '540px', width: '120px', minWidth: '120px', maxWidth: '120px'}}>{renderHeaderLabel('usuario', 'USUARIO')}</th>
+                                            <th className="col-sticky col-sticky-no">No</th>
+                                            <th className="col-sticky col-sticky-curp">{renderHeaderLabel('curp', 'CURP')}</th>
+                                            <th className="col-sticky col-sticky-nombre">{renderHeaderLabel('nombre', 'NOMBRE COMPLETO')}</th>
+                                            <th className="col-sticky col-sticky-usuario shadow-[2px_0_5px_rgba(0,0,0,0.05)]">{renderHeaderLabel('usuario', 'USUARIO')}</th>
                                             
                                             <th>{renderHeaderLabel('correo', 'CORREO')}</th><th>{renderHeaderLabel('asesor', 'ASESOR')}</th><th>{renderHeaderLabel('grupo', 'GRUPO')}</th>
                                             <th>{renderHeaderLabel('conf', 'CONFIRMACIÓN')}</th>
@@ -9256,10 +9313,10 @@ María López	maria.lopez	Z9y8x7" />
                                             <th className="bg-yellow-50">{renderHeaderLabel('msgGrp', 'MSJ GRUPO')}</th><th className="bg-yellow-50">{renderHeaderLabel('msgPer', 'MSJ PERS.')}</th><th className="bg-yellow-50">{renderHeaderLabel('llamada', 'LLAMADA')}</th><th className="bg-yellow-50" style={{minWidth: '350px'}}>{renderHeaderLabel('obs', 'OBSERVACIONES')}</th>
                                         </tr>
                                         <tr className="bg-gray-50 border-t border-gray-200">
-                                            <th className="col-sticky" style={{left: 0, width: '40px', minWidth: '40px', maxWidth: '40px'}}></th>
-                                            <th className="col-sticky" style={{left: '40px', width: '150px', minWidth: '150px', maxWidth: '150px'}}><input type="text" className="w-full text-[10px] p-1 border border-gray-200 rounded" placeholder="Buscar CURP" value={columnFilters.curp} onChange={e => setColumnFilters(prev => ({ ...prev, curp: e.target.value }))} /></th>
-                                            <th className="col-sticky" style={{left: '190px', width: '350px', minWidth: '350px', maxWidth: '350px'}}><input type="text" className="w-full text-[10px] p-1 border border-gray-200 rounded" placeholder="Buscar nombre" value={columnFilters.nombre} onChange={e => setColumnFilters(prev => ({ ...prev, nombre: e.target.value }))} /></th>
-                                            <th className="col-sticky shadow-[2px_0_5px_rgba(0,0,0,0.05)]" style={{left: '540px', width: '120px', minWidth: '120px', maxWidth: '120px'}}><input type="text" className="w-full text-[10px] p-1 border border-gray-200 rounded" placeholder="Buscar usuario" value={columnFilters.usuario} onChange={e => setColumnFilters(prev => ({ ...prev, usuario: e.target.value }))} /></th>
+                                            <th className="col-sticky col-sticky-no"></th>
+                                            <th className="col-sticky col-sticky-curp"><input type="text" className="w-full text-[10px] p-1 border border-gray-200 rounded" placeholder="Buscar CURP" value={columnFilters.curp} onChange={e => setColumnFilters(prev => ({ ...prev, curp: e.target.value }))} /></th>
+                                            <th className="col-sticky col-sticky-nombre"><input type="text" className="w-full text-[10px] p-1 border border-gray-200 rounded" placeholder="Buscar nombre" value={columnFilters.nombre} onChange={e => setColumnFilters(prev => ({ ...prev, nombre: e.target.value }))} /></th>
+                                            <th className="col-sticky col-sticky-usuario shadow-[2px_0_5px_rgba(0,0,0,0.05)]"><input type="text" className="w-full text-[10px] p-1 border border-gray-200 rounded" placeholder="Buscar usuario" value={columnFilters.usuario} onChange={e => setColumnFilters(prev => ({ ...prev, usuario: e.target.value }))} /></th>
                                             <th><input type="text" className="w-full text-[10px] p-1 border border-gray-200 rounded" placeholder="Buscar correo" value={columnFilters.correo} onChange={e => setColumnFilters(prev => ({ ...prev, correo: e.target.value }))} /></th>
                                             <th><input type="text" className="w-full text-[10px] p-1 border border-gray-200 rounded" placeholder="Buscar asesor" value={columnFilters.asesor} onChange={e => setColumnFilters(prev => ({ ...prev, asesor: e.target.value }))} /></th>
                                             <th><input type="text" className="w-full text-[10px] p-1 border border-gray-200 rounded" placeholder="Buscar grupo" value={columnFilters.grupo} onChange={e => setColumnFilters(prev => ({ ...prev, grupo: e.target.value }))} /></th>
@@ -9308,15 +9365,15 @@ María López	maria.lopez	Z9y8x7" />
                                             const status = calFinal >= umbralAcreditacion ? 'ACREDITADO' : 'NO ACREDITADO';
                                             return (
                                                 <tr key={p.id} className="hover:bg-blue-50/50 group">
-                                                    <td className="col-sticky font-bold text-gray-500 text-center" style={{left: 0, width: '40px', minWidth: '40px', maxWidth: '40px'}}>{idx+1}</td>
-                                                    <td className="col-sticky font-mono text-[10px] text-center" style={{left: '40px', width: '150px', minWidth: '150px', maxWidth: '150px'}}>{p.curp}</td>
-                                                    <td className="col-sticky truncate font-semibold text-gray-800" style={{left: '190px', width: '350px', minWidth: '350px', maxWidth: '350px'}} title={p.completo}>
+                                                    <td className="col-sticky col-sticky-no font-bold text-gray-500 text-center">{idx+1}</td>
+                                                    <td className="col-sticky col-sticky-curp font-mono text-[10px] text-center">{p.curp}</td>
+                                                    <td className="col-sticky col-sticky-nombre truncate font-semibold text-gray-800" title={p.completo}>
                                                         <div className="flex items-center gap-2">
                                                             {isAdmin ? <button type="button" onClick={() => abrirEdicionParticipante(p)} className="truncate text-left text-gray-800 hover:text-gray-900" title="Editar datos del participante">{p.completo}</button> : <span className="truncate">{p.completo}</span>}
                                                             {(isAdmin || getParticipantMessages(p.id).length > 0) && <button type="button" onClick={() => isAdmin && getParticipantMessages(p.id).length === 0 ? abrirNuevoMensaje(p.id) : abrirMensajesParticipante(p.id)} className={`relative shrink-0 rounded-md px-1.5 py-1 text-[10px] ${getParticipantMessages(p.id).some(mensaje => mensaje.estado === 'atendido') && !getParticipantMessages(p.id).some(mensaje => mensaje.estado !== 'atendido') ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-amber-100 text-amber-700 hover:bg-amber-200'}`} title={getParticipantMessages(p.id).length > 0 ? 'Ver mensajes del participante' : 'Enviar mensaje al asesor y coordinador'} aria-label={`Mensajes de ${p.completo}`}><i className={`fa-solid ${getParticipantMessages(p.id).length > 0 ? 'fa-message' : 'fa-message-plus'}`}></i>{getParticipantMessages(p.id).length > 1 && <span className="absolute -right-1 -top-1 rounded-full bg-red-600 px-1 text-[8px] font-black text-white">{getParticipantMessages(p.id).length}</span>}</button>}
                                                         </div>
                                                     </td>
-                                                    <td className="col-sticky font-mono text-[10px] text-blue-600 text-center shadow-[2px_0_5px_rgba(0,0,0,0.05)] group-hover:bg-blue-50/50" style={{left: '540px', width: '120px', minWidth: '120px', maxWidth: '120px'}}>{getMoodleUsername(p.curp)}</td>
+                                                    <td className="col-sticky col-sticky-usuario font-mono text-[10px] text-blue-600 text-center shadow-[2px_0_5px_rgba(0,0,0,0.05)] group-hover:bg-blue-50/50">{getMoodleUsername(p.curp)}</td>
                                                     
                                                     <td className="text-[10px]">{p.correo}</td><td className="text-[10px]">{isAdmin && onEditPersonal && g.asesorId ? <button type="button" onClick={() => onEditPersonal(asesoresGlobales.find(persona => persona.id === g.asesorId) || { id: g.asesorId, nombre: g.asesor, usuario: '', password: '', roles: ['asesor'] })} className="text-left text-gray-800 hover:text-gray-900" title="Editar datos del asesor">{g.asesor}</button> : g.asesor}</td><td className="font-bold text-[10px]">{g.nombre}</td>
                                                     
