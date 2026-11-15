@@ -2480,7 +2480,7 @@
                                             <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-[10px] text-slate-200">v13.1</div>
+                                        <div className="text-[10px] text-slate-200">v13.2</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -2488,7 +2488,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v13.1</div>
+                                        <div className="text-xs text-slate-200">v13.2</div>
                                     </div>
                                 )}
                             </div>
@@ -8039,12 +8039,13 @@ María López	maria.lopez	Z9y8x7" />
                 : 'Sin registro';
             const lastMatrixImportDisplay = (
                 <div
-                    className="flex min-w-[150px] flex-col justify-center px-2 text-right text-[10px] leading-tight text-gray-300"
+                    className="flex w-[118px] min-w-[118px] flex-none flex-col justify-center px-1 text-right text-[10px] leading-tight text-gray-300"
                     title={`Última carga de datos a la matriz para ${activeSem?.nombre || 'la semana activa'}`}
                     aria-label={`Última carga de datos a la matriz: ${lastMatrixImportLabel}. ${activeSem?.nombre || 'Semana activa'}`}
                 >
-                    <span>Actualizado al: {lastMatrixImportLabel}</span>
-                    <span className="mt-1 text-[9px] text-gray-400">{activeSem?.nombre || 'Semana activa'}</span>
+                    <span>Actualizado al:</span>
+                    <span className="whitespace-nowrap">{lastMatrixImportLabel}</span>
+                    <span className="text-[9px] text-gray-400">{activeSem?.nombre || 'Semana activa'}</span>
                 </div>
             );
 
@@ -9144,19 +9145,19 @@ María López	maria.lopez	Z9y8x7" />
                 return (
                 <div className="seguimiento-panel flex flex-col h-full min-h-0 min-w-0 bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-100">
                         <div className="bg-gray-800 text-white p-4 flex flex-wrap justify-between items-center gap-2 no-print">
-                            <div className="flex items-center gap-2">
+                            <div className="flex shrink-0 items-center gap-2">
                                 <span className="font-bold text-gray-300 uppercase tracking-wider text-xs mr-2">Ciclo Operativo:</span>
                                 <select className="bg-gray-700 text-white border border-gray-600 rounded-lg p-2 text-sm outline-none focus:border-cyan-400 font-bold" value={activeSemId} onChange={e=>setActiveSemId(e.target.value)}>
                                     {semanas.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
                                 </select>
                             </div>
-                            <div className="flex flex-wrap justify-end gap-2 p-1 bg-gray-900 rounded-xl">
+                            <div className="flex min-w-0 max-w-full flex-[1_1_700px] flex-wrap justify-start gap-1 p-1 bg-gray-900 rounded-xl">
                                 {lastMatrixImportDisplay}
-                                <button onClick={()=>setSubView('matriz')} className="px-4 py-2 rounded-lg text-xs font-bold transition-colors text-gray-400 hover:text-white hover:bg-gray-700"><i className="fa-solid fa-table-cells mr-1"></i> Matriz Principal</button>
-                                <button onClick={()=>setSubView('faltantes')} className="px-4 py-2 rounded-lg text-xs font-bold transition-colors text-gray-400 hover:text-white hover:bg-gray-700"><i className="fa-solid fa-file-signature mr-1"></i> Por Revisar</button>
-                                <button onClick={()=>setSubView('seguimiento')} className="px-4 py-2 rounded-lg text-xs font-bold transition-colors text-gray-400 hover:text-white hover:bg-gray-700"><i className="fa-solid fa-triangle-exclamation mr-1"></i> Alerta</button>
-                                {(isAdmin || isCoordinador) && <button onClick={()=>setSubView('eficiencia')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${subView === 'eficiencia' ? 'bg-blue-600 shadow text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`}><i className="fa-solid fa-chart-line mr-1"></i> Eficiencia y Gráficas</button>}
-                                {canViewFollowupInfo && <button onClick={()=>setSubView('informacion')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${subView === 'informacion' ? 'bg-cyan-600 shadow text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`}><i className="fa-solid fa-circle-info mr-1"></i> Información para Seguimiento</button>}
+                                <button onClick={()=>setSubView('matriz')} className="shrink-0 whitespace-nowrap px-1 py-2 text-[9px] font-bold transition-colors text-gray-400 hover:text-white hover:bg-gray-700 sm:px-2 sm:text-[10px] rounded-lg"><i className="fa-solid fa-table-cells mr-1"></i> Matriz Principal</button>
+                                <button onClick={()=>setSubView('faltantes')} className="shrink-0 whitespace-nowrap px-1 py-2 text-[9px] font-bold transition-colors text-gray-400 hover:text-white hover:bg-gray-700 sm:px-2 sm:text-[10px] rounded-lg"><i className="fa-solid fa-file-signature mr-1"></i> Por Revisar</button>
+                                <button onClick={()=>setSubView('seguimiento')} className="shrink-0 whitespace-nowrap px-1 py-2 text-[9px] font-bold transition-colors text-gray-400 hover:text-white hover:bg-gray-700 sm:px-2 sm:text-[10px] rounded-lg"><i className="fa-solid fa-triangle-exclamation mr-1"></i> Alerta</button>
+                                {(isAdmin || isCoordinador) && <button onClick={()=>setSubView('eficiencia')} className={`shrink-0 whitespace-nowrap px-1 py-2 text-[9px] font-bold transition-colors sm:px-2 sm:text-[10px] rounded-lg ${subView === 'eficiencia' ? 'bg-blue-600 shadow text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`}><i className="fa-solid fa-chart-line mr-1"></i> Eficiencia y Gráficas</button>}
+                                {canViewFollowupInfo && <button onClick={()=>setSubView('informacion')} className={`shrink-0 whitespace-nowrap px-1 py-2 text-[9px] font-bold transition-colors sm:px-2 sm:text-[10px] rounded-lg ${subView === 'informacion' ? 'bg-cyan-600 shadow text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`}><i className="fa-solid fa-circle-info mr-1"></i> <span className="whitespace-normal text-center leading-tight">Información<br />para Seguimiento</span></button>}
                             </div>
                         </div>
                         {subView === 'informacion'
@@ -9169,7 +9170,7 @@ María López	maria.lopez	Z9y8x7" />
             return (
                 <div className="flex flex-col h-full min-h-0 min-w-0 bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-100">
                     <div className="bg-gray-800 text-white p-4 flex flex-wrap justify-between items-center gap-2 no-print">
-                        <div className="flex items-center gap-2">
+                        <div className="flex shrink-0 items-center gap-2">
                             <span className="font-bold text-gray-300 uppercase tracking-wider text-xs mr-2">Ciclo Operativo:</span>
                             <select disabled={isEditingAttendance} className="bg-gray-700 text-white border border-gray-600 rounded-lg p-2 text-sm outline-none focus:border-cyan-400 font-bold disabled:opacity-60" value={activeSemId} onChange={e=>setActiveSemId(e.target.value)}>
                                 {semanas.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
@@ -9177,13 +9178,13 @@ María López	maria.lopez	Z9y8x7" />
                             {isAdmin && <button onClick={renameSemana} className="text-gray-400 hover:text-white px-2 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 ml-1" title="Renombrar Semana"><i className="fa-solid fa-pen text-xs"></i></button>}
                             {isAdmin && <button onClick={addSemana} className="bg-cyan-600 text-cyan-50 px-3 py-2 rounded-lg text-xs hover:bg-cyan-500 font-bold transition-colors shadow-sm ml-2"><i className="fa-solid fa-plus"></i> Nueva</button>}
                         </div>
-                        <div className="flex flex-wrap justify-end gap-2 p-1 bg-gray-900 rounded-xl">
+                        <div className="flex min-w-0 max-w-full flex-[1_1_700px] flex-wrap justify-start gap-1 p-1 bg-gray-900 rounded-xl">
                             {lastMatrixImportDisplay}
-                            <button onClick={()=>setSubView('matriz')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${subView==='matriz'?'bg-blue-600 shadow text-white':'text-gray-400 hover:text-white hover:bg-gray-700'}`}><i className="fa-solid fa-table-cells mr-1"></i> Matriz Principal</button>
-                            <button onClick={()=>setSubView('faltantes')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${subView==='faltantes'?'bg-blue-600 shadow text-white':'text-gray-400 hover:text-white hover:bg-gray-700'}`}><i className="fa-solid fa-file-signature mr-1"></i> Por Revisar</button>
-                            <button onClick={()=>setSubView('seguimiento')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${subView==='seguimiento'?'bg-blue-600 shadow text-white':'text-gray-400 hover:text-white hover:bg-gray-700'}`}><i className="fa-solid fa-triangle-exclamation mr-1"></i> Alerta</button>
-                            {(isAdmin || isCoordinador) && <button onClick={()=>setSubView('eficiencia')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors text-gray-400 hover:text-white hover:bg-gray-700`}><i className="fa-solid fa-chart-line mr-1"></i> Eficiencia y Gráficas</button>}
-                            {canViewFollowupInfo && <button onClick={()=>setSubView('informacion')} className="px-4 py-2 rounded-lg text-xs font-bold transition-colors text-gray-400 hover:text-white hover:bg-gray-700"><i className="fa-solid fa-circle-info mr-1"></i> Información para Seguimiento</button>}
+                            <button onClick={()=>setSubView('matriz')} className={`shrink-0 whitespace-nowrap px-1 py-2 text-[9px] font-bold transition-colors sm:px-2 sm:text-[10px] rounded-lg ${subView==='matriz'?'bg-blue-600 shadow text-white':'text-gray-400 hover:text-white hover:bg-gray-700'}`}><i className="fa-solid fa-table-cells mr-1"></i> Matriz Principal</button>
+                            <button onClick={()=>setSubView('faltantes')} className={`shrink-0 whitespace-nowrap px-1 py-2 text-[9px] font-bold transition-colors sm:px-2 sm:text-[10px] rounded-lg ${subView==='faltantes'?'bg-blue-600 shadow text-white':'text-gray-400 hover:text-white hover:bg-gray-700'}`}><i className="fa-solid fa-file-signature mr-1"></i> Por Revisar</button>
+                            <button onClick={()=>setSubView('seguimiento')} className={`shrink-0 whitespace-nowrap px-1 py-2 text-[9px] font-bold transition-colors sm:px-2 sm:text-[10px] rounded-lg ${subView==='seguimiento'?'bg-blue-600 shadow text-white':'text-gray-400 hover:text-white hover:bg-gray-700'}`}><i className="fa-solid fa-triangle-exclamation mr-1"></i> Alerta</button>
+                            {(isAdmin || isCoordinador) && <button onClick={()=>setSubView('eficiencia')} className={`shrink-0 whitespace-nowrap px-1 py-2 text-[9px] font-bold transition-colors sm:px-2 sm:text-[10px] rounded-lg text-gray-400 hover:text-white hover:bg-gray-700`}><i className="fa-solid fa-chart-line mr-1"></i> Eficiencia y Gráficas</button>}
+                            {canViewFollowupInfo && <button onClick={()=>setSubView('informacion')} className="shrink-0 whitespace-nowrap px-1 py-2 text-[9px] font-bold transition-colors sm:px-2 sm:text-[10px] rounded-lg text-gray-400 hover:text-white hover:bg-gray-700"><i className="fa-solid fa-circle-info mr-1"></i> <span className="whitespace-normal text-center leading-tight">Información<br />para Seguimiento</span></button>}
                         </div>
                     </div>
 
