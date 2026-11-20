@@ -861,7 +861,7 @@
         // ==========================================
         // COMPONENTE GENÉRICO DE GRÁFICAS 
         // ==========================================
-        function ChartCard({ type, labels, datasets, title, subtitle, id }) {
+        function ChartCard({ type, labels, datasets, title, subtitle, id, roundPercentages = false }) {
             const canvasRef = useRef(null);
             const chartRef = useRef(null);
             const cardRef = useRef(null);
@@ -883,11 +883,15 @@
                                     label: function(context) { 
                                         let label = context.dataset.label || ''; 
                                         if (label) { label += ': '; } 
-                                        if (context.parsed.y !== null) { label += context.parsed.y; } 
-                                        else if (context.parsed !== null) { label += context.parsed; }
-                                        
                                         const labelTitle = title.toLowerCase();
-                                        if (label.includes('%') || labelTitle.includes('%') || labelTitle.includes('eficiencia')) {
+                                        const isPercentage = labelTitle.includes('%') || labelTitle.includes('eficiencia');
+                                        const value = typeof context.parsed === 'object' && context.parsed !== null
+                                            ? context.parsed.y
+                                            : context.parsed;
+                                        if (value !== null) {
+                                            label += roundPercentages && isPercentage ? Math.round(value) : value;
+                                        }
+                                        if (isPercentage) {
                                             if (!label.endsWith('%')) label += '%';
                                         }
                                         return label; 
@@ -910,7 +914,8 @@
                                     const datasetLabel = context.dataset.label || '';
                                     const labelTitle = title.toLowerCase();
                                     const isPercentage = datasetLabel.includes('%') || labelTitle.includes('%') || labelTitle.includes('eficiencia');
-                                    return isPercentage ? valNum + '%' : valNum;
+                                    const displayValue = roundPercentages && isPercentage ? Math.round(valNum) : valNum;
+                                    return isPercentage ? displayValue + '%' : displayValue;
                                 }
                             }
                         },
@@ -939,7 +944,7 @@
                 });
 
                 return () => { if(chartRef.current) chartRef.current.destroy(); }
-            }, [type, labels, datasets]);
+            }, [type, labels, datasets, title, roundPercentages]);
 
             const copyImage = async () => {
                 const target = cardRef.current;
@@ -2480,7 +2485,7 @@
                                             <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-[10px] text-slate-200">v13.2</div>
+                                        <div className="text-[10px] text-slate-200">v13.3</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -2488,7 +2493,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v13.2</div>
+                                        <div className="text-xs text-slate-200">v13.3</div>
                                     </div>
                                 )}
                             </div>
@@ -7155,10 +7160,14 @@ María López	maria.lopez	Z9y8x7" />
             );
         }
 
-        function SubTabEficiencia({ db, activeSem, listParticipantes, getPData, getEffectiveConf, calcFinal }) {
-            const grupos = Array.isArray(db?.grupos) ? db.grupos : [];
-            const participantes = Array.isArray(db?.participantes) ? db.participantes : [];
-            const participantesLista = Array.isArray(listParticipantes) ? listParticipantes : participantes;
+        function SubTabEficiencia({ db, activeSem, isAsesor, asesorGrupoId, getPData, getEffectiveConf, calcFinal }) {
+            const gruposCurso = Array.isArray(db?.grupos) ? db.grupos : [];
+            const participantesCurso = Array.isArray(db?.participantes) ? db.participantes : [];
+            const grupos = isAsesor ? gruposCurso.filter(grupo => grupo.id === asesorGrupoId) : gruposCurso;
+            const participantes = isAsesor
+                ? participantesCurso.filter(participante => participante.grupoId === asesorGrupoId)
+                : participantesCurso;
+            const participantesLista = participantes;
             const aPA = Array.from({length: db.info.numPA}, (_, i) => i + 1);
             const aAct = Array.from({length: db.info.numAct}, (_, i) => i + 1);
             const aSes = Array.from({length: db.info.numSesiones || 0}, (_, i) => i + 1);
@@ -7820,6 +7829,7 @@ María López	maria.lopez	Z9y8x7" />
                                 subtitle={String(activeSem?.nombre || '').replace(/^SEMANA\s*/i, 'Semana ').trim()}
                                 labels={['% No Acreditados', '% Acreditados']}
                                 datasets={dataEfiGlobal}
+                                roundPercentages
                             />
                         </div>
 
@@ -9141,7 +9151,7 @@ María López	maria.lopez	Z9y8x7" />
 
             if (!activeSem) return <div className="p-10 text-center">Sin semanas creadas.</div>;
 
-            if ((subView === 'eficiencia' && (isAdmin || isCoordinador)) || (subView === 'informacion' && canViewFollowupInfo)) {
+            if ((subView === 'eficiencia' && (isAdmin || isCoordinador || isAsesor)) || (subView === 'informacion' && canViewFollowupInfo)) {
                 return (
                 <div className="seguimiento-panel flex flex-col h-full min-h-0 min-w-0 bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-100">
                         <div className="bg-gray-800 text-white p-4 flex flex-wrap justify-between items-center gap-2 no-print">
@@ -9156,13 +9166,13 @@ María López	maria.lopez	Z9y8x7" />
                                 <button onClick={()=>setSubView('matriz')} className="shrink-0 whitespace-nowrap px-1 py-2 text-[9px] font-bold transition-colors text-gray-400 hover:text-white hover:bg-gray-700 sm:px-2 sm:text-[10px] rounded-lg"><i className="fa-solid fa-table-cells mr-1"></i> Matriz Principal</button>
                                 <button onClick={()=>setSubView('faltantes')} className="shrink-0 whitespace-nowrap px-1 py-2 text-[9px] font-bold transition-colors text-gray-400 hover:text-white hover:bg-gray-700 sm:px-2 sm:text-[10px] rounded-lg"><i className="fa-solid fa-file-signature mr-1"></i> Por Revisar</button>
                                 <button onClick={()=>setSubView('seguimiento')} className="shrink-0 whitespace-nowrap px-1 py-2 text-[9px] font-bold transition-colors text-gray-400 hover:text-white hover:bg-gray-700 sm:px-2 sm:text-[10px] rounded-lg"><i className="fa-solid fa-triangle-exclamation mr-1"></i> Alerta</button>
-                                {(isAdmin || isCoordinador) && <button onClick={()=>setSubView('eficiencia')} className={`shrink-0 whitespace-nowrap px-1 py-2 text-[9px] font-bold transition-colors sm:px-2 sm:text-[10px] rounded-lg ${subView === 'eficiencia' ? 'bg-blue-600 shadow text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`}><i className="fa-solid fa-chart-line mr-1"></i> Eficiencia y Gráficas</button>}
+                                {(isAdmin || isCoordinador || isAsesor) && <button onClick={()=>setSubView('eficiencia')} className={`shrink-0 whitespace-nowrap px-1 py-2 text-[9px] font-bold transition-colors sm:px-2 sm:text-[10px] rounded-lg ${subView === 'eficiencia' ? 'bg-blue-600 shadow text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`}><i className="fa-solid fa-chart-line mr-1"></i> Eficiencia y Gráficas</button>}
                                 {canViewFollowupInfo && <button onClick={()=>setSubView('informacion')} className={`shrink-0 whitespace-nowrap px-1 py-2 text-[9px] font-bold transition-colors sm:px-2 sm:text-[10px] rounded-lg ${subView === 'informacion' ? 'bg-cyan-600 shadow text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`}><i className="fa-solid fa-circle-info mr-1"></i> <span className="whitespace-normal text-center leading-tight">Información<br />para Seguimiento</span></button>}
                             </div>
                         </div>
                         {subView === 'informacion'
                             ? <SubTabInformacionSeguimiento db={db} activeSem={activeSem} getPData={getPData} getEffectiveConf={getEffectiveConf} isAsesor={isAsesor} asesorGrupoId={asesorGrupoId} />
-                            : <SubTabEficiencia db={db} activeSem={activeSem} listParticipantes={db.participantes} getPData={getPData} getEffectiveConf={getEffectiveConf} calcFinal={calcFinal} />}
+                            : <SubTabEficiencia db={db} activeSem={activeSem} isAsesor={isAsesor} asesorGrupoId={asesorGrupoId} getPData={getPData} getEffectiveConf={getEffectiveConf} calcFinal={calcFinal} />}
                     </div>
                 );
             }
@@ -9183,7 +9193,7 @@ María López	maria.lopez	Z9y8x7" />
                             <button onClick={()=>setSubView('matriz')} className={`shrink-0 whitespace-nowrap px-1 py-2 text-[9px] font-bold transition-colors sm:px-2 sm:text-[10px] rounded-lg ${subView==='matriz'?'bg-blue-600 shadow text-white':'text-gray-400 hover:text-white hover:bg-gray-700'}`}><i className="fa-solid fa-table-cells mr-1"></i> Matriz Principal</button>
                             <button onClick={()=>setSubView('faltantes')} className={`shrink-0 whitespace-nowrap px-1 py-2 text-[9px] font-bold transition-colors sm:px-2 sm:text-[10px] rounded-lg ${subView==='faltantes'?'bg-blue-600 shadow text-white':'text-gray-400 hover:text-white hover:bg-gray-700'}`}><i className="fa-solid fa-file-signature mr-1"></i> Por Revisar</button>
                             <button onClick={()=>setSubView('seguimiento')} className={`shrink-0 whitespace-nowrap px-1 py-2 text-[9px] font-bold transition-colors sm:px-2 sm:text-[10px] rounded-lg ${subView==='seguimiento'?'bg-blue-600 shadow text-white':'text-gray-400 hover:text-white hover:bg-gray-700'}`}><i className="fa-solid fa-triangle-exclamation mr-1"></i> Alerta</button>
-                            {(isAdmin || isCoordinador) && <button onClick={()=>setSubView('eficiencia')} className={`shrink-0 whitespace-nowrap px-1 py-2 text-[9px] font-bold transition-colors sm:px-2 sm:text-[10px] rounded-lg text-gray-400 hover:text-white hover:bg-gray-700`}><i className="fa-solid fa-chart-line mr-1"></i> Eficiencia y Gráficas</button>}
+                            {(isAdmin || isCoordinador || isAsesor) && <button onClick={()=>setSubView('eficiencia')} className={`shrink-0 whitespace-nowrap px-1 py-2 text-[9px] font-bold transition-colors sm:px-2 sm:text-[10px] rounded-lg text-gray-400 hover:text-white hover:bg-gray-700`}><i className="fa-solid fa-chart-line mr-1"></i> Eficiencia y Gráficas</button>}
                             {canViewFollowupInfo && <button onClick={()=>setSubView('informacion')} className="shrink-0 whitespace-nowrap px-1 py-2 text-[9px] font-bold transition-colors sm:px-2 sm:text-[10px] rounded-lg text-gray-400 hover:text-white hover:bg-gray-700"><i className="fa-solid fa-circle-info mr-1"></i> <span className="whitespace-normal text-center leading-tight">Información<br />para Seguimiento</span></button>}
                         </div>
                     </div>
