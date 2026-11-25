@@ -178,6 +178,11 @@
                 overflow-x: hidden !important;
             }
 
+            .workspace-content.avisos-workspace-content {
+                overflow-y: auto !important;
+                overflow-x: hidden !important;
+            }
+
             .seguimiento-panel {
                 min-height: 0;
             }
@@ -861,7 +866,7 @@
         // ==========================================
         // COMPONENTE GENÉRICO DE GRÁFICAS 
         // ==========================================
-        function ChartCard({ type, labels, datasets, title, subtitle, id, roundPercentages = false }) {
+        function ChartCard({ type, labels, datasets, title, subtitle, id, roundPercentages = false, maxValue = 100 }) {
             const canvasRef = useRef(null);
             const chartRef = useRef(null);
             const cardRef = useRef(null);
@@ -923,7 +928,7 @@
                             y: {
                                 beginAtZero: true,
                                 min: 0,
-                                max: 100,
+                                max: maxValue,
                                 grace: '12%',
                                 ticks: { font: {size: 10} }
                             },
@@ -944,7 +949,7 @@
                 });
 
                 return () => { if(chartRef.current) chartRef.current.destroy(); }
-            }, [type, labels, datasets, title, roundPercentages]);
+            }, [type, labels, datasets, title, roundPercentages, maxValue]);
 
             const copyImage = async () => {
                 const target = cardRef.current;
@@ -1264,9 +1269,9 @@
             const [textoPegado, setTextoPegado] = useState('');
             const [participantesProcesados, setParticipantesProcesados] = useState([]);
             const [coordinadorSearch, setCoordinadorSearch] = useState('');
-            const [editPersonalModal, setEditPersonalModal] = useState({ show: false, id: null, nombre: '', usuario: '', password: '', roles: ['asesor'], assignedGroupIds: [], coordinatorCourseIds: [], selectedGroupCourseId: '' });
+            const [editPersonalModal, setEditPersonalModal] = useState({ show: false, id: null, nombre: '', usuario: '', password: '', telefono: '', roles: ['asesor'], assignedGroupIds: [], coordinatorCourseIds: [], selectedGroupCourseId: '' });
             const [assignedCourseSearch, setAssignedCourseSearch] = useState('');
-            const [createPersonalModal, setCreatePersonalModal] = useState({ show: false, mode: 'individual', nombre: '', usuario: '', password: '', roles: ['asesor'], bulkText: '' });
+            const [createPersonalModal, setCreatePersonalModal] = useState({ show: false, mode: 'individual', nombre: '', usuario: '', password: '', telefono: '', roles: ['asesor'], bulkText: '' });
 
             const ordenarPersonalPorNombre = (personal) => [...personal].sort((a, b) =>
                 String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es', { sensitivity: 'base' })
@@ -1458,7 +1463,7 @@
                         nombreCurso, horas, modalidad, moodlePass, moodlePassMode, numSesiones: parseInt(numSesiones), numPA: parseInt(numPA), numAct: parseInt(numAct),
                         acreditacion: parseInt(acreditacion) || 80, calculoFinalTipo, coordinadorIds 
                     },
-                    participantes: participantesProcesados || [], grupos: [], semanasSeguimiento: [],
+                    participantes: participantesProcesados || [], participantesOcultos: [], grupos: [], semanasSeguimiento: [],
                     fechaCreacion: new Date().toLocaleDateString()
                 };
                 const saved = await setBasesDeDatos(current => [...current, nuevaBD]);
@@ -2270,11 +2275,11 @@
             };
 
             const resetCreatePersonalModal = () => {
-                setCreatePersonalModal({ show: false, mode: 'individual', nombre: '', usuario: '', password: '', roles: ['asesor'], bulkText: '' });
+                setCreatePersonalModal({ show: false, mode: 'individual', nombre: '', usuario: '', password: '', telefono: '', roles: ['asesor'], bulkText: '' });
             };
 
             const handleCrearPersonalAdmin = () => {
-                setCreatePersonalModal({ show: true, mode: 'individual', nombre: '', usuario: '', password: '', roles: ['asesor'], bulkText: '' });
+                setCreatePersonalModal({ show: true, mode: 'individual', nombre: '', usuario: '', password: '', telefono: '', roles: ['asesor'], bulkText: '' });
             };
 
             const abrirEdicionPersonalAdmin = (persona) => {
@@ -2292,6 +2297,7 @@
                     usuario: persona.usuario || '',
                     password: persona.password,
                     roles: [...new Set([...(persona.roles || ['asesor']), ...(coordinatorCourseIds.length ? ['coordinador'] : [])])],
+                    telefono: persona.telefono || persona.phone1 || '',
                     assignedGroupIds,
                     coordinatorCourseIds,
                     selectedGroupCourseId: firstAssignedCourse
@@ -2303,16 +2309,17 @@
                     const nombre = createPersonalModal.nombre.trim();
                     const usuario = createPersonalModal.usuario.trim();
                     const password = createPersonalModal.password.trim();
+                    const telefono = createPersonalModal.telefono.trim();
                     if (!nombre || !usuario || !password) return alert('Ingresa nombre completo, usuario y contraseña.');
 
                     const usuarioNormalizado = normalizeText(usuario);
                     const existente = personalGlobal.find(persona => normalizeText(persona.usuario || persona.nombre) === usuarioNormalizado);
                     if (existente) {
-                        const reemplazar = confirm(`El usuario "${usuario}" ya existe como "${existente.nombre}".\n\n¿Deseas actualizar su nombre, contraseña y roles?`);
+                        const reemplazar = confirm(`El usuario "${usuario}" ya existe como "${existente.nombre}".\n\n¿Deseas actualizar su nombre, contraseña, teléfono y roles?`);
                         if (!reemplazar) return;
 
                         setPersonalGlobal(prev => ordenarPersonalPorNombre(prev.map(persona => persona.id === existente.id
-                            ? { ...persona, nombre, usuario, password, roles: createPersonalModal.roles }
+                            ? { ...persona, nombre, usuario, password, telefono, roles: createPersonalModal.roles }
                             : persona)));
                         setBasesDeDatos(prev => prev.map(db => ({
                             ...db,
@@ -2323,7 +2330,7 @@
                         return;
                     }
 
-                    setPersonalGlobal(prev => ordenarPersonalPorNombre([...prev, { id: `PERS-${Date.now()}`, nombre, usuario, password, roles: createPersonalModal.roles }]));
+                    setPersonalGlobal(prev => ordenarPersonalPorNombre([...prev, { id: `PERS-${Date.now()}`, nombre, usuario, password, telefono, roles: createPersonalModal.roles }]));
                     alert(`Persona registrada. Usuario: ${usuario} • Contraseña: ${password}`);
                     resetCreatePersonalModal();
                     return;
@@ -2347,7 +2354,11 @@
                     const nombre = celdas[0] || '';
                     const usuario = celdas[1] || celdas[0] || '';
                     const password = celdas[2] || celdas[1] || '';
-                    const rolesTexto = normalizeText(celdas[3] || 'ASESOR');
+                    const rolesCandidate = normalizeText(celdas[3] || '');
+                    const rolesValidos = ['ASESOR', 'COORDINADOR', 'AMBOS', 'MANAGER', 'GERENTE'];
+                    const telefonoEnCuartaColumna = celdas.length === 4 && !rolesValidos.some(role => rolesCandidate.includes(role));
+                    const rolesTexto = telefonoEnCuartaColumna || !rolesCandidate ? 'ASESOR' : rolesCandidate;
+                    const telefono = celdas[4] || (telefonoEnCuartaColumna ? celdas[3] : '');
                     const roles = [];
                     if (rolesTexto.includes('ASESOR') || rolesTexto.includes('AMBOS')) roles.push('asesor');
                     if (rolesTexto.includes('COORDINADOR') || rolesTexto.includes('AMBOS')) roles.push('coordinador');
@@ -2355,7 +2366,7 @@
                     if (roles.length === 0) roles.push('asesor');
 
                     if (nombre && usuario && password) {
-                        registrosPorUsuario.set(normalizeText(usuario), { id: `PERS-${Date.now()}-${index + 1}`, nombre, usuario, password, roles });
+                        registrosPorUsuario.set(normalizeText(usuario), { id: `PERS-${Date.now()}-${index + 1}`, nombre, usuario, password, telefono, roles });
                     }
                 });
 
@@ -2372,7 +2383,7 @@
                         const actual = personalGlobal.find(persona => normalizeText(persona.usuario || persona.nombre) === normalizeText(registro.usuario));
                         return `• ${registro.usuario}: ${actual?.nombre || 'sin nombre'} → ${registro.nombre}`;
                     }).join('\n');
-                    actualizarExistentes = confirm(`Se encontraron ${existentes.length} usuario(s) existente(s):\n\n${detalle}\n\n¿Deseas reemplazar sus nombres, contraseñas y roles?\n\nAceptar = actualizar\nCancelar = conservar los existentes y cargar solo los nuevos.`);
+                    actualizarExistentes = confirm(`Se encontraron ${existentes.length} usuario(s) existente(s):\n\n${detalle}\n\n¿Deseas reemplazar sus nombres, contraseñas, teléfonos indicados y roles?\n\nAceptar = actualizar\nCancelar = conservar los existentes y cargar solo los nuevos.`);
                 }
 
                 const registrosParaAgregar = nuevos.map(registro => ({ ...registro, id: `PERS-${Date.now()}-${registro.usuario}` }));
@@ -2380,7 +2391,14 @@
                 const nuevosPersonal = personalGlobal
                     .map(persona => {
                         const actualizacion = actualizaciones.find(registro => normalizeText(registro.usuario) === normalizeText(persona.usuario || persona.nombre));
-                        return actualizacion ? { ...persona, nombre: actualizacion.nombre, usuario: actualizacion.usuario, password: actualizacion.password, roles: actualizacion.roles } : persona;
+                        return actualizacion ? {
+                            ...persona,
+                            nombre: actualizacion.nombre,
+                            usuario: actualizacion.usuario,
+                            password: actualizacion.password,
+                            ...(actualizacion.telefono ? { telefono: actualizacion.telefono } : {}),
+                            roles: actualizacion.roles
+                        } : persona;
                     })
                     .concat(registrosParaAgregar);
 
@@ -2401,7 +2419,7 @@
             };
 
             const guardarEdicionPersonal = () => {
-                const { id, nombre, usuario, password, assignedGroupIds = [], coordinatorCourseIds = [] } = editPersonalModal;
+                const { id, nombre, usuario, password, telefono, assignedGroupIds = [], coordinatorCourseIds = [] } = editPersonalModal;
                 const roles = editPersonalModal.roles.filter(role =>
                     role !== 'asesor' && role !== 'coordinador'
                         ? true
@@ -2413,7 +2431,7 @@
                 const gruposConOtroAsesor = basesDeDatos.flatMap(db => (db.grupos || []).filter(grupo => assignedGroupIds.includes(grupo.id) && grupo.asesorId && grupo.asesorId !== id && grupo.asesor).map(grupo => `${db.info.siglas || 'Curso'} · ${grupo.nombre} (${grupo.asesor})`));
                 if (gruposConOtroAsesor.length > 0 && !confirm(`Estos grupos ya tienen otro asesor:\n\n${gruposConOtroAsesor.join('\n')}\n\n¿Deseas asignarlos a ${nombre}?`)) return;
 
-                const nuevosPersonal = ordenarPersonalPorNombre(personalGlobal.map(a => a.id === id ? { ...a, nombre, usuario, password, roles } : a));
+                const nuevosPersonal = ordenarPersonalPorNombre(personalGlobal.map(a => a.id === id ? { ...a, nombre, usuario, password, telefono: telefono.trim(), roles } : a));
                 setPersonalGlobal(nuevosPersonal);
 
                 const nuevasBases = basesDeDatos.map(db => {
@@ -2431,7 +2449,7 @@
                 });
                 setBasesDeDatos(nuevasBases);
 
-                setEditPersonalModal({ show: false, id: null, nombre: '', usuario: '', password: '', roles: ['asesor'], assignedGroupIds: [], coordinatorCourseIds: [], selectedGroupCourseId: '' });
+                setEditPersonalModal({ show: false, id: null, nombre: '', usuario: '', password: '', telefono: '', roles: ['asesor'], assignedGroupIds: [], coordinatorCourseIds: [], selectedGroupCourseId: '' });
                 alert('Personal actualizado correctamente en todo el sistema.');
             };
 
@@ -2485,7 +2503,7 @@
                                             <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-[10px] text-slate-200">v13.3</div>
+                                        <div className="text-[10px] text-slate-200">v13.6</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -2493,7 +2511,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v13.3</div>
+                                        <div className="text-xs text-slate-200">v13.6</div>
                                     </div>
                                 )}
                             </div>
@@ -2950,7 +2968,7 @@
                                                                 <td className="p-4 font-mono text-xs text-gray-500 bg-gray-50/50 px-2 rounded">{a.password}</td>
                                                                 <td className="p-4 text-center">
                                                                     <div className="flex justify-center gap-2">
-                                                                        <button onClick={() => { const coordinatorCourseIds = basesDeDatos.filter(db => (db.info.coordinadorIds || (db.info.coordinadorId ? [db.info.coordinadorId] : [])).includes(a.id)).map(db => db.id); const assignedGroupIds = basesDeDatos.flatMap(db => (db.grupos || []).filter(g => g.asesorId === a.id || g.asesor === a.nombre).map(g => g.id)); const firstAssignedCourse = basesDeDatos.find(db => (db.grupos || []).some(g => assignedGroupIds.includes(g.id)))?.id || ''; setAssignedCourseSearch(''); setEditPersonalModal({show: true, id: a.id, nombre: a.nombre, usuario: a.usuario || '', password: a.password, roles: [...new Set([...(a.roles || ['asesor']), ...(coordinatorCourseIds.length ? ['coordinador'] : [])])], assignedGroupIds, coordinatorCourseIds, selectedGroupCourseId: firstAssignedCourse})}} className="w-8 h-8 rounded-lg text-indigo-600 hover:bg-indigo-100 flex items-center justify-center transition-colors"><i className="fa-solid fa-pen"></i></button>
+                                                                        <button onClick={() => { const coordinatorCourseIds = basesDeDatos.filter(db => (db.info.coordinadorIds || (db.info.coordinadorId ? [db.info.coordinadorId] : [])).includes(a.id)).map(db => db.id); const assignedGroupIds = basesDeDatos.flatMap(db => (db.grupos || []).filter(g => g.asesorId === a.id || g.asesor === a.nombre).map(g => g.id)); const firstAssignedCourse = basesDeDatos.find(db => (db.grupos || []).some(g => assignedGroupIds.includes(g.id)))?.id || ''; setAssignedCourseSearch(''); setEditPersonalModal({show: true, id: a.id, nombre: a.nombre, usuario: a.usuario || '', password: a.password, telefono: a.telefono || a.phone1 || '', roles: [...new Set([...(a.roles || ['asesor']), ...(coordinatorCourseIds.length ? ['coordinador'] : [])])], assignedGroupIds, coordinatorCourseIds, selectedGroupCourseId: firstAssignedCourse})}} className="w-8 h-8 rounded-lg text-indigo-600 hover:bg-indigo-100 flex items-center justify-center transition-colors"><i className="fa-solid fa-pen"></i></button>
                                                                         <button onClick={() => eliminarPersonal(a.id)} className="w-8 h-8 rounded-lg text-gray-400 hover:bg-red-100 hover:text-red-600 flex items-center justify-center transition-colors"><i className="fa-solid fa-trash"></i></button>
                                                                     </div>
                                                                 </td>
@@ -3088,7 +3106,7 @@
                                                         <td className="p-4 font-mono text-xs text-gray-500 bg-gray-50/50 px-2 rounded">{a.password}</td>
                                                         <td className="p-4 text-center">
                                                             <div className="flex justify-center gap-2">
-                                                                <button onClick={() => { const coordinatorCourseIds = basesDeDatos.filter(db => (db.info.coordinadorIds || (db.info.coordinadorId ? [db.info.coordinadorId] : [])).includes(a.id)).map(db => db.id); const assignedGroupIds = basesDeDatos.flatMap(db => (db.grupos || []).filter(g => g.asesorId === a.id || g.asesor === a.nombre).map(g => g.id)); const firstAssignedCourse = basesDeDatos.find(db => (db.grupos || []).some(g => assignedGroupIds.includes(g.id)))?.id || ''; setAssignedCourseSearch(''); setEditPersonalModal({show: true, id: a.id, nombre: a.nombre, usuario: a.usuario || '', password: a.password, roles: [...new Set([...(a.roles || ['asesor']), ...(coordinatorCourseIds.length ? ['coordinador'] : [])])], assignedGroupIds, coordinatorCourseIds, selectedGroupCourseId: firstAssignedCourse})}} className="w-8 h-8 rounded-lg text-violet-600 hover:bg-violet-100 flex items-center justify-center transition-colors"><i className="fa-solid fa-pen"></i></button>
+                                                                <button onClick={() => { const coordinatorCourseIds = basesDeDatos.filter(db => (db.info.coordinadorIds || (db.info.coordinadorId ? [db.info.coordinadorId] : [])).includes(a.id)).map(db => db.id); const assignedGroupIds = basesDeDatos.flatMap(db => (db.grupos || []).filter(g => g.asesorId === a.id || g.asesor === a.nombre).map(g => g.id)); const firstAssignedCourse = basesDeDatos.find(db => (db.grupos || []).some(g => assignedGroupIds.includes(g.id)))?.id || ''; setAssignedCourseSearch(''); setEditPersonalModal({show: true, id: a.id, nombre: a.nombre, usuario: a.usuario || '', password: a.password, telefono: a.telefono || a.phone1 || '', roles: [...new Set([...(a.roles || ['asesor']), ...(coordinatorCourseIds.length ? ['coordinador'] : [])])], assignedGroupIds, coordinatorCourseIds, selectedGroupCourseId: firstAssignedCourse})}} className="w-8 h-8 rounded-lg text-violet-600 hover:bg-violet-100 flex items-center justify-center transition-colors"><i className="fa-solid fa-pen"></i></button>
                                                                 <button onClick={() => eliminarPersonal(a.id)} className="w-8 h-8 rounded-lg text-gray-400 hover:bg-red-100 hover:text-red-600 flex items-center justify-center transition-colors"><i className="fa-solid fa-trash"></i></button>
                                                             </div>
                                                         </td>
@@ -3510,6 +3528,10 @@
                                                 <input type="text" className="w-full border border-gray-300 rounded-lg p-3 text-sm font-mono focus:border-indigo-500 outline-none" value={createPersonalModal.password} onChange={e => setCreatePersonalModal(prev => ({ ...prev, password: e.target.value }))} placeholder="Ej. A1b2C3" />
                                             </div>
                                             <div>
+                                                <label className="block text-xs font-bold text-gray-700 mb-1">Teléfono</label>
+                                                <input type="tel" className="w-full border border-gray-300 rounded-lg p-3 text-sm focus:border-indigo-500 outline-none" value={createPersonalModal.telefono} onChange={e => setCreatePersonalModal(prev => ({ ...prev, telefono: e.target.value }))} placeholder="Ej. 5551234567" />
+                                            </div>
+                                            <div>
                                                 <label className="block text-xs font-bold text-gray-700 mb-2">Roles</label>
                                                 <div className="flex gap-4">
                                                     {['asesor', 'coordinador', 'manager'].map(role => <label key={role} className="flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" checked={createPersonalModal.roles.includes(role)} onChange={e => setCreatePersonalModal(prev => ({ ...prev, roles: e.target.checked ? [...prev.roles, role] : prev.roles.filter(item => item !== role) }))} />{role === 'asesor' ? 'Asesor' : role === 'coordinador' ? 'Coordinador' : 'Manager'}</label>)}
@@ -3526,9 +3548,9 @@ María López	maria.lopez	Z9y8x7" />
                                             </div>
                                             <div className="rounded-lg bg-indigo-50 p-3 text-xs text-indigo-700 border border-indigo-100">
                                                 <p className="font-semibold mb-1">Formato esperado:</p>
-                                                <p>Nombre Completo · Usuario · Contraseña Única</p>
-                                                <p className="mt-1 font-mono">Juan Pérez · juan.perez · A1b2C3</p>
-                                                <p className="mt-1">También acepta una cuarta columna opcional de rol: Asesor, Coordinador, Manager o Ambos.</p>
+                                                <p>Nombre Completo · Usuario · Contraseña Única · Rol (opcional) · Teléfono (opcional)</p>
+                                                <p className="mt-1 font-mono">Juan Pérez · juan.perez · A1b2C3 · Asesor · 5551234567</p>
+                                                <p className="mt-1">También puedes indicar solo el teléfono después de la contraseña. El teléfono y el rol son opcionales.</p>
                                             </div>
                                         </div>
                                     )}
@@ -3544,7 +3566,7 @@ María López	maria.lopez	Z9y8x7" />
                         )}
 
                         {editPersonalModal.show && (
-                            <Modal show={editPersonalModal.show} onClose={() => setEditPersonalModal({ show:false, id:null, nombre:'', usuario:'', password:'', roles:['asesor'], assignedGroupIds: [], coordinatorCourseIds: [], selectedGroupCourseId: '' })} width="max-w-5xl" ariaLabel="Editar personal">
+                            <Modal show={editPersonalModal.show} onClose={() => setEditPersonalModal({ show:false, id:null, nombre:'', usuario:'', password:'', telefono:'', roles:['asesor'], assignedGroupIds: [], coordinatorCourseIds: [], selectedGroupCourseId: '' })} width="max-w-5xl" ariaLabel="Editar personal">
                                 <div className="w-full max-w-[980px] rounded-[28px] bg-slate-50 p-4 shadow-2xl ring-1 ring-slate-200 sm:p-6">
                                     <div className="mb-5 flex flex-col gap-3 border-b border-slate-200 pb-4 sm:flex-row sm:items-center sm:justify-between">
                                         <div className="flex items-center gap-3">
@@ -3578,6 +3600,10 @@ María López	maria.lopez	Z9y8x7" />
                                                 <div>
                                                     <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-600">Contraseña</label>
                                                     <input type="text" className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-mono text-slate-800 outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100" value={editPersonalModal.password} onChange={e=>setEditPersonalModal({...editPersonalModal, password: e.target.value})} />
+                                                </div>
+                                                <div>
+                                                    <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-600">Teléfono</label>
+                                                    <input type="tel" className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-800 outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100" value={editPersonalModal.telefono || ''} onChange={e=>setEditPersonalModal({...editPersonalModal, telefono: e.target.value})} />
                                                 </div>
                                             </div>
                                         </section>
@@ -3702,7 +3728,7 @@ María López	maria.lopez	Z9y8x7" />
                                     </div>
 
                                     <div className="mt-6 flex justify-end gap-3 border-t border-slate-200 pt-4">
-                                        <button onClick={()=>setEditPersonalModal({show:false, id:null, nombre:'', usuario:'', password:'', roles:['asesor'], assignedGroupIds: [], coordinatorCourseIds: []})} className="rounded-xl px-4 py-2.5 font-bold text-slate-600 transition-colors hover:bg-slate-200">Cancelar</button>
+                                        <button onClick={()=>setEditPersonalModal({show:false, id:null, nombre:'', usuario:'', password:'', telefono:'', roles:['asesor'], assignedGroupIds: [], coordinatorCourseIds: []})} className="rounded-xl px-4 py-2.5 font-bold text-slate-600 transition-colors hover:bg-slate-200">Cancelar</button>
                                         <button onClick={guardarEdicionPersonal} className="rounded-xl bg-indigo-600 px-4 py-2.5 font-bold text-white shadow-md transition-colors hover:bg-indigo-700">Guardar Cambios</button>
                                     </div>
                                 </div>
@@ -3900,6 +3926,332 @@ María López	maria.lopez	Z9y8x7" />
         // ==========================================
         // COMPONENTE WORKSPACE (4.0 LÓGICA DE PERMISOS)
         // ==========================================
+        const getAvisoEstado = (aviso, asesorId = '') => {
+            if (aviso?.destinatario !== 'asesor' && asesorId) {
+                const estadoAsesor = aviso.estadosPorAsesor?.[asesorId]?.estado;
+                if (estadoAsesor) return estadoAsesor === 'atendido' ? 'atendido' : 'pendiente';
+            }
+            return aviso?.estado === 'atendido' ? 'atendido' : 'pendiente';
+        };
+        const getAvisoEstadoClasses = estado => estado === 'atendido'
+            ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+            : 'border-amber-200 bg-amber-50 text-amber-900';
+        const getAvisoPrioridad = prioridad => ['normal', 'importante', 'urgente'].includes(prioridad) ? prioridad : 'normal';
+        const getAvisoPrioridadClasses = prioridad => ({
+            normal: 'border-slate-200 bg-slate-100 text-slate-700',
+            importante: 'border-amber-200 bg-amber-100 text-amber-800',
+            urgente: 'border-red-200 bg-red-100 text-red-800'
+        })[getAvisoPrioridad(prioridad)];
+
+        const guardarEstadoAviso = async (onUpdate, avisoId, estado, actualizadoPor, asesorId = '') => {
+            const timestamp = new Date().toISOString();
+            const saved = await onUpdate(currentDb => ({
+                avisosAsesores: (Array.isArray(currentDb.avisosAsesores) ? currentDb.avisosAsesores : [])
+                    .map(aviso => {
+                        if (aviso.id !== avisoId) return aviso;
+                        if (aviso.destinatario !== 'asesor' && asesorId) {
+                            return {
+                                ...aviso,
+                                estadosPorAsesor: {
+                                    ...(aviso.estadosPorAsesor || {}),
+                                    [asesorId]: {
+                                        estado,
+                                        atendidoPor: estado === 'atendido' ? actualizadoPor : '',
+                                        atendidoEn: estado === 'atendido' ? timestamp : ''
+                                    }
+                                }
+                            };
+                        }
+                        return {
+                            ...aviso,
+                            estado,
+                            atendidoPor: estado === 'atendido' ? actualizadoPor : '',
+                            atendidoEn: estado === 'atendido' ? timestamp : ''
+                        };
+                    })
+            }));
+            if (saved === false) throw new Error('Firebase no confirmó el cambio de estado del aviso.');
+        };
+
+        function TabAvisosAsesores({ db, onUpdate, asesoresGlobales, updatedBy }) {
+            const avisos = Array.isArray(db.avisosAsesores) ? db.avisosAsesores : [];
+            const asesoresDelCurso = useMemo(() => {
+                const asesores = new Map();
+                (db.grupos || []).forEach(grupo => {
+                    const asesor = asesoresGlobales.find(persona => persona.id === grupo.asesorId)
+                        || asesoresGlobales.find(persona => normalizeText(persona.nombre) === normalizeText(grupo.asesor));
+                    if (!asesor?.id) return;
+                    const grupoNombre = String(grupo.nombre || '').trim();
+                    const grupoLabel = /^grupo\b/i.test(grupoNombre)
+                        ? grupoNombre.toUpperCase()
+                        : `GRUPO ${grupoNombre || 'SIN NOMBRE'}`;
+                    const asesorConGrupos = asesores.get(asesor.id) || { ...asesor, grupos: [] };
+                    if (!asesorConGrupos.grupos.includes(grupoLabel)) asesorConGrupos.grupos.push(grupoLabel);
+                    asesores.set(asesor.id, asesorConGrupos);
+                });
+                const compararGrupos = (a, b) => String(a || '').localeCompare(String(b || ''), 'es', { numeric: true, sensitivity: 'base' });
+                return Array.from(asesores.values())
+                    .map(asesor => {
+                        const grupos = [...asesor.grupos].sort(compararGrupos);
+                        return { ...asesor, grupos, grupoLabel: grupos.join(' / ') };
+                    })
+                    .sort((a, b) => compararGrupos(a.grupos[0], b.grupos[0])
+                        || String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es', { sensitivity: 'base' }));
+            }, [db.grupos, asesoresGlobales]);
+            const getAsesorLabel = asesor => `${asesor.grupoLabel} - ${asesor.nombre}`;
+            const [draft, setDraft] = useState({ id: '', titulo: '', mensaje: '', destinatario: 'todos', asesorId: '', prioridad: 'normal' });
+            const [isSaving, setIsSaving] = useState(false);
+
+            const limpiarDraft = () => setDraft({ id: '', titulo: '', mensaje: '', destinatario: 'todos', asesorId: '', prioridad: 'normal' });
+
+            const guardarAviso = async () => {
+                const titulo = draft.titulo.trim();
+                const mensaje = draft.mensaje.trim();
+                if (!titulo || !mensaje) {
+                    alert('Escribe un título y el mensaje del aviso.');
+                    return;
+                }
+                if (draft.destinatario === 'asesor' && !draft.asesorId) {
+                    alert('Selecciona el asesor que recibirá este aviso.');
+                    return;
+                }
+
+                const now = new Date().toISOString();
+                const avisoExistente = avisos.find(item => item.id === draft.id);
+                const aviso = {
+                    ...(avisoExistente || {}),
+                    id: draft.id || `AVISO-${Date.now()}`,
+                    titulo,
+                    mensaje,
+                    destinatario: draft.destinatario,
+                    asesorId: draft.destinatario === 'asesor' ? draft.asesorId : '',
+                    prioridad: getAvisoPrioridad(draft.prioridad),
+                    estado: draft.destinatario === 'todos' && avisoExistente?.destinatario === 'asesor'
+                        ? 'pendiente'
+                        : getAvisoEstado(avisoExistente),
+                    atendidoPor: draft.destinatario === 'todos' && avisoExistente?.destinatario === 'asesor'
+                        ? ''
+                        : avisoExistente?.atendidoPor || '',
+                    atendidoEn: draft.destinatario === 'todos' && avisoExistente?.destinatario === 'asesor'
+                        ? ''
+                        : avisoExistente?.atendidoEn || '',
+                    estadosPorAsesor: draft.destinatario === 'todos' && avisoExistente?.destinatario !== 'asesor'
+                        ? avisoExistente?.estadosPorAsesor || {}
+                        : {},
+                    creadoEn: avisoExistente?.creadoEn || now,
+                    actualizadoEn: now
+                };
+
+                setIsSaving(true);
+                try {
+                    const saved = await onUpdate(currentDb => {
+                        const currentAvisos = Array.isArray(currentDb.avisosAsesores) ? currentDb.avisosAsesores : [];
+                        const avisoActualizado = currentAvisos.find(item => item.id === draft.id);
+                        const avisosActualizados = draft.id
+                            ? currentAvisos.map(item => item.id === draft.id ? {
+                                ...avisoActualizado,
+                                ...aviso,
+                                estado: getAvisoEstado(avisoActualizado),
+                                atendidoPor: avisoActualizado?.atendidoPor || '',
+                                atendidoEn: avisoActualizado?.atendidoEn || '',
+                                estadosPorAsesor: avisoActualizado?.estadosPorAsesor || aviso.estadosPorAsesor || {}
+                            } : item)
+                            : [...currentAvisos, aviso];
+                        return { avisosAsesores: avisosActualizados };
+                    });
+                    if (saved === false) {
+                        alert('No se pudo guardar el aviso. Intenta nuevamente.');
+                        return;
+                    }
+                    limpiarDraft();
+                } catch (error) {
+                    console.error('Error al guardar aviso para asesores:', error);
+                    alert('No se pudo guardar el aviso. Intenta nuevamente.');
+                } finally {
+                    setIsSaving(false);
+                }
+            };
+
+            const eliminarAviso = async avisoId => {
+                if (!confirm('¿Eliminar este aviso para los asesores?')) return;
+                try {
+                    const saved = await onUpdate(currentDb => ({
+                        avisosAsesores: (Array.isArray(currentDb.avisosAsesores) ? currentDb.avisosAsesores : [])
+                            .filter(item => item.id !== avisoId)
+                    }));
+                    if (saved === false) {
+                        alert('No se pudo eliminar el aviso. Intenta nuevamente.');
+                        return;
+                    }
+                    if (draft.id === avisoId) limpiarDraft();
+                } catch (error) {
+                    console.error('Error al eliminar aviso para asesores:', error);
+                    alert('No se pudo eliminar el aviso. Intenta nuevamente.');
+                }
+            };
+
+            const cambiarEstadoAviso = async (avisoId, estado, asesorId = '') => {
+                try {
+                    await guardarEstadoAviso(onUpdate, avisoId, estado, updatedBy || 'Administrador', asesorId);
+                } catch (error) {
+                    console.error('Error al actualizar el estado del aviso:', error);
+                    alert('No se pudo actualizar el estado del aviso. Intenta nuevamente.');
+                }
+            };
+
+            return (
+                <div className="mx-auto w-full max-w-5xl space-y-6 pb-8">
+                    <section className="rounded-2xl border border-blue-100 bg-white p-6 shadow-sm">
+                        <div className="mb-5 flex items-center gap-4 border-b border-slate-100 pb-4 text-blue-900">
+                            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-100 text-blue-700"><i className="fa-solid fa-bullhorn text-xl"></i></div>
+                            <div>
+                                <h2 className="text-2xl font-bold">Avisos para asesores</h2>
+                                <p className="mt-1 text-sm text-gray-500">Elige si el aviso se muestra a todos los asesores del curso o solo a uno específico.</p>
+                            </div>
+                        </div>
+                        <p className="mb-5 rounded-xl border border-blue-100 bg-blue-50 p-3 text-sm text-blue-900">
+                            Cerrar el popup solo lo oculta. Al marcar un aviso como atendido, dejará de aparecerle a ese asesor; los avisos para todos mantienen el estado individual de cada asesor.
+                        </p>
+                        <div className="space-y-4">
+                            <label className="block text-xs font-bold uppercase tracking-wide text-slate-600">
+                                Título
+                                <input
+                                    type="text"
+                                    value={draft.titulo}
+                                    onChange={event => setDraft(current => ({ ...current, titulo: event.target.value }))}
+                                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-normal normal-case text-slate-800 outline-none focus:border-blue-500 focus:bg-white"
+                                    placeholder="Ej. Entregar reporte de avance"
+                                />
+                            </label>
+                            <label className="block text-xs font-bold uppercase tracking-wide text-slate-600">
+                                Destinatarios
+                                <select
+                                    value={draft.destinatario}
+                                    onChange={event => setDraft(current => ({ ...current, destinatario: event.target.value, asesorId: event.target.value === 'todos' ? '' : current.asesorId }))}
+                                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-normal normal-case text-slate-800 outline-none focus:border-blue-500 focus:bg-white"
+                                >
+                                    <option value="todos">Todos los asesores de este curso</option>
+                                    <option value="asesor">Un asesor específico</option>
+                                </select>
+                            </label>
+                            {draft.destinatario === 'asesor' && (
+                                <label className="block text-xs font-bold uppercase tracking-wide text-slate-600">
+                                    Asesor
+                                    <select
+                                        value={draft.asesorId}
+                                        onChange={event => setDraft(current => ({ ...current, asesorId: event.target.value }))}
+                                        className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-normal normal-case text-slate-800 outline-none focus:border-blue-500 focus:bg-white"
+                                    >
+                                        <option value="">Selecciona un asesor</option>
+                                        {asesoresDelCurso.map(asesor => <option key={asesor.id} value={asesor.id}>{getAsesorLabel(asesor)}</option>)}
+                                    </select>
+                                    {asesoresDelCurso.length === 0 && <span className="mt-1 block font-normal normal-case text-amber-700">No hay asesores asignados a grupos en este curso.</span>}
+                                </label>
+                            )}
+                            <label className="block text-xs font-bold uppercase tracking-wide text-slate-600">
+                                Prioridad
+                                <select
+                                    value={draft.prioridad}
+                                    onChange={event => setDraft(current => ({ ...current, prioridad: event.target.value }))}
+                                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-normal normal-case text-slate-800 outline-none focus:border-blue-500 focus:bg-white"
+                                >
+                                    <option value="normal">Normal</option>
+                                    <option value="importante">Importante</option>
+                                    <option value="urgente">Urgente</option>
+                                </select>
+                            </label>
+                            <label className="block text-xs font-bold uppercase tracking-wide text-slate-600">
+                                Mensaje
+                                <textarea
+                                    rows="4"
+                                    value={draft.mensaje}
+                                    onChange={event => setDraft(current => ({ ...current, mensaje: event.target.value }))}
+                                    className="mt-1 w-full resize-y rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-normal normal-case text-slate-800 outline-none focus:border-blue-500 focus:bg-white"
+                                    placeholder="Escribe las indicaciones que debe atender el asesor."
+                                />
+                            </label>
+                            <div className="flex flex-wrap justify-end gap-3">
+                                {draft.id && <button type="button" onClick={limpiarDraft} className="rounded-xl bg-slate-100 px-5 py-2.5 font-semibold text-slate-600 hover:bg-slate-200">Cancelar edición</button>}
+                                <button type="button" disabled={isSaving} onClick={guardarAviso} className="rounded-xl bg-blue-700 px-5 py-2.5 font-bold text-white hover:bg-blue-800 disabled:cursor-wait disabled:opacity-60">
+                                    <i className={`fa-solid ${draft.id ? 'fa-floppy-disk' : 'fa-plus'} mr-2`}></i>{isSaving ? 'Guardando...' : draft.id ? 'Guardar cambios' : 'Publicar aviso'}
+                                </button>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section className="space-y-3">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-sm font-black uppercase tracking-wide text-slate-600">Avisos publicados</h3>
+                            <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-800">{avisos.length}</span>
+                        </div>
+                        {avisos.map(aviso => {
+                            const esParaTodos = aviso.destinatario !== 'asesor';
+                            const estadosAsesores = esParaTodos
+                                ? asesoresDelCurso.map(asesor => ({ asesor, estado: getAvisoEstado(aviso, asesor.id), registro: aviso.estadosPorAsesor?.[asesor.id] || {} }))
+                                : [];
+                            const pendientes = estadosAsesores.filter(item => item.estado === 'pendiente').length;
+                            const atendidos = estadosAsesores.length - pendientes;
+                            const estadoAviso = getAvisoEstado(aviso);
+                            const estadoVisual = esParaTodos
+                                ? estadosAsesores.length > 0 && pendientes === 0 ? 'atendido' : 'pendiente'
+                                : estadoAviso;
+                            return (
+                            <article key={aviso.id} className={`rounded-2xl border p-5 shadow-sm ${getAvisoEstadoClasses(estadoVisual)}`}>
+                                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                    <div className="min-w-0">
+                                        <h4 className="font-bold text-slate-900">{aviso.titulo}</h4>
+                                        <p className="mt-1 text-xs font-semibold text-blue-700">
+                                            {aviso.destinatario === 'asesor'
+                                                ? `Solo para: ${asesoresDelCurso.find(asesor => asesor.id === aviso.asesorId) ? getAsesorLabel(asesoresDelCurso.find(asesor => asesor.id === aviso.asesorId)) : 'Asesor específico'}`
+                                                : 'Para todos los asesores del curso'}
+                                        </p>
+                                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                                            <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase ${getAvisoPrioridadClasses(aviso.prioridad)}`}>Prioridad: {getAvisoPrioridad(aviso.prioridad)}</span>
+                                            {esParaTodos
+                                                ? <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase ${getAvisoEstadoClasses(atendidos === estadosAsesores.length && estadosAsesores.length > 0 ? 'atendido' : 'pendiente')}`}>{pendientes} Pendiente(s) · {atendidos} Atendido(s)</span>
+                                                : <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase ${getAvisoEstadoClasses(estadoAviso)}`}>{estadoAviso === 'atendido' ? 'Atendido' : 'Pendiente'}</span>}
+                                        </div>
+                                        <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">{aviso.mensaje}</p>
+                                        {aviso.actualizadoEn && <p className="mt-3 text-xs text-slate-400">Actualizado: {new Date(aviso.actualizadoEn).toLocaleString('es-MX')}</p>}
+                                        {aviso.atendidoPor && <p className="mt-1 text-xs text-slate-500">Atendido por {aviso.atendidoPor}{aviso.atendidoEn ? ` · ${new Date(aviso.atendidoEn).toLocaleString('es-MX')}` : ''}</p>}
+                                        {esParaTodos && estadosAsesores.length > 0 && (
+                                            <details className="mt-3 rounded-xl border border-slate-200 bg-white/70 p-3">
+                                                <summary className="cursor-pointer text-xs font-bold text-slate-600">Ver estado por asesor</summary>
+                                                <div className="mt-3 space-y-2">
+                                                    {estadosAsesores.map(({ asesor, estado, registro }) => (
+                                                        <div key={asesor.id} className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2">
+                                                            <div>
+                                                                <span className="text-xs font-semibold text-slate-700">{getAsesorLabel(asesor)}</span>
+                                                                {estado === 'atendido' && registro.atendidoPor && <p className="mt-0.5 text-[10px] text-slate-500">Atendido por {registro.atendidoPor}{registro.atendidoEn ? ` · ${new Date(registro.atendidoEn).toLocaleString('es-MX')}` : ''}</p>}
+                                                            </div>
+                                                            <select value={estado} onChange={event => cambiarEstadoAviso(aviso.id, event.target.value, asesor.id)} aria-label={`Estado de ${getAsesorLabel(asesor)} para ${aviso.titulo}`} className={`rounded-lg border px-2 py-1 text-[10px] font-black uppercase ${getAvisoEstadoClasses(estado)}`}>
+                                                                <option value="pendiente">Pendiente</option>
+                                                                <option value="atendido">Atendido</option>
+                                                            </select>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </details>
+                                        )}
+                                    </div>
+                                    <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                                        {!esParaTodos && <select value={estadoAviso} onChange={event => cambiarEstadoAviso(aviso.id, event.target.value)} aria-label={`Estado del aviso ${aviso.titulo}`} className="rounded-lg border border-current bg-white/80 px-2 py-2 text-xs font-black uppercase outline-none">
+                                            <option value="pendiente">Pendiente</option>
+                                            <option value="atendido">Atendido</option>
+                                        </select>}
+                                        <button type="button" onClick={() => setDraft({ id: aviso.id, titulo: aviso.titulo || '', mensaje: aviso.mensaje || '', destinatario: aviso.destinatario === 'asesor' ? 'asesor' : 'todos', asesorId: aviso.asesorId || '', prioridad: getAvisoPrioridad(aviso.prioridad) })} className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-50"><i className="fa-solid fa-pen mr-1"></i>Editar</button>
+                                        <button type="button" onClick={() => eliminarAviso(aviso.id)} className="rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-50"><i className="fa-solid fa-trash mr-1"></i>Eliminar</button>
+                                    </div>
+                                </div>
+                            </article>
+                            );
+                        })}
+                        {avisos.length === 0 && <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-400">Aún no hay avisos para los asesores de este curso.</div>}
+                    </section>
+                </div>
+            );
+        }
+
         function Workspace({ db, appView, setAppView, asesoresGlobales, setAsesoresGlobales, zoomAccounts, onUpdate, modoPersonal, textoPegado, setTextoPegado, participantesProcesados, setParticipantesProcesados, procesarTextoPegado, descargarPlantillaBase, onEditPersonal }) {
             const [previewMode, setPreviewMode] = useState(null);
             const [previewHistory, setPreviewHistory] = useState([]);
@@ -3913,6 +4265,68 @@ María López	maria.lopez	Z9y8x7" />
             const isAdmin = !isPersonal || isManager;
             const canViewFollowupInfo = !isPersonal || isCoordinador || isAsesor;
             const canEditStaff = !isPersonal;
+            const avisosCurso = Array.isArray(db.avisosAsesores) ? db.avisosAsesores : [];
+            const asesoresDelCurso = useMemo(() => {
+                const asesores = new Map();
+                (db.grupos || []).forEach(grupo => {
+                    const asesor = asesoresGlobales.find(persona => persona.id === grupo.asesorId)
+                        || asesoresGlobales.find(persona => normalizeText(persona.nombre) === normalizeText(grupo.asesor));
+                    const asesorId = String(asesor?.id || grupo.asesorId || normalizeText(grupo.asesor || ''));
+                    if (!asesorId) return;
+                    const grupoNombre = String(grupo.nombre || '').trim();
+                    const grupoLabel = /^grupo\b/i.test(grupoNombre)
+                        ? grupoNombre.toUpperCase()
+                        : `GRUPO ${grupoNombre || 'SIN NOMBRE'}`;
+                    const datosAsesor = asesores.get(asesorId) || {
+                        id: asesorId,
+                        nombre: asesor?.nombre || grupo.asesor || 'Asesor',
+                        grupos: []
+                    };
+                    if (!datosAsesor.grupos.includes(grupoLabel)) datosAsesor.grupos.push(grupoLabel);
+                    asesores.set(asesorId, datosAsesor);
+                });
+                const compararGrupos = (a, b) => String(a || '').localeCompare(String(b || ''), 'es', { numeric: true, sensitivity: 'base' });
+                return Array.from(asesores.values())
+                    .map(asesor => {
+                        const grupos = [...asesor.grupos].sort(compararGrupos);
+                        return { ...asesor, grupos, grupoLabel: grupos.join(' / ') };
+                    })
+                    .sort((a, b) => compararGrupos(a.grupos[0], b.grupos[0])
+                        || String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es', { sensitivity: 'base' }));
+            }, [db.grupos, asesoresGlobales]);
+            const avisosAsesores = avisosCurso
+                .filter(aviso => aviso.destinatario !== 'asesor' || String(aviso.asesorId || '') === String(currentModoPersonal.personalId || ''))
+                .filter(aviso => getAvisoEstado(aviso, currentModoPersonal.personalId || '') === 'pendiente');
+            const avisosSignature = avisosAsesores.map(aviso => `${aviso.id}:${aviso.actualizadoEn || ''}:${getAvisoEstado(aviso, currentModoPersonal.personalId || '')}:${getAvisoPrioridad(aviso.prioridad)}`).join('|');
+            const [showAdvisorNotices, setShowAdvisorNotices] = useState(false);
+            const [showCoordinatorNotices, setShowCoordinatorNotices] = useState(false);
+            const asesoresConAvisosPendientes = useMemo(() => asesoresDelCurso
+                .map(asesor => ({
+                    ...asesor,
+                    avisos: avisosCurso.filter(aviso =>
+                        (aviso.destinatario !== 'asesor' || String(aviso.asesorId || '') === String(asesor.id))
+                        && getAvisoEstado(aviso, asesor.id) === 'pendiente'
+                    )
+                }))
+                .filter(asesor => asesor.avisos.length > 0), [asesoresDelCurso, avisosCurso]);
+            const totalAvisosPendientesCoordinador = asesoresConAvisosPendientes.reduce((total, asesor) => total + asesor.avisos.length, 0);
+            const avisoActor = currentModoPersonal.personalName || (isAsesor ? 'Asesor' : isManager ? 'Manager' : 'Administrador');
+
+            const cambiarEstadoAvisoAsesor = async (avisoId, estado) => {
+                try {
+                    await guardarEstadoAviso(onUpdate, avisoId, estado, avisoActor, currentModoPersonal.personalId || '');
+                } catch (error) {
+                    console.error('Error al actualizar el estado del aviso:', error);
+                    alert('No se pudo actualizar el estado del aviso. Intenta nuevamente.');
+                }
+            };
+
+            useEffect(() => {
+                setShowAdvisorNotices(isAsesor && avisosAsesores.length > 0);
+            }, [db.id, isAsesor, currentModoPersonal.personalId, currentModoPersonal.grupoId, avisosSignature]);
+            useEffect(() => {
+                setShowCoordinatorNotices(false);
+            }, [db.id, currentModoPersonal.personalId]);
 
             const coordinadoresDelCurso = (db.info.coordinadorIds || (db.info.coordinadorId ? [db.info.coordinadorId] : []))
                 .map(id => asesoresGlobales.find(persona => persona.id === id))
@@ -3951,7 +4365,7 @@ María López	maria.lopez	Z9y8x7" />
             const abrirEdicionPersonalWorkspace = persona => {
                 if (!canEditStaff || !persona?.id) return;
                 setEditingWorkspacePersonal(persona);
-                setWorkspacePersonalData({ id: persona.id, nombre: persona.nombre || '', usuario: persona.usuario || '', password: persona.password || '' });
+                setWorkspacePersonalData({ id: persona.id, nombre: persona.nombre || '', usuario: persona.usuario || '', password: persona.password || '', telefono: persona.telefono || persona.phone1 || '' });
             };
 
             const cerrarEdicionPersonalWorkspace = () => {
@@ -3963,7 +4377,7 @@ María López	maria.lopez	Z9y8x7" />
                 if (!workspacePersonalData?.nombre.trim() || !workspacePersonalData.usuario.trim() || !workspacePersonalData.password.trim()) return alert('El nombre, usuario y contraseña son obligatorios.');
                 const nombreAnterior = editingWorkspacePersonal.nombre;
                 const nombreNuevo = workspacePersonalData.nombre.trim();
-                setAsesoresGlobales(asesoresGlobales.map(persona => persona.id === workspacePersonalData.id ? { ...persona, ...workspacePersonalData, nombre: nombreNuevo, usuario: workspacePersonalData.usuario.trim(), password: workspacePersonalData.password.trim() } : persona));
+                setAsesoresGlobales(asesoresGlobales.map(persona => persona.id === workspacePersonalData.id ? { ...persona, ...workspacePersonalData, nombre: nombreNuevo, usuario: workspacePersonalData.usuario.trim(), password: workspacePersonalData.password.trim(), telefono: workspacePersonalData.telefono.trim() } : persona));
                 onUpdate({ ...db, grupos: (db.grupos || []).map(grupo => grupo.asesorId === workspacePersonalData.id || grupo.asesor === nombreAnterior ? { ...grupo, asesor: nombreNuevo, asesorId: workspacePersonalData.id } : grupo) });
                 cerrarEdicionPersonalWorkspace();
             };
@@ -3986,6 +4400,7 @@ María López	maria.lopez	Z9y8x7" />
                             {isAdmin && <button onClick={()=>setTab('ajustes')} className={`px-4 py-1.5 rounded-lg transition-colors whitespace-nowrap ${tab==='ajustes'?'bg-white text-blue-900 shadow':'hover:bg-blue-700 text-blue-100'}`}><i className="fa-solid fa-gear"></i> Ajustes</button>}
                             {isAdmin && <button onClick={()=>setTab('pegadoExcel')} className={`px-4 py-1.5 rounded-lg transition-colors whitespace-nowrap ${tab==='pegadoExcel'?'bg-white text-blue-900 shadow':'hover:bg-blue-700 text-blue-100'}`}><i className="fa-solid fa-file-excel"></i> Alumnos</button>}
                             {isAdmin && <button onClick={()=>setTab('grupos')} className={`px-4 py-1.5 rounded-lg transition-colors whitespace-nowrap ${tab==='grupos'?'bg-white text-blue-900 shadow':'hover:bg-blue-700 text-blue-100'}`}><i className="fa-solid fa-users"></i> Grupos</button>}
+                            {isAdmin && <button onClick={()=>setTab('avisos')} className={`px-4 py-1.5 rounded-lg transition-colors whitespace-nowrap ${tab==='avisos'?'bg-white text-blue-900 shadow':'hover:bg-blue-700 text-blue-100'}`}><i className="fa-solid fa-bullhorn"></i> Avisos</button>}
                             {isAdmin && <button onClick={()=>setTab('datos')} className={`px-4 py-1.5 rounded-lg transition-colors whitespace-nowrap ${tab==='datos'?'bg-white text-blue-900 shadow':'hover:bg-blue-700 text-blue-100'}`}><i className="fa-solid fa-table"></i> Asignar</button>}
                             
                             <button onClick={()=>setTab('seguimiento')} className={`px-4 py-1.5 rounded-lg transition-colors whitespace-nowrap ${tab==='seguimiento'?'bg-yellow-400 text-blue-900 font-bold shadow':'hover:bg-blue-700 text-blue-100'}`}><i className="fa-solid fa-list-check"></i> Seguimiento</button>
@@ -4036,11 +4451,12 @@ María López	maria.lopez	Z9y8x7" />
                         </div>
                     )}
 
-                    <div className={`workspace-content ${tab === 'grupos' ? 'group-workspace-content overflow-visible' : tab === 'control' ? 'control-workspace-content flex-1 min-h-0 overflow-y-auto' : 'flex-1 min-h-0 overflow-hidden'} min-w-0 flex flex-col p-3 print:p-0`}>
+                    <div className={`workspace-content ${tab === 'grupos' ? 'group-workspace-content overflow-visible' : tab === 'avisos' ? 'avisos-workspace-content flex-1 min-h-0 overflow-y-auto' : tab === 'control' ? 'control-workspace-content flex-1 min-h-0 overflow-y-auto' : 'flex-1 min-h-0 overflow-hidden'} min-w-0 flex flex-col p-3 print:p-0`}>
                         {tab === 'resumen' && (isAdmin || isCoordinador) && <TabResumen db={db} asesoresGlobales={asesoresGlobales} />}
                         {tab === 'ajustes' && isAdmin && <TabAjustes db={db} onUpdate={onUpdate} asesoresGlobales={asesoresGlobales} />}
                         {tab === 'pegadoExcel' && isAdmin && <TabPegadoExcel db={db} onUpdate={onUpdate} textoPegado={textoPegado} setTextoPegado={setTextoPegado} participantesProcesados={participantesProcesados} setParticipantesProcesados={setParticipantesProcesados} procesarTextoPegado={procesarTextoPegado} descargarPlantillaBase={descargarPlantillaBase} />}
                         {tab === 'grupos' && isAdmin && <TabGrupos db={db} onUpdate={onUpdate} asesoresGlobales={asesoresGlobales} onEditPersonal={canEditStaff ? abrirEdicionPersonalWorkspace : null} />}
+                        {tab === 'avisos' && isAdmin && <TabAvisosAsesores db={db} onUpdate={onUpdate} asesoresGlobales={asesoresGlobales} updatedBy={avisoActor} />}
                         {tab === 'datos' && isAdmin && <TabDatos db={db} onUpdate={onUpdate} />}
                         {tab === 'exportar' && (isAdmin || isCoordinador || isAsesor) && <TabExportar db={db} onUpdate={onUpdate} isAdmin={isAdmin} isCoordinador={isCoordinador} isAsesor={isAsesor} asesorGrupoId={currentModoPersonal.grupoId} asesoresGlobales={asesoresGlobales} />}
                         {tab === 'seguimiento' && <TabSeguimiento db={db} onUpdate={onUpdate} asesoresGlobales={asesoresGlobales} isAsesor={isAsesor} isCoordinador={isCoordinador} isAdmin={isAdmin} canViewFollowupInfo={canViewFollowupInfo} asesorGrupoId={currentModoPersonal.grupoId} personalName={currentModoPersonal.personalName} onEditPersonal={canEditStaff ? abrirEdicionPersonalWorkspace : null} />}
@@ -4054,11 +4470,118 @@ María López	maria.lopez	Z9y8x7" />
                                     <button type="button" onClick={cerrarEdicionPersonalWorkspace} className="text-slate-400 hover:text-slate-800" aria-label="Cerrar edición"><i className="fa-solid fa-xmark text-lg"></i></button>
                                 </div>
                                 <div className="space-y-4">
-                                    {[['nombre', 'Nombre completo'], ['usuario', 'Usuario'], ['password', 'Contraseña']].map(([key, label]) => <label key={key} className="block text-xs font-bold uppercase tracking-wide text-slate-600">{label}<input type="text" value={workspacePersonalData[key]} onChange={e => setWorkspacePersonalData(prev => ({ ...prev, [key]: e.target.value }))} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm normal-case outline-none focus:border-slate-500 focus:bg-white" /></label>)}
+                                    {[['nombre', 'Nombre completo'], ['usuario', 'Usuario'], ['password', 'Contraseña'], ['telefono', 'Teléfono']].map(([key, label]) => <label key={key} className="block text-xs font-bold uppercase tracking-wide text-slate-600">{label}<input type={key === 'telefono' ? 'tel' : 'text'} value={workspacePersonalData[key] || ''} onChange={e => setWorkspacePersonalData(prev => ({ ...prev, [key]: e.target.value }))} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm normal-case outline-none focus:border-slate-500 focus:bg-white" /></label>)}
                                 </div>
                                 <div className="mt-6 flex justify-end gap-3 border-t border-slate-100 pt-4"><button type="button" onClick={cerrarEdicionPersonalWorkspace} className="rounded-xl bg-slate-100 px-5 py-2.5 font-semibold text-slate-600 hover:bg-slate-200">Cancelar</button><button type="button" onClick={guardarEdicionPersonalWorkspace} className="rounded-xl bg-slate-800 px-5 py-2.5 font-bold text-white hover:bg-slate-900">Guardar cambios</button></div>
                             </div>
                         </Modal>
+                    )}
+                    {isAsesor && avisosAsesores.length > 0 && (
+                        <>
+                            <button
+                                type="button"
+                                onClick={() => setShowAdvisorNotices(true)}
+                                className="fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-full bg-blue-700 px-4 py-3 font-bold text-white shadow-xl transition hover:bg-blue-800 focus:outline-none focus:ring-4 focus:ring-blue-200"
+                                aria-label={`Abrir ${avisosAsesores.length} aviso(s) pendiente(s) del administrador`}
+                                title="Abrir avisos del administrador"
+                            >
+                                <i className="fa-solid fa-bell"></i>
+                                <span>Avisos</span>
+                                <span className="flex h-6 min-w-6 items-center justify-center rounded-full bg-white px-1.5 text-xs font-black text-blue-800">{avisosAsesores.length}</span>
+                            </button>
+                            <Modal show={showAdvisorNotices} onClose={() => setShowAdvisorNotices(false)} width="max-w-3xl" ariaLabel="Avisos del administrador para asesores">
+                                <div className="overflow-hidden rounded-3xl bg-slate-50">
+                                    <div className="flex items-start justify-between gap-4 border-b border-blue-100 bg-white px-6 py-5">
+                                        <div className="flex items-center gap-3">
+                                            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-700"><i className="fa-solid fa-bullhorn text-lg"></i></div>
+                                            <div>
+                                                <h2 className="text-xl font-black text-slate-900">Avisos del administrador</h2>
+                                                <p className="mt-1 text-sm text-slate-500">{db.info?.nombreCurso || db.info?.siglas || 'Curso'} · {avisosAsesores.length} pendiente(s)</p>
+                                            </div>
+                                        </div>
+                                        <button type="button" onClick={() => setShowAdvisorNotices(false)} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-800" aria-label="Cerrar avisos"><i className="fa-solid fa-xmark text-lg"></i></button>
+                                    </div>
+                                    <div className="max-h-[70vh] space-y-4 overflow-y-auto p-5 sm:p-6">
+                                        {avisosAsesores.map(aviso => (
+                                            <article key={aviso.id} className={`rounded-2xl border p-5 shadow-sm ${getAvisoEstadoClasses(getAvisoEstado(aviso, currentModoPersonal.personalId || ''))}`}>
+                                                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                                                    <h3 className="text-lg font-black text-slate-900">{aviso.titulo}</h3>
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        <span className={`rounded-full border px-3 py-1 text-xs font-black uppercase ${getAvisoPrioridadClasses(aviso.prioridad)}`}>Prioridad: {getAvisoPrioridad(aviso.prioridad)}</span>
+                                                        <select value={getAvisoEstado(aviso, currentModoPersonal.personalId || '')} onChange={event => cambiarEstadoAvisoAsesor(aviso.id, event.target.value)} aria-label={`Estado del aviso ${aviso.titulo}`} className={`rounded-full border px-3 py-1 text-xs font-black uppercase outline-none ${getAvisoEstadoClasses(getAvisoEstado(aviso, currentModoPersonal.personalId || ''))}`}>
+                                                            <option value="pendiente">Pendiente</option>
+                                                            <option value="atendido">Atendido</option>
+                                                        </select>
+                                                    </div>
+                                                </div>
+                                                <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700">{aviso.mensaje}</p>
+                                                {aviso.actualizadoEn && <p className="mt-4 text-xs text-slate-400">Publicado: {new Date(aviso.actualizadoEn).toLocaleString('es-MX')}</p>}
+                                            </article>
+                                        ))}
+                                    </div>
+                                    <div className="border-t border-slate-200 bg-white px-6 py-4 text-right">
+                                        <button type="button" onClick={() => setShowAdvisorNotices(false)} className="rounded-xl bg-blue-700 px-5 py-2.5 font-bold text-white hover:bg-blue-800">Cerrar</button>
+                                    </div>
+                                </div>
+                            </Modal>
+                        </>
+                    )}
+                    {isCoordinador && totalAvisosPendientesCoordinador > 0 && (
+                        <>
+                            <button
+                                type="button"
+                                onClick={() => setShowCoordinatorNotices(true)}
+                                className="fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-full bg-violet-700 px-4 py-3 font-bold text-white shadow-xl transition hover:bg-violet-800 focus:outline-none focus:ring-4 focus:ring-violet-200"
+                                aria-label={`Ver avisos pendientes de ${asesoresConAvisosPendientes.length} asesor(es)`}
+                                title="Ver asesores con avisos pendientes"
+                            >
+                                <i className="fa-solid fa-bell"></i>
+                                <span>Avisos de asesores</span>
+                                <span className="flex h-6 min-w-6 items-center justify-center rounded-full bg-white px-1.5 text-xs font-black text-violet-800">{totalAvisosPendientesCoordinador}</span>
+                            </button>
+                            <Modal show={showCoordinatorNotices} onClose={() => setShowCoordinatorNotices(false)} width="max-w-3xl" ariaLabel="Avisos pendientes de asesores">
+                                <div className="overflow-hidden rounded-3xl bg-slate-50">
+                                    <div className="flex items-start justify-between gap-4 border-b border-violet-100 bg-white px-6 py-5">
+                                        <div className="flex items-center gap-3">
+                                            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-100 text-violet-700"><i className="fa-solid fa-bell text-lg"></i></div>
+                                            <div>
+                                                <h2 className="text-xl font-black text-slate-900">Avisos pendientes de asesores</h2>
+                                                <p className="mt-1 text-sm text-slate-500">{db.info?.nombreCurso || db.info?.siglas || 'Curso'} · {asesoresConAvisosPendientes.length} asesor(es) · {totalAvisosPendientesCoordinador} aviso(s)</p>
+                                            </div>
+                                        </div>
+                                        <button type="button" onClick={() => setShowCoordinatorNotices(false)} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-800" aria-label="Cerrar avisos de asesores"><i className="fa-solid fa-xmark text-lg"></i></button>
+                                    </div>
+                                    <div className="max-h-[70vh] space-y-3 overflow-y-auto p-5 sm:p-6">
+                                        {asesoresConAvisosPendientes.map(asesor => (
+                                            <details key={asesor.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                                                <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 p-4 hover:bg-violet-50/50">
+                                                    <div>
+                                                        <p className="font-bold text-slate-900">{asesor.nombre}</p>
+                                                        <p className="mt-0.5 text-xs font-semibold text-slate-500">{asesor.grupoLabel}</p>
+                                                    </div>
+                                                    <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-black text-amber-800">{asesor.avisos.length} pendiente(s)</span>
+                                                </summary>
+                                                <div className="space-y-3 border-t border-slate-100 bg-slate-50/70 p-4">
+                                                    {asesor.avisos.map(aviso => (
+                                                        <article key={aviso.id} className="rounded-xl border border-slate-200 bg-white p-4">
+                                                            <div className="flex flex-wrap items-start justify-between gap-2">
+                                                                <h3 className="font-bold text-slate-900">{aviso.titulo}</h3>
+                                                                <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase ${getAvisoPrioridadClasses(aviso.prioridad)}`}>Prioridad: {getAvisoPrioridad(aviso.prioridad)}</span>
+                                                            </div>
+                                                            <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{aviso.mensaje}</p>
+                                                            {(aviso.actualizadoEn || aviso.creadoEn) && <p className="mt-3 text-xs text-slate-400">Publicado: {new Date(aviso.actualizadoEn || aviso.creadoEn).toLocaleString('es-MX')}</p>}
+                                                        </article>
+                                                    ))}
+                                                </div>
+                                            </details>
+                                        ))}
+                                    </div>
+                                    <div className="border-t border-slate-200 bg-white px-6 py-4 text-right">
+                                        <button type="button" onClick={() => setShowCoordinatorNotices(false)} className="rounded-xl bg-violet-700 px-5 py-2.5 font-bold text-white hover:bg-violet-800">Cerrar</button>
+                                    </div>
+                                </div>
+                            </Modal>
+                        </>
                     )}
                 </div>
             );
@@ -4165,6 +4688,7 @@ María López	maria.lopez	Z9y8x7" />
                 <div className="bg-white rounded-2xl shadow-sm h-full flex flex-col overflow-auto p-8">
                     <div className="mb-6 border-b pb-4">
                         <h2 className="font-bold text-2xl text-gray-800"><i className="fa-solid fa-chart-pie text-blue-600"></i> Resumen de la Oferta</h2>
+                        <p className="mt-2 text-lg font-bold text-gray-800">{db.info.nombreCurso || 'Curso sin nombre'}</p>
                         <p className="mt-2 text-sm text-gray-500"><i className="fa-solid fa-user-tie mr-2 text-purple-600"></i><span className="font-bold text-gray-700">Coordinador a cargo:</span> {coordinadores.length ? coordinadores.join(', ') : 'Sin coordinador asignado'}</p>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -4215,6 +4739,8 @@ María López	maria.lopez	Z9y8x7" />
             const [alumnoManual, setAlumnoManual] = useState({
                 no: '', correo: '', rfc: '', curp: '', edad: '', sexo: '', nombre: '', paterno: '', materno: '', telefono: '', cct: '', subsistema: '', municipio: '', funcion: '', nivel: '', servicio: ''
             });
+            const participantesOcultos = Array.isArray(db.participantesOcultos) ? db.participantesOcultos : [];
+            const participantesExistentes = [...db.participantes, ...participantesOcultos];
             const gruposNoEncontrados = [...new Set(participantesProcesados.filter(participante => participante.grupoNoEncontrado).map(participante => participante.grupoImportado))];
 
             const agregarParticipantesPegados = async () => {
@@ -4227,7 +4753,7 @@ María López	maria.lopez	Z9y8x7" />
                     return mismoCurp || mismoCorreo;
                 };
                 const duplicados = [...new Set(participantesValidos
-                    .map(nuevo => db.participantes.findIndex(actual => coincideParticipante(actual, nuevo)))
+                        .map(nuevo => participantesExistentes.findIndex(actual => coincideParticipante(actual, nuevo)))
                     .filter(indice => indice !== -1))];
                 const actualizarDuplicados = duplicados.length > 0 && window.confirm(
                     `Se encontraron ${duplicados.length} alumno${duplicados.length === 1 ? '' : 's'} ya registrado${duplicados.length === 1 ? '' : 's'}.\n\n` +
@@ -4238,28 +4764,36 @@ María López	maria.lopez	Z9y8x7" />
                 const nuevos = [];
 
                 participantesValidos.forEach(nuevo => {
-                    const indiceExistente = db.participantes.findIndex(actual => coincideParticipante(actual, nuevo));
+                    const indiceExistente = participantesExistentes.findIndex(actual => coincideParticipante(actual, nuevo));
                     if (indiceExistente === -1) {
                         nuevos.push(nuevo);
                         return;
                     }
                     if (!actualizarDuplicados) return;
 
-                    const actual = actualizaciones.get(indiceExistente) || db.participantes[indiceExistente];
+                    const participanteExistente = participantesExistentes[indiceExistente];
+                    const actual = actualizaciones.get(participanteExistente.id) || participanteExistente;
                     const datosImportados = Object.fromEntries(
                         Object.entries(nuevo).filter(([campo, valor]) =>
                             !['id', 'grupoImportado', 'grupoNoEncontrado'].includes(campo) &&
                             valor !== null && valor !== undefined && String(valor).trim() !== ''
                         )
                     );
-                    actualizaciones.set(indiceExistente, { ...actual, ...datosImportados, id: actual.id });
+                    actualizaciones.set(participanteExistente.id, { ...actual, ...datosImportados, id: actual.id });
                 });
 
                 if (nuevos.length || actualizaciones.size) {
-                    const participantesActualizados = db.participantes.map((participante, index) =>
-                        actualizaciones.get(index) || participante
+                    const participantesActualizados = db.participantes.map(participante =>
+                        actualizaciones.get(participante.id) || participante
                     );
-                    const saved = await onUpdate({ ...db, participantes: [...participantesActualizados, ...nuevos] });
+                    const participantesOcultosActualizados = participantesOcultos.map(participante =>
+                        actualizaciones.get(participante.id) || participante
+                    );
+                    const saved = await onUpdate({
+                        ...db,
+                        participantes: [...participantesActualizados, ...nuevos],
+                        participantesOcultos: participantesOcultosActualizados
+                    });
                     if (saved === false) {
                         alert('Firebase no confirmó el guardado. Conservé la tabla pegada para que puedas intentar de nuevo.');
                         return;
@@ -4284,6 +4818,14 @@ María López	maria.lopez	Z9y8x7" />
 
                 if (!nombre && !curp && !correo) {
                     alert('Completa al menos nombre, CURP o correo antes de guardar.');
+                    return;
+                }
+                const coincideParticipanteOculto = participantesOcultos.some(participante =>
+                    (curp && participante.curp && curp.trim().toLowerCase() === participante.curp.trim().toLowerCase()) ||
+                    (correo && participante.correo && correo.trim().toLowerCase() === participante.correo.trim().toLowerCase())
+                );
+                if (coincideParticipanteOculto) {
+                    alert('Este participante ya existe y está oculto. Puedes localizarlo en Asignar y volver a mostrarlo.');
                     return;
                 }
 
@@ -4670,7 +5212,12 @@ María López	maria.lopez	Z9y8x7" />
                 const gruposReemplazados = reemplazarDuplicados ? gruposDuplicados.length : 0;
                 alert(`Importación terminada: ${gruposNuevos.length} grupo(s) nuevo(s)${gruposReemplazados ? ` y ${gruposReemplazados} grupo(s) actualizado(s)` : ''}.`);
             };
-            const del = (id) => onUpdate({ ...db, grupos: db.grupos.filter(g => g.id !== id), participantes: db.participantes.map(p => p.grupoId === id ? { ...p, grupoId: null } : p) });
+            const del = (id) => onUpdate({
+                ...db,
+                grupos: db.grupos.filter(g => g.id !== id),
+                participantes: db.participantes.map(p => p.grupoId === id ? { ...p, grupoId: null } : p),
+                participantesOcultos: (db.participantesOcultos || []).map(p => p.grupoId === id ? { ...p, grupoId: null } : p)
+            });
             const openEditGroup = (group) => {
                 setEditingGroup(group.id);
                 setGroupEditData({ ...group });
@@ -4715,7 +5262,11 @@ María López	maria.lopez	Z9y8x7" />
                     ? { ...participant, grupoId: null }
                     : participant
                 );
-                onUpdate({ ...db, grupos: gruposRestantes, participantes: participantesActualizados });
+                const participantesOcultosActualizados = (db.participantesOcultos || []).map(participant => selectedGroupIds.has(participant.grupoId)
+                    ? { ...participant, grupoId: null }
+                    : participant
+                );
+                onUpdate({ ...db, grupos: gruposRestantes, participantes: participantesActualizados, participantesOcultos: participantesOcultosActualizados });
                 setSelectedGroupIds(new Set());
             };
             
@@ -5347,14 +5898,27 @@ María López	maria.lopez	Z9y8x7" />
             const [reparticionAbierta, setReparticionAbierta] = useState(false);
             const [reparticionModo, setReparticionModo] = useState('todos');
             const [gruposReparticion, setGruposReparticion] = useState([]);
+            const participantesOcultos = Array.isArray(db.participantesOcultos) ? db.participantesOcultos : [];
+            const participantesAsignacion = useMemo(() => [...db.participantes, ...participantesOcultos], [db.participantes, participantesOcultos]);
+            const idsParticipantesOcultos = useMemo(() => new Set(participantesOcultos.map(p => p.id)), [participantesOcultos]);
+            const participantesSeleccionadosActivos = db.participantes.filter(p => selectedIds.has(p.id));
+            const participantesSeleccionadosOcultos = participantesOcultos.filter(p => selectedIds.has(p.id));
 
-            const municipiosUnicos = useMemo(() => [...new Set(db.participantes.map(p => p.municipio).filter(Boolean))].sort(), [db.participantes]);
+            const actualizarParticipantesAsignacion = mapper => {
+                onUpdate({
+                    ...db,
+                    participantes: db.participantes.map(mapper),
+                    participantesOcultos: participantesOcultos.map(mapper)
+                });
+            };
+
+            const municipiosUnicos = useMemo(() => [...new Set(participantesAsignacion.map(p => p.municipio).filter(Boolean))].sort(), [participantesAsignacion]);
 
             const detectDuplicates = () => {
                 const curpMap = {};
                 const correoMap = {};
 
-                db.participantes.forEach(p => {
+                participantesAsignacion.forEach(p => {
                     const curpKey = normalizeText(p.curp || '');
                     if (curpKey) curpMap[curpKey] = [...(curpMap[curpKey] || []), p];
                     const correoKey = (p.correo || '').trim().toLowerCase();
@@ -5395,41 +5959,79 @@ María López	maria.lopez	Z9y8x7" />
                     ...editData,
                     completo: `${editData.paterno || ''} ${editData.materno || ''} ${editData.nombre || ''}`.trim()
                 } : p);
+                const hiddenList = participantesOcultos.map(p => p.id === editData.id ? {
+                    ...p,
+                    ...editData,
+                    completo: `${editData.paterno || ''} ${editData.materno || ''} ${editData.nombre || ''}`.trim()
+                } : p);
 
-                onUpdate({ ...db, participantes: newList });
+                onUpdate({ ...db, participantes: newList, participantesOcultos: hiddenList });
                 closeEditModal();
             };
 
             const deleteParticipant = (id) => {
                 if (!confirm('¿Eliminar este participante? Esta acción no se puede deshacer.')) return;
-                onUpdate({ ...db, participantes: db.participantes.filter(p => p.id !== id) });
+                onUpdate({
+                    ...db,
+                    participantes: db.participantes.filter(p => p.id !== id),
+                    participantesOcultos: participantesOcultos.filter(p => p.id !== id)
+                });
                 setSelectedIds(prev => { const next = new Set(prev); next.delete(id); return next; });
                 setDuplicateGroups(prev => prev.map(group => ({ ...group, items: group.items.filter(p => p.id !== id) })).filter(group => group.items.length > 1));
             };
             const deleteSelectedParticipants = () => {
-                const selectedParticipants = db.participantes.filter(p => selectedIds.has(p.id));
+                const selectedParticipants = participantesAsignacion.filter(p => selectedIds.has(p.id));
                 if (!selectedParticipants.length) return;
                 const count = selectedParticipants.length;
                 const alumnoLabel = count === 1 ? 'alumno seleccionado' : 'alumnos seleccionados';
                 if (!confirm(`¿Eliminar permanentemente a ${count} ${alumnoLabel}? Esta acción no se puede deshacer.`)) return;
 
                 const deletedIds = new Set(selectedParticipants.map(p => p.id));
-                onUpdate({ ...db, participantes: db.participantes.filter(p => !deletedIds.has(p.id)) });
+                onUpdate({
+                    ...db,
+                    participantes: db.participantes.filter(p => !deletedIds.has(p.id)),
+                    participantesOcultos: participantesOcultos.filter(p => !deletedIds.has(p.id))
+                });
                 setSelectedIds(new Set());
                 setDuplicateGroups(prev => prev.map(group => ({ ...group, items: group.items.filter(p => !deletedIds.has(p.id)) })).filter(group => group.items.length > 1));
             };
-            const funcionesUnicas = useMemo(() => [...new Set(db.participantes.map(p => p.funcion).filter(Boolean))].sort(), [db.participantes]);
-            const nivelesUnicos = useMemo(() => [...new Set(db.participantes.map(p => p.nivel).filter(Boolean))].sort(), [db.participantes]);
+            const ocultarSeleccionados = () => {
+                if (!participantesSeleccionadosActivos.length) return;
+                if (!confirm(`¿Ocultar ${participantesSeleccionadosActivos.length} participante(s)? Dejarán de aparecer en seguimientos, reportes y estadísticas. Podrás volver a mostrarlos desde Asignar.`)) return;
+                const ocultarIds = new Set(participantesSeleccionadosActivos.map(p => p.id));
+                onUpdate({
+                    ...db,
+                    participantes: db.participantes.filter(p => !ocultarIds.has(p.id)),
+                    participantesOcultos: [...participantesOcultos, ...participantesSeleccionadosActivos]
+                });
+                setSelectedIds(new Set());
+            };
+            const mostrarSeleccionados = () => {
+                if (!participantesSeleccionadosOcultos.length) return;
+                const mostrarIds = new Set(participantesSeleccionadosOcultos.map(p => p.id));
+                const activeIds = new Set(db.participantes.map(p => p.id));
+                onUpdate({
+                    ...db,
+                    participantes: [
+                        ...db.participantes,
+                        ...participantesSeleccionadosOcultos.filter(p => !activeIds.has(p.id))
+                    ],
+                    participantesOcultos: participantesOcultos.filter(p => !mostrarIds.has(p.id))
+                });
+                setSelectedIds(new Set());
+            };
+            const funcionesUnicas = useMemo(() => [...new Set(participantesAsignacion.map(p => p.funcion).filter(Boolean))].sort(), [participantesAsignacion]);
+            const nivelesUnicos = useMemo(() => [...new Set(participantesAsignacion.map(p => p.nivel).filter(Boolean))].sort(), [participantesAsignacion]);
 
             const participantesFiltrados = useMemo(() => {
-                return db.participantes.filter(p => {
+                return participantesAsignacion.filter(p => {
                     if (filtros.municipio.length > 0 && !filtros.municipio.includes(p.municipio)) return false;
                     if (filtros.funcion.length > 0 && !filtros.funcion.includes(p.funcion)) return false;
                     if (filtros.nivel.length > 0 && !filtros.nivel.includes(p.nivel)) return false;
                     if (filtros.grupo.length > 0 && !filtros.grupo.includes(p.grupoId || 'NONE')) return false;
                     return true;
                 });
-            }, [db.participantes, filtros]);
+            }, [participantesAsignacion, filtros]);
 
             const participantesPendientes = useMemo(() => {
                 return db.participantes.filter(p => {
@@ -5446,8 +6048,25 @@ María López	maria.lopez	Z9y8x7" />
             };
 
             const toggleSelectAll = () => {
-                if (selectedIds.size === participantesFiltrados.length && participantesFiltrados.length > 0) setSelectedIds(new Set());
-                else setSelectedIds(new Set(participantesFiltrados.map(p => p.id)));
+                const todosSeleccionados = participantesFiltrados.length > 0 && participantesFiltrados.every(p => selectedIds.has(p.id));
+                setSelectedIds(prev => {
+                    const next = new Set(prev);
+                    participantesFiltrados.forEach(p => {
+                        if (todosSeleccionados) next.delete(p.id);
+                        else next.add(p.id);
+                    });
+                    return next;
+                });
+            };
+            const invertirSeleccion = () => {
+                setSelectedIds(prev => {
+                    const next = new Set(prev);
+                    participantesFiltrados.forEach(p => {
+                        if (next.has(p.id)) next.delete(p.id);
+                        else next.add(p.id);
+                    });
+                    return next;
+                });
             };
             const toggleSelect = (id) => {
                 const newSet = new Set(selectedIds);
@@ -5483,7 +6102,7 @@ María López	maria.lopez	Z9y8x7" />
                     const normalized = normalizeText(candidato);
                     const emailValue = candidato.trim().toLowerCase();
 
-                    db.participantes.forEach(participant => {
+                    participantesAsignacion.forEach(participant => {
                         const curpValue = normalizeText(participant.curp || '');
                         const correoValue = (participant.correo || '').trim().toLowerCase();
                         const usuarioValue = normalizeText(participant.usuario || getMoodleUsername(participant.curp) || '');
@@ -5511,13 +6130,11 @@ María López	maria.lopez	Z9y8x7" />
 
             const aplicarGrupoMasivo = () => {
                 if (!grupoAsignar) return alert("Selecciona un grupo primero");
-                const nuevosParticipantes = db.participantes.map(p => selectedIds.has(p.id) ? { ...p, grupoId: grupoAsignar } : p);
-                onUpdate({ ...db, participantes: nuevosParticipantes });
+                actualizarParticipantesAsignacion(p => selectedIds.has(p.id) ? { ...p, grupoId: grupoAsignar } : p);
                 setSelectedIds(new Set()); 
             };
             const quitarGrupoMasivo = () => {
-                const nuevosParticipantes = db.participantes.map(p => selectedIds.has(p.id) ? { ...p, grupoId: null } : p);
-                onUpdate({ ...db, participantes: nuevosParticipantes });
+                actualizarParticipantesAsignacion(p => selectedIds.has(p.id) ? { ...p, grupoId: null } : p);
                 setSelectedIds(new Set());
                 setGrupoAsignar('');
             };
@@ -5541,11 +6158,10 @@ María López	maria.lopez	Z9y8x7" />
                 participantesPendientes.forEach((participant, index) => {
                     asignaciones.set(participant.id, gruposDestino[index % gruposDestino.length].id);
                 });
-                const nuevosParticipantes = db.participantes.map(participant => asignaciones.has(participant.id)
+                actualizarParticipantesAsignacion(participant => asignaciones.has(participant.id)
                     ? { ...participant, grupoId: asignaciones.get(participant.id) }
                     : participant);
 
-                onUpdate({ ...db, participantes: nuevosParticipantes });
                 setReparticionAbierta(false);
                 setGruposReparticion([]);
                 alert(`Se repartieron ${participantesPendientes.length} participantes en ${gruposDestino.length} grupos.`);
@@ -5590,23 +6206,29 @@ María López	maria.lopez	Z9y8x7" />
                                     className="w-full resize-none rounded-xl border border-blue-200 bg-blue-50 p-2.5 text-xs font-mono text-gray-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                                 />
                             </div>
-                            <div className="flex items-end gap-2">
+                            <div className="flex flex-wrap items-end gap-2">
                                 <button onClick={seleccionarPorLista} className="h-[42px] rounded-xl bg-blue-600 px-4 text-sm font-bold text-white hover:bg-blue-700 transition-colors">Seleccionar coincidencias</button>
+                                <button onClick={invertirSeleccion} className="h-[42px] rounded-xl border border-violet-200 bg-violet-50 px-4 text-sm font-semibold text-violet-700 hover:bg-violet-100 transition-colors"><i className="fa-solid fa-arrow-right-arrow-left mr-2"></i>Invertir selección</button>
                                 <button onClick={() => setBulkSelectionText('')} className="h-[42px] rounded-xl border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-600 hover:bg-gray-100 transition-colors">Limpiar</button>
                             </div>
                         </div>
                     </div>
 
                     {selectedIds.size > 0 && (
-                        <div className="shrink-0 p-3 bg-blue-600 border-b flex items-center justify-between shadow-sm text-white">
-                            <div className="font-bold text-sm px-3">{selectedIds.size} participantes seleccionados listos para asignar.</div>
-                            <div className="flex gap-2">
+                        <div className="shrink-0 p-3 bg-blue-600 border-b flex flex-wrap items-center justify-between gap-3 shadow-sm text-white">
+                            <div className="font-bold text-sm px-3">
+                                {selectedIds.size} seleccionado(s)
+                                {(participantesSeleccionadosActivos.length > 0 || participantesSeleccionadosOcultos.length > 0) && <span className="ml-2 text-xs font-medium text-blue-100">({participantesSeleccionadosActivos.length} visibles · {participantesSeleccionadosOcultos.length} ocultos)</span>}
+                            </div>
+                            <div className="flex flex-wrap justify-end gap-2">
                                 <select className="p-2 border-none bg-white text-gray-800 rounded-lg text-sm font-semibold outline-none" value={grupoAsignar} onChange={e=>setGrupoAsignar(e.target.value)}>
                                     <option value="">-- Seleccionar Grupo Destino --</option>
                                     {db.grupos.map(g => <option key={g.id} value={g.id}>{g.nombre} ({g.asesor})</option>)}
                                 </select>
                                 <button onClick={aplicarGrupoMasivo} className="bg-green-500 hover:bg-green-400 text-white px-5 py-2 rounded-lg text-sm font-bold shadow transition-colors">Aplicar Grupo</button>
                                 <button onClick={quitarGrupoMasivo} className="bg-red-500 hover:bg-red-400 text-white px-5 py-2 rounded-lg text-sm font-bold shadow transition-colors">Quitar grupo</button>
+                                {participantesSeleccionadosActivos.length > 0 && <button onClick={ocultarSeleccionados} className="bg-amber-400 hover:bg-amber-300 text-amber-950 px-5 py-2 rounded-lg text-sm font-bold shadow transition-colors"><i className="fa-solid fa-eye-slash mr-2"></i>Ocultar</button>}
+                                {participantesSeleccionadosOcultos.length > 0 && <button onClick={mostrarSeleccionados} className="bg-emerald-400 hover:bg-emerald-300 text-emerald-950 px-5 py-2 rounded-lg text-sm font-bold shadow transition-colors"><i className="fa-solid fa-eye mr-2"></i>Mostrar</button>}
                                 <button onClick={deleteSelectedParticipants} className="bg-red-700 hover:bg-red-800 text-white px-5 py-2 rounded-lg text-sm font-bold shadow transition-colors">Eliminar alumnos</button>
                             </div>
                         </div>
@@ -5616,7 +6238,7 @@ María López	maria.lopez	Z9y8x7" />
                         <table className="asignar-table w-full text-xs text-left whitespace-nowrap">
                             <thead className="bg-white">
                                 <tr>
-                                    <th className="sticky top-0 z-20 bg-white p-3 text-center w-10 border-b border-gray-100"><input type="checkbox" className="w-4 h-4" checked={selectedIds.size > 0 && selectedIds.size === participantesFiltrados.length} onChange={toggleSelectAll} /></th>
+                                    <th className="sticky top-0 z-20 bg-white p-3 text-center w-10 border-b border-gray-100"><input type="checkbox" className="w-4 h-4" checked={participantesFiltrados.length > 0 && participantesFiltrados.every(p => selectedIds.has(p.id))} onChange={toggleSelectAll} /></th>
                                     <th className="sticky top-0 z-20 bg-white p-3 border-b border-gray-100 text-blue-800 font-bold">GRUPO ASIGNADO</th>
                                     <th className="sticky top-0 z-20 bg-white p-3 border-b border-gray-100 font-semibold text-gray-500">NO.</th>
                                     <th className="sticky top-0 z-20 bg-white p-3 border-b border-gray-100 font-semibold text-gray-500">CURP</th>
@@ -5631,10 +6253,11 @@ María López	maria.lopez	Z9y8x7" />
                             <tbody>
                                 {participantesFiltrados.map(p => {
                                     const grupoObj = db.grupos.find(g => g.id === p.grupoId);
+                                    const isHidden = idsParticipantesOcultos.has(p.id);
                                     return (
-                                        <tr key={p.id} className={`border-b border-gray-100 hover:bg-blue-50/50 transition-colors ${selectedIds.has(p.id) ? 'bg-blue-100/50' : 'bg-white'}`}>
+                                        <tr key={p.id} className={`border-b border-gray-100 transition-colors ${selectedIds.has(p.id) ? 'bg-blue-100/50' : isHidden ? 'bg-amber-50/70' : 'bg-white'} hover:bg-blue-50/70`}>
                                             <td className="p-3 text-center"><input type="checkbox" className="asignar-checkbox w-4 h-4" data-asignar-checkbox="true" aria-label={`Seleccionar a ${p.completo || 'participante'}`} checked={selectedIds.has(p.id)} onKeyDown={event => moveCheckboxFocus(event, participantesFiltrados.findIndex(item => item.id === p.id))} onChange={() => toggleSelect(p.id)} /></td>
-                                            <td className="p-3 font-bold text-blue-700">{grupoObj ? grupoObj.nombre : <span className="text-red-400 bg-red-50 px-2 py-0.5 rounded text-[10px]">Sin grupo</span>}</td>
+                                            <td className="p-3 font-bold text-blue-700">{grupoObj ? grupoObj.nombre : <span className="text-red-400 bg-red-50 px-2 py-0.5 rounded text-[10px]">Sin grupo</span>}{isHidden && <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-black uppercase text-amber-800"><i className="fa-solid fa-eye-slash"></i>Oculto</span>}</td>
                                             <td className="p-3 text-gray-500">{p.no}</td>
                                             <td className="p-3 font-mono text-[10px] text-gray-500">{p.curp}</td>
                                             <td className="p-3 font-semibold text-gray-800">{p.completo}</td>
@@ -5653,7 +6276,7 @@ María López	maria.lopez	Z9y8x7" />
                         </table>
                     </div>
                     <div className="p-3 bg-white border-t border-gray-200 text-xs text-gray-500 text-center font-medium shadow-inner">
-                        Mostrando {participantesFiltrados.length} registros de {db.participantes.length} en total.
+                        Mostrando {participantesFiltrados.length} registros de {participantesAsignacion.length} en total · {participantesOcultos.length} oculto(s), excluido(s) de seguimientos, estadísticas y reportes.
                     </div>
 
                     {reparticionAbierta && (
@@ -6042,6 +6665,48 @@ María López	maria.lopez	Z9y8x7" />
                 downloadCSV(`Moodle_${db.info.siglas}.csv`, [head.join(','), ...rows].join('\n'));
             };
 
+            const expMoodleAsesores = () => {
+                const head = ['username', 'course1', 'group1', 'role1'];
+                const course = `${db.info.siglas}-${db.info.idEstado}${String(db.info.anio || '').slice(-2)}`;
+                const rows = [];
+                const seen = new Set();
+
+                (db.grupos || []).forEach(grupo => {
+                    const asesor = asesoresGlobales.find(persona => persona.id === grupo.asesorId)
+                        || asesoresGlobales.find(persona => normalizeText(persona.nombre) === normalizeText(grupo.asesor));
+                    const username = String(asesor?.usuario || asesor?.nombre || grupo.asesor || '').trim();
+                    const groupName = String(grupo.nombre || '').trim();
+                    if (!username) return;
+
+                    const key = `${normalizeText(username)}|${course}|${normalizeText(groupName)}|editingteacher`;
+                    if (seen.has(key)) return;
+                    seen.add(key);
+                    rows.push([username, course, groupName, 'editingteacher']);
+                });
+
+                const coordinadorIds = db.info.coordinadorIds || (db.info.coordinadorId ? [db.info.coordinadorId] : []);
+                coordinadorIds.forEach(id => {
+                    const coordinador = asesoresGlobales.find(persona => persona.id === id);
+                    const username = String(coordinador?.usuario || coordinador?.nombre || '').trim();
+                    if (!username) return;
+
+                    const key = `${normalizeText(username)}|${course}| |manager`;
+                    if (seen.has(key)) return;
+                    seen.add(key);
+                    rows.push([username, course, '', 'manager']);
+                });
+
+                if (rows.length === 0) {
+                    alert('No hay asesores o coordinadores con usuario asignado para exportar.');
+                    return;
+                }
+
+                const csvData = [head.join(','), ...rows
+                    .map(row => row.map(value => `"${String(value ?? '').replace(/"/g, '""')}"`).join(','))
+                ].join('\n');
+                downloadCSV(`Moodle_Asesores_Coordinadores_${db.info.siglas || 'curso'}.csv`, csvData);
+            };
+
             const getGoogleContactsCsvData = () => {
                 const headers = ['First Name', 'Last Name', 'Name Prefix', 'Name Suffix', 'Organization Name', 'Organization Title', 'Labels', 'E-mail 1 - Label', 'E-mail 1 - Value', 'Phone 1 - Label', 'Phone 1 - Value'];
                 const orgName = `${db.info.siglas} ${db.info.idEstado} ${db.info.anio.slice(-2)}`;
@@ -6208,7 +6873,10 @@ María López	maria.lopez	Z9y8x7" />
                                 <div className="no-print max-w-2xl">
                                     <div className="flex items-center gap-4 mb-6 text-blue-900"><div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center"><i className="fa-solid fa-graduation-cap text-2xl"></i></div><h2 className="text-3xl font-bold">Exportar para Moodle</h2></div>
                                     <p className="text-gray-600 mb-8 leading-relaxed">Genera un archivo CSV compatible para subir usuarios a Moodle masivamente. Incluye minúsculas forzadas en username y concatenación de siglas de curso automáticas.</p>
-                                    <button onClick={expMoodle} className="bg-blue-600 text-white px-8 py-4 rounded-xl shadow-lg shadow-blue-500/30 flex items-center gap-3 hover:bg-blue-700 font-bold text-lg transition-transform active:scale-95"><i className="fa-solid fa-download"></i> Descargar archivo CSV</button>
+                                    <div className="flex flex-wrap gap-4">
+                                        <button onClick={expMoodle} className="bg-blue-600 text-white px-8 py-4 rounded-xl shadow-lg shadow-blue-500/30 flex items-center gap-3 hover:bg-blue-700 font-bold text-lg transition-transform active:scale-95"><i className="fa-solid fa-download"></i> Descargar CSV de alumnos</button>
+                                        <button onClick={expMoodleAsesores} className="bg-indigo-600 text-white px-8 py-4 rounded-xl shadow-lg shadow-indigo-500/30 flex items-center gap-3 hover:bg-indigo-700 font-bold text-lg transition-transform active:scale-95"><i className="fa-solid fa-user-tie"></i> Descargar CSV de asesores</button>
+                                    </div>
                                 </div>
                             )}
                             {subTab === 'google' && !isCoordinador && !isAsesor && (
@@ -7204,6 +7872,38 @@ María López	maria.lopez	Z9y8x7" />
                 return results;
             }, [grupos, participantes, db.info.numPA, db.info.numAct, getPData, getEffectiveConf, calcFinal, umbralAcreditacion]);
 
+            const functionBreakdown = useMemo(() => {
+                const funcionLabels = new Map();
+                participantes.forEach(participante => {
+                    const funcion = String(participante.funcion || '').trim() || 'Sin función';
+                    const key = funcion.toLocaleLowerCase('es');
+                    if (!funcionLabels.has(key)) funcionLabels.set(key, funcion);
+                });
+                const columns = Array.from(funcionLabels.values())
+                    .sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+                const groups = stats.map(group => {
+                    const groupParticipants = participantes.filter(participante =>
+                        group.id === 'NONE' ? !participante.grupoId : participante.grupoId === group.id
+                    );
+                    const counts = {};
+                    const accredited = {};
+                    columns.forEach(funcion => {
+                        const matchingParticipants = groupParticipants.filter(participante =>
+                            (String(participante.funcion || '').trim() || 'Sin función').toLocaleLowerCase('es') === funcion.toLocaleLowerCase('es')
+                        );
+                        counts[funcion] = matchingParticipants.length;
+                        accredited[funcion] = matchingParticipants.filter(participante => calcFinal(participante.id) >= umbralAcreditacion).length;
+                    });
+                    return { id: group.id, nombre: group.nombre, total: groupParticipants.length, counts, accredited };
+                });
+                const totalRow = { id: 'TOTAL', nombre: `Total ${db.info.siglas}`, total: participantes.length, counts: {}, accredited: {} };
+                columns.forEach(funcion => {
+                    totalRow.counts[funcion] = groups.reduce((sum, group) => sum + group.counts[funcion], 0);
+                    totalRow.accredited[funcion] = groups.reduce((sum, group) => sum + group.accredited[funcion], 0);
+                });
+                return { columns, groups, totalRow };
+            }, [participantes, stats, calcFinal, umbralAcreditacion, db.info.siglas]);
+
             const total = useMemo(() => {
                 const t = { nombre: 'Total ' + db.info.siglas, inscritos: 0, atendidos: 0, acreditados: 0, paCounts: {}, actCounts: {} };
                 stats.forEach(s => {
@@ -7213,6 +7913,19 @@ María López	maria.lopez	Z9y8x7" />
                 });
                 return t;
             }, [stats, db.info]);
+
+            const functionAccreditedChart = useMemo(() => {
+                const labels = ['Total acreditados', ...functionBreakdown.columns];
+                const data = [
+                    total.acreditados,
+                    ...functionBreakdown.columns.map(funcion => functionBreakdown.totalRow.accredited[funcion])
+                ];
+                return {
+                    labels,
+                    data,
+                    maxValue: Math.max(1, Math.ceil(Math.max(...data, 0) * 1.15))
+                };
+            }, [functionBreakdown, total.acreditados]);
 
             const activityBreakdown = useMemo(() => {
                 const columns = [
@@ -7425,6 +8138,40 @@ María López	maria.lopez	Z9y8x7" />
                 } catch (error) {
                     console.error('Error al copiar la imagen de Eficiencia Terminal de Actividades:', error);
                     alert('No se pudo copiar la imagen. Intenta nuevamente.');
+                }
+            };
+
+            const copiarFuncionesPorGrupoComoImagen = async () => {
+                const target = document.getElementById('funciones-por-grupo-card');
+                if (!target) return alert('No se pudo capturar la tabla de Funciones por grupo.');
+                if (!window.html2canvas) return alert('La captura de imagen no está disponible en este navegador.');
+
+                try {
+                    const canvas = await window.html2canvas(target, {
+                        backgroundColor: '#ffffff',
+                        scale: 2,
+                        useCORS: true,
+                        scrollX: 0,
+                        scrollY: 0,
+                        ignoreElements: element => element.classList?.contains('no-print')
+                    });
+                    const blob = await new Promise((resolve, reject) => {
+                        canvas.toBlob(imageBlob => imageBlob ? resolve(imageBlob) : reject(new Error('No se pudo generar la imagen.')), 'image/png');
+                    });
+
+                    if (navigator.clipboard?.write && typeof ClipboardItem !== 'undefined') {
+                        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+                        alert('La tabla de Funciones por grupo se copió como imagen al portapapeles.');
+                    } else {
+                        const link = document.createElement('a');
+                        link.href = canvas.toDataURL('image/png');
+                        link.download = `Funciones_por_Grupo_${db.info?.siglas || 'curso'}.png`;
+                        link.click();
+                        alert('La imagen se descargó porque tu navegador no permite copiar directo al portapapeles.');
+                    }
+                } catch (error) {
+                    console.error('Error al copiar la tabla de Funciones por grupo:', error);
+                    alert('No se pudo copiar la tabla. Intenta nuevamente.');
                 }
             };
 
@@ -7732,6 +8479,71 @@ María López	maria.lopez	Z9y8x7" />
                                     </tfoot>
                                 </table>
                             </div>
+                        </div>
+
+                        <div id="funciones-por-grupo-card" className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden break-inside-avoid">
+                            <div className="flex items-start justify-between gap-3 bg-gray-50 p-4 border-b border-gray-100">
+                                <div>
+                                    <h3 className="font-bold text-gray-800 uppercase text-sm tracking-wider">Funciones por grupo</h3>
+                                    <p className="text-[11px] text-gray-500 mt-1">Participantes inscritos por función y, por separado, cuántos están acreditados (calificación final igual o superior a {umbralAcreditacion}).</p>
+                                </div>
+                                <button type="button" onClick={copiarFuncionesPorGrupoComoImagen} className="no-print shrink-0 rounded-xl border border-gray-200 bg-white p-2.5 text-gray-500 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700" title="Copiar tabla como imagen" aria-label="Copiar tabla de Funciones por grupo">
+                                    <i className="fa-solid fa-copy"></i>
+                                </button>
+                            </div>
+                            {functionBreakdown.columns.length > 0 ? (
+                                <div className="w-full p-3 sm:p-4">
+                                    <table className="w-full table-fixed border-collapse text-[10px] text-center sm:text-xs">
+                                        <thead>
+                                            <tr className="bg-slate-800 text-white">
+                                                <th rowSpan="2" className="w-[12%] border border-slate-600 px-1 py-2 text-left sm:px-2">Grupo</th>
+                                                <th rowSpan="2" className="w-[7%] border border-slate-600 px-1 py-2">Total</th>
+                                                <th colSpan={functionBreakdown.columns.length} className="border border-slate-600 px-1 py-2 sm:px-2">Participantes por función</th>
+                                                <th colSpan={functionBreakdown.columns.length} className="border border-slate-600 px-1 py-2 sm:px-2">Acreditados por función</th>
+                                            </tr>
+                                            <tr className="bg-slate-100 text-slate-700">
+                                                {functionBreakdown.columns.map(funcion => <th key={`funcion-count-${funcion}`} className="break-words border border-slate-200 px-1 py-2 font-semibold sm:px-2">{funcion}</th>)}
+                                                {functionBreakdown.columns.map(funcion => <th key={`funcion-accredited-${funcion}`} className="break-words border border-slate-200 px-1 py-2 font-semibold sm:px-2">{funcion} · Acreditados</th>)}
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {functionBreakdown.groups.map((group, index) => (
+                                                <tr key={group.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                                                    <th className="break-words border border-gray-200 px-1 py-2 text-left font-bold text-gray-800 sm:px-2">{group.nombre}</th>
+                                                    <td className="border border-gray-200 px-1 py-2 font-bold text-gray-700 sm:px-2">{group.total}</td>
+                                                    {functionBreakdown.columns.map(funcion => <td key={`group-${group.id}-${funcion}`} className="border border-gray-200 px-1 py-2 text-gray-700 sm:px-2">{group.counts[funcion]}</td>)}
+                                                    {functionBreakdown.columns.map(funcion => <td key={`accredited-${group.id}-${funcion}`} className="border border-gray-200 px-1 py-2 font-semibold text-green-700 sm:px-2">{group.accredited[funcion]}</td>)}
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                        <tfoot className="bg-gray-800 font-bold text-white">
+                                            <tr>
+                                                <th className="break-words border border-gray-700 px-1 py-2 text-left sm:px-2">{functionBreakdown.totalRow.nombre}</th>
+                                                <td className="border border-gray-700 px-1 py-2 sm:px-2">{functionBreakdown.totalRow.total}</td>
+                                                {functionBreakdown.columns.map(funcion => <td key={`total-${funcion}`} className="border border-gray-700 px-1 py-2 sm:px-2">{functionBreakdown.totalRow.counts[funcion]}</td>)}
+                                                {functionBreakdown.columns.map(funcion => <td key={`total-accredited-${funcion}`} className="border border-gray-700 px-1 py-2 text-green-300 sm:px-2">{functionBreakdown.totalRow.accredited[funcion]}</td>)}
+                                            </tr>
+                                        </tfoot>
+                                    </table>
+                                </div>
+                            ) : (
+                                <p className="p-6 text-center text-sm text-gray-500">No hay funciones capturadas para los participantes de esta oferta.</p>
+                            )}
+                        </div>
+
+                        <div className="mx-auto w-full max-w-5xl break-inside-avoid">
+                            <ChartCard
+                                type="bar"
+                                title={`Acreditados por función - ${cursoHeaderMeta}`}
+                                subtitle={`${String(activeSem?.nombre || '').replace(/^SEMANA\s*/i, 'Semana ').trim()} · Total acreditados y desglose por función`}
+                                labels={functionAccreditedChart.labels}
+                                datasets={[{
+                                    label: 'Acreditados',
+                                    data: functionAccreditedChart.data,
+                                    backgroundColor: ['#2563eb', ...functionBreakdown.columns.map(() => '#8b5cf6')]
+                                }]}
+                                maxValue={functionAccreditedChart.maxValue}
+                            />
                         </div>
 
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 break-inside-avoid">
