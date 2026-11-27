@@ -209,6 +209,11 @@
             @page { size: landscape; margin: 1cm; }
         }
 
+        .notice-rich-text ul { list-style: disc; padding-left: 1.5rem; }
+        .notice-rich-text ol { list-style: decimal; padding-left: 1.5rem; }
+        .notice-rich-text p, .notice-rich-text div { min-height: 1em; }
+        .notice-rich-editor:empty::before { color: #94a3b8; content: attr(data-placeholder); pointer-events: none; }
+
         :root {
             --color-azul-institucional: rgb(0, 25, 51);
             --color-azul-institucional-2: rgb(0, 43, 86);
@@ -293,9 +298,12 @@
         const firebaseEnabled = !!firebaseDb;
         const remoteStateDoc = firebaseDb ? firebaseDb.collection('prodep_app').doc('app_state') : null;
         const courseRecordsCollection = remoteStateDoc ? remoteStateDoc.collection('basesDeDatos') : null;
-        const COURSE_SCHEMA_VERSION = 3;
+        const COURSE_SCHEMA_VERSION = 4;
         const MAX_COURSE_DOCUMENT_BYTES = 900 * 1024;
+        const MAX_NOTICE_DOCUMENT_BYTES = 900 * 1024;
         const getCourseWeeksCollection = courseId => courseRecordsCollection.doc(String(courseId)).collection('semanasSeguimiento');
+        const getCourseNoticesCollection = courseId => courseRecordsCollection.doc(String(courseId)).collection('avisosAsesores');
+        const getNoticeStatesCollection = (courseId, noticeId) => getCourseNoticesCollection(courseId).doc(String(noticeId)).collection('estados');
 
         const notifySaveFailed = error => {
             const detail = { message: error?.code || error?.message || 'Error desconocido' };
@@ -313,8 +321,13 @@
         };
 
         const getCourseDocumentData = record => {
-            const { semanasSeguimiento, ...courseData } = record;
+            const { semanasSeguimiento, avisosAsesores, ...courseData } = record;
             return courseData;
+        };
+
+        const getNoticeDocumentData = notice => {
+            const { estadosPorAsesor, ...noticeData } = notice;
+            return noticeData;
         };
 
         const readCourseWeeks = async (courseReference, courseData) => {
@@ -328,10 +341,39 @@
             );
         };
 
+        const readCourseNotices = async (courseReference, courseData) => {
+            const embeddedNotices = Array.isArray(courseData.avisosAsesores) ? courseData.avisosAsesores : [];
+            const noticeSnapshot = await courseReference.collection('avisosAsesores').get();
+            const noticesById = new Map();
+            const noticesWithoutId = [];
+            embeddedNotices.forEach(notice => {
+                const noticeId = String(notice?.id || '').trim();
+                if (noticeId) noticesById.set(noticeId, notice);
+                else noticesWithoutId.push(notice);
+            });
+            noticeSnapshot.docs.forEach(document => {
+                noticesById.set(document.id, { ...noticesById.get(document.id), ...document.data(), id: document.id });
+            });
+            return Promise.all([...noticesById.values(), ...noticesWithoutId].map(async notice => {
+                const noticeId = String(notice?.id || '').trim();
+                const estadosPorAsesor = { ...(notice?.estadosPorAsesor || {}) };
+                if (noticeId) {
+                    const statesSnapshot = await courseReference.collection('avisosAsesores').doc(noticeId).collection('estados').get();
+                    statesSnapshot.docs.forEach(document => {
+                        estadosPorAsesor[document.id] = document.data();
+                    });
+                }
+                return { ...notice, estadosPorAsesor };
+            }));
+        };
+
         const readCourseRecords = async snapshot => Promise.all(snapshot.docs.map(async document => {
             const courseData = document.data();
-            const semanasSeguimiento = await readCourseWeeks(document.ref, courseData);
-            return { ...courseData, id: document.id, semanasSeguimiento };
+            const [semanasSeguimiento, avisosAsesores] = await Promise.all([
+                readCourseWeeks(document.ref, courseData),
+                readCourseNotices(document.ref, courseData)
+            ]);
+            return { ...courseData, id: document.id, semanasSeguimiento, avisosAsesores };
         }));
 
         const writeCourseRecords = async (records, previousRecords = [], force = false) => {
@@ -374,11 +416,56 @@
                 previousWeeks.forEach((week, weekId) => {
                     if (!nextWeeks.has(weekId)) operations.push({ type: 'delete-week', courseId: id, weekId });
                 });
+
+                const previousNotices = new Map((previous?.avisosAsesores || []).map(notice => [String(notice.id), notice]));
+                const nextNotices = new Map();
+                (record.avisosAsesores || []).forEach(notice => {
+                    const noticeId = String(notice?.id || '').trim();
+                    if (!noticeId || noticeId.includes('/')) throw new Error(`El curso ${record.info?.siglas || id} tiene un aviso sin identificador válido.`);
+                    if (nextNotices.has(noticeId)) throw new Error(`El curso ${record.info?.siglas || id} tiene avisos con identificadores duplicados.`);
+                    const noticeData = { ...getNoticeDocumentData(notice), id: noticeId };
+                    if (new TextEncoder().encode(JSON.stringify(noticeData)).length > MAX_NOTICE_DOCUMENT_BYTES) {
+                        throw new Error(`Un aviso del curso ${record.info?.siglas || id} supera el tamaño seguro por documento.`);
+                    }
+                    nextNotices.set(noticeId, noticeData);
+                    if (force || serializeComparable(getNoticeDocumentData(previousNotices.get(noticeId) || {})) !== serializeComparable(noticeData)) {
+                        operations.push({ type: 'set-notice', courseId: id, noticeId, data: noticeData });
+                    }
+                    const previousStates = previousNotices.get(noticeId)?.estadosPorAsesor || {};
+                    const nextStates = notice.estadosPorAsesor || {};
+                    Object.entries(nextStates).forEach(([asesorId, state]) => {
+                        if (!asesorId || asesorId.includes('/')) throw new Error(`El aviso ${noticeId} contiene un identificador de asesor inválido.`);
+                        const stateData = state && typeof state === 'object' && !Array.isArray(state) ? state : { estado: state };
+                        if (force || serializeComparable(previousStates[asesorId]) !== serializeComparable(stateData)) {
+                            operations.push({ type: 'set-notice-state', courseId: id, noticeId, asesorId, data: stateData });
+                        }
+                    });
+                    Object.keys(previousStates).forEach(asesorId => {
+                        if (!Object.prototype.hasOwnProperty.call(nextStates, asesorId)) {
+                            operations.push({ type: 'delete-notice-state', courseId: id, noticeId, asesorId });
+                        }
+                    });
+                });
+                previousNotices.forEach((notice, noticeId) => {
+                    if (!nextNotices.has(noticeId)) {
+                        Object.keys(notice.estadosPorAsesor || {}).forEach(asesorId => {
+                            operations.push({ type: 'delete-notice-state', courseId: id, noticeId, asesorId });
+                        });
+                        operations.push({ type: 'delete-notice', courseId: id, noticeId });
+                    }
+                });
             });
             previousById.forEach((record, id) => {
                 if (!nextById.has(id)) {
                     (record.semanasSeguimiento || []).forEach(week => {
                         operations.push({ type: 'delete-week', courseId: id, weekId: String(week.id) });
+                    });
+                    (record.avisosAsesores || []).forEach(notice => {
+                        const noticeId = String(notice.id);
+                        operations.push({ type: 'delete-notice', courseId: id, noticeId });
+                        Object.keys(notice.estadosPorAsesor || {}).forEach(asesorId => {
+                            operations.push({ type: 'delete-notice-state', courseId: id, noticeId, asesorId });
+                        });
                     });
                     operations.push({ type: 'delete-course', courseId: id });
                 }
@@ -388,9 +475,13 @@
                 const batch = firebaseDb.batch();
                 operations.slice(start, start + 450).forEach(operation => {
                     const courseReference = courseRecordsCollection.doc(operation.courseId);
-                    const reference = operation.type.includes('week')
+                    const reference = operation.type.endsWith('-week')
                         ? courseReference.collection('semanasSeguimiento').doc(operation.weekId)
-                        : courseReference;
+                        : operation.type.endsWith('-notice-state')
+                            ? getNoticeStatesCollection(operation.courseId, operation.noticeId).doc(operation.asesorId)
+                        : operation.type.endsWith('-notice')
+                            ? courseReference.collection('avisosAsesores').doc(operation.noticeId)
+                            : courseReference;
                     if (operation.type.startsWith('delete')) batch.delete(reference);
                     else batch.set(reference, operation.data);
                 });
@@ -410,6 +501,8 @@
                 : await readCourseRecords(currentCourses);
 
             const weeklyWrites = [];
+            const noticeWrites = [];
+            const noticeStateWrites = [];
             recordsToMigrate.forEach(record => {
                 const courseId = String(record?.id || '').trim();
                 if (!courseId || courseId.includes('/')) throw new Error('Un curso del formato anterior tiene un identificador inválido.');
@@ -422,12 +515,45 @@
                     }
                     weeklyWrites.push({ courseId, weekId, week: weekData });
                 });
+                const noticeIds = new Set();
+                (record.avisosAsesores || []).forEach(notice => {
+                    const noticeId = String(notice?.id || '').trim();
+                    if (!noticeId || noticeId.includes('/')) throw new Error(`Un aviso del curso ${record.info?.siglas || courseId} tiene un identificador inválido.`);
+                    if (noticeIds.has(noticeId)) throw new Error(`El curso ${record.info?.siglas || courseId} tiene avisos con identificadores duplicados.`);
+                    noticeIds.add(noticeId);
+                    const noticeData = { ...getNoticeDocumentData(notice), id: noticeId };
+                    if (new TextEncoder().encode(JSON.stringify(noticeData)).length > MAX_NOTICE_DOCUMENT_BYTES) {
+                        throw new Error(`Un aviso del curso ${record.info?.siglas || courseId} supera el tamaño seguro por documento.`);
+                    }
+                    noticeWrites.push({ courseId, noticeId, notice: noticeData });
+                    Object.entries(notice.estadosPorAsesor || {}).forEach(([asesorId, state]) => {
+                        if (!asesorId || asesorId.includes('/')) throw new Error(`Un aviso del curso ${record.info?.siglas || courseId} contiene un identificador de asesor inválido.`);
+                        const stateData = state && typeof state === 'object' && !Array.isArray(state) ? state : { estado: state };
+                        noticeStateWrites.push({ courseId, noticeId, asesorId, state: stateData });
+                    });
+                });
             });
 
             for (let start = 0; start < weeklyWrites.length; start += 450) {
                 const batch = firebaseDb.batch();
                 weeklyWrites.slice(start, start + 450).forEach(({ courseId, weekId, week }) => {
                     batch.set(getCourseWeeksCollection(courseId).doc(weekId), week);
+                });
+                await batch.commit();
+            }
+
+            for (let start = 0; start < noticeWrites.length; start += 450) {
+                const batch = firebaseDb.batch();
+                noticeWrites.slice(start, start + 450).forEach(({ courseId, noticeId, notice }) => {
+                    batch.set(getCourseNoticesCollection(courseId).doc(noticeId), notice);
+                });
+                await batch.commit();
+            }
+
+            for (let start = 0; start < noticeStateWrites.length; start += 450) {
+                const batch = firebaseDb.batch();
+                noticeStateWrites.slice(start, start + 450).forEach(({ courseId, noticeId, asesorId, state }) => {
+                    batch.set(getNoticeStatesCollection(courseId, noticeId).doc(asesorId), state);
                 });
                 await batch.commit();
             }
@@ -440,6 +566,18 @@
                     serializeComparable(verifiedWeeks.get(String(week.id))) !== serializeComparable({ ...week, orden: index })
                 )) {
                     throw new Error('Los datos de seguimiento no coincidieron; se conservó intacto el formato anterior.');
+                }
+                const expectedNotices = (record.avisosAsesores || []).map(notice => ({
+                    ...notice,
+                    id: String(notice.id),
+                    estadosPorAsesor: notice.estadosPorAsesor || {}
+                }));
+                const verifiedNotices = await readCourseNotices(courseRecordsCollection.doc(courseId), { avisosAsesores: [] });
+                const verifiedNoticesById = new Map(verifiedNotices.map(notice => [notice.id, notice]));
+                if (verifiedNoticesById.size !== expectedNotices.length || expectedNotices.some(notice =>
+                    serializeComparable(verifiedNoticesById.get(notice.id)) !== serializeComparable(notice)
+                )) {
+                    throw new Error('La verificación de avisos no coincidió; se conservaron los avisos originales.');
                 }
             }
 
@@ -472,7 +610,7 @@
                 basesDeDatosSchemaVersion: COURSE_SCHEMA_VERSION,
                 updatedAt: new Date().toISOString()
             }, { merge: true });
-            return weeklyWrites.length + courseWrites.length + 1;
+            return weeklyWrites.length + noticeWrites.length + noticeStateWrites.length + courseWrites.length + 1;
         };
 
         const getTodayUsageKey = () => new Date().toISOString().slice(0, 10);
@@ -579,15 +717,37 @@
                             if (!isMounted) return;
                             const coursesById = new Map(initialCourses.map(record => [String(record.id), getCourseDocumentData(record)]));
                             const weeksByCourse = new Map(initialCourses.map(record => [String(record.id), record.semanasSeguimiento || []]));
+                            const noticesByCourse = new Map(initialCourses.map(record => [String(record.id), record.avisosAsesores || []]));
+                            const noticeDataByCourse = new Map(initialCourses.map(record => [
+                                String(record.id),
+                                new Map((record.avisosAsesores || []).map(notice => [String(notice.id), getNoticeDocumentData(notice)]))
+                            ]));
+                            const noticeStatesByCourse = new Map(initialCourses.map(record => [
+                                String(record.id),
+                                new Map((record.avisosAsesores || []).map(notice => [String(notice.id), new Map(Object.entries(notice.estadosPorAsesor || {}))]))
+                            ]));
                             const weekUnsubscribes = new Map();
+                            const noticeUnsubscribes = new Map();
+                            const noticeStateUnsubscribes = new Map();
                             const publishRecords = () => {
                                 const records = Array.from(coursesById, ([id, course]) => ({
                                     ...course,
                                     id,
-                                    semanasSeguimiento: weeksByCourse.get(id) || []
+                                    semanasSeguimiento: weeksByCourse.get(id) || [],
+                                    avisosAsesores: noticesByCourse.get(id) || []
                                 }));
                                 storedValueRef.current = records;
                                 setStoredValue(records);
+                            };
+                            const publishNotices = courseId => {
+                                const notices = noticeDataByCourse.get(courseId) || new Map();
+                                const statesByNotice = noticeStatesByCourse.get(courseId) || new Map();
+                                noticesByCourse.set(courseId, Array.from(notices, ([noticeId, notice]) => ({
+                                    ...notice,
+                                    id: noticeId,
+                                    estadosPorAsesor: Object.fromEntries(statesByNotice.get(noticeId) || [])
+                                })));
+                                publishRecords();
                             };
                             const watchWeeks = courseId => {
                                 if (weekUnsubscribes.has(courseId)) return;
@@ -601,6 +761,56 @@
                                 });
                                 weekUnsubscribes.set(courseId, unsubscribeWeeks);
                             };
+                            const watchNoticeStates = (courseId, noticeId) => {
+                                const key = `${courseId}/${noticeId}`;
+                                if (noticeStateUnsubscribes.has(key)) return;
+                                const unsubscribeStates = getNoticeStatesCollection(courseId, noticeId).onSnapshot(snapshot => {
+                                    if (!isMounted) return;
+                                    let statesByNotice = noticeStatesByCourse.get(courseId);
+                                    if (!statesByNotice) {
+                                        statesByNotice = new Map();
+                                        noticeStatesByCourse.set(courseId, statesByNotice);
+                                    }
+                                    statesByNotice.set(noticeId, new Map(snapshot.docs.map(document => [document.id, document.data()])));
+                                    publishNotices(courseId);
+                                }, error => {
+                                    console.warn('Firebase: no se pudo sincronizar el estado de un aviso.', error);
+                                    notifySaveFailed(error);
+                                });
+                                noticeStateUnsubscribes.set(key, unsubscribeStates);
+                            };
+                            const watchNotices = courseId => {
+                                if (noticeUnsubscribes.has(courseId)) return;
+                                const unsubscribeNotices = getCourseNoticesCollection(courseId).onSnapshot(snapshot => {
+                                    if (!isMounted) return;
+                                    const nextNoticeData = new Map();
+                                    let statesByNotice = noticeStatesByCourse.get(courseId);
+                                    if (!statesByNotice) {
+                                        statesByNotice = new Map();
+                                        noticeStatesByCourse.set(courseId, statesByNotice);
+                                    }
+                                    const activeNoticeIds = new Set(snapshot.docs.map(document => document.id));
+                                    statesByNotice.forEach((states, noticeId) => {
+                                        if (!activeNoticeIds.has(noticeId)) {
+                                            statesByNotice.delete(noticeId);
+                                            const key = `${courseId}/${noticeId}`;
+                                            noticeStateUnsubscribes.get(key)?.();
+                                            noticeStateUnsubscribes.delete(key);
+                                        }
+                                    });
+                                    snapshot.docs.forEach(document => {
+                                        nextNoticeData.set(document.id, document.data());
+                                        if (!statesByNotice.has(document.id)) statesByNotice.set(document.id, new Map());
+                                        watchNoticeStates(courseId, document.id);
+                                    });
+                                    noticeDataByCourse.set(courseId, nextNoticeData);
+                                    publishNotices(courseId);
+                                }, error => {
+                                    console.warn('Firebase: no se pudieron sincronizar los avisos para asesores.', error);
+                                    notifySaveFailed(error);
+                                });
+                                noticeUnsubscribes.set(courseId, unsubscribeNotices);
+                            };
 
                             publishRecords();
                             courseStateReadyRef.current = true;
@@ -612,12 +822,25 @@
                                         unsubscribeWeeks();
                                         weekUnsubscribes.delete(courseId);
                                         weeksByCourse.delete(courseId);
+                                        const unsubscribeNotices = noticeUnsubscribes.get(courseId);
+                                        if (unsubscribeNotices) unsubscribeNotices();
+                                        noticeUnsubscribes.delete(courseId);
+                                        noticesByCourse.delete(courseId);
+                                        noticeDataByCourse.delete(courseId);
+                                        noticeStatesByCourse.delete(courseId);
+                                        Array.from(noticeStateUnsubscribes.keys())
+                                            .filter(key => key.startsWith(`${courseId}/`))
+                                            .forEach(key => {
+                                                noticeStateUnsubscribes.get(key)?.();
+                                                noticeStateUnsubscribes.delete(key);
+                                            });
                                         coursesById.delete(courseId);
                                     }
                                 });
                                 snapshot.docs.forEach(document => {
-                                    coursesById.set(document.id, document.data());
+                                    coursesById.set(document.id, getCourseDocumentData(document.data()));
                                     watchWeeks(document.id);
+                                    watchNotices(document.id);
                                 });
                                 publishRecords();
                             }, error => {
@@ -628,6 +851,8 @@
                             unsubscribe = () => {
                                 unsubscribeCourses();
                                 weekUnsubscribes.forEach(unsubscribeWeeks => unsubscribeWeeks());
+                                noticeUnsubscribes.forEach(unsubscribeNotices => unsubscribeNotices());
+                                noticeStateUnsubscribes.forEach(unsubscribeStates => unsubscribeStates());
                             };
                         } catch (error) {
                             console.warn('Firebase: no se pudo preparar la migración de cursos.', error);
@@ -2503,7 +2728,7 @@
                                             <i className="fa-solid fa-cloud-check text-[10px] sm:text-[11px] text-emerald-300"></i>
                                             <span>Conectado a Firebase</span>
                                         </div>
-                                        <div className="text-[10px] text-slate-200">v13.6</div>
+                                        <div className="text-[10px] text-slate-200">v13.7</div>
                                     </>
                                 ) : (
                                     <div className="inline-flex flex-col items-center gap-2 text-white/90">
@@ -2511,7 +2736,7 @@
                                             <i className="fa-solid fa-cloud text-base text-white/60"></i>
                                             <span>{firebaseStatusMessage}</span>
                                         </div>
-                                        <div className="text-xs text-slate-200">v13.6</div>
+                                        <div className="text-xs text-slate-200">v13.7</div>
                                     </div>
                                 )}
                             </div>
@@ -3943,6 +4168,95 @@ María López	maria.lopez	Z9y8x7" />
             urgente: 'border-red-200 bg-red-100 text-red-800'
         })[getAvisoPrioridad(prioridad)];
 
+        const escaparTextoAviso = texto => String(texto ?? '').replace(/[&<>"]/g, caracter => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;'
+        })[caracter]);
+        const sanitizarHtmlAviso = (contenido, esHtml = true) => {
+            const fuente = esHtml
+                ? String(contenido ?? '')
+                : escaparTextoAviso(contenido).replace(/\r\n?|\n/g, '<br>');
+            const documento = new DOMParser().parseFromString(fuente, 'text/html');
+            const permitidas = new Set(['P', 'DIV', 'BR', 'STRONG', 'B', 'EM', 'I', 'U', 'UL', 'OL', 'LI']);
+            const descartadas = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'SVG', 'MATH', 'TEMPLATE']);
+            const copiarNodos = (origen, destino) => {
+                Array.from(origen.childNodes).forEach(nodo => {
+                    if (nodo.nodeType === Node.TEXT_NODE) {
+                        destino.appendChild(document.createTextNode(nodo.nodeValue || ''));
+                        return;
+                    }
+                    if (nodo.nodeType !== Node.ELEMENT_NODE || descartadas.has(nodo.tagName)) return;
+                    if (!permitidas.has(nodo.tagName)) {
+                        copiarNodos(nodo, destino);
+                        return;
+                    }
+                    const copia = document.createElement(nodo.tagName.toLowerCase());
+                    const alineacion = nodo.style?.textAlign || nodo.getAttribute('align') || '';
+                    if (['left', 'center', 'right', 'justify'].includes(alineacion.toLowerCase())) {
+                        copia.style.textAlign = alineacion.toLowerCase();
+                    }
+                    copiarNodos(nodo, copia);
+                    destino.appendChild(copia);
+                });
+            };
+            const resultado = document.createElement('div');
+            copiarNodos(documento.body, resultado);
+            return resultado.innerHTML;
+        };
+
+        function EditorMensajeAviso({ value, isHtml, resetKey, onChange }) {
+            const editorRef = useRef(null);
+            useEffect(() => {
+                if (editorRef.current) editorRef.current.innerHTML = sanitizarHtmlAviso(value, isHtml);
+            }, [resetKey]);
+
+            const ejecutarFormato = comando => {
+                editorRef.current?.focus();
+                document.execCommand(comando, false);
+                if (editorRef.current) onChange(editorRef.current.innerHTML);
+            };
+            const botones = [
+                { comando: 'bold', etiqueta: 'Negritas', icono: 'fa-bold' },
+                { comando: 'italic', etiqueta: 'Cursiva', icono: 'fa-italic' },
+                { comando: 'underline', etiqueta: 'Subrayado', icono: 'fa-underline' },
+                { comando: 'insertUnorderedList', etiqueta: 'Viñetas', icono: 'fa-list-ul' },
+                { comando: 'insertOrderedList', etiqueta: 'Lista numerada', icono: 'fa-list-ol' },
+                { comando: 'justifyLeft', etiqueta: 'Alinear a la izquierda', icono: 'fa-align-left' },
+                { comando: 'justifyCenter', etiqueta: 'Centrar', icono: 'fa-align-center' },
+                { comando: 'justifyRight', etiqueta: 'Alinear a la derecha', icono: 'fa-align-right' },
+                { comando: 'justifyFull', etiqueta: 'Justificar', icono: 'fa-align-justify' }
+            ];
+
+            return (
+                <div className="mt-1 overflow-hidden rounded-xl border border-slate-200 bg-white focus-within:border-blue-500">
+                    <div className="flex flex-wrap gap-1 border-b border-slate-200 bg-slate-50 p-2" role="toolbar" aria-label="Formato del mensaje">
+                        {botones.map(boton => (
+                            <button key={boton.comando} type="button" title={boton.etiqueta} aria-label={boton.etiqueta}
+                                onMouseDown={event => event.preventDefault()} onClick={() => ejecutarFormato(boton.comando)}
+                                className="flex h-8 w-8 items-center justify-center rounded-md text-slate-600 hover:bg-blue-100 hover:text-blue-800">
+                                <i className={`fa-solid ${boton.icono}`} aria-hidden="true"></i>
+                            </button>
+                        ))}
+                    </div>
+                    <div ref={editorRef} contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true"
+                        data-placeholder="Escribe las indicaciones que debe atender el asesor."
+                        onInput={event => onChange(event.currentTarget.innerHTML)}
+                        onPaste={event => {
+                            event.preventDefault();
+                            document.execCommand('insertText', false, event.clipboardData.getData('text/plain'));
+                        }}
+                        className="notice-rich-editor notice-rich-text min-h-28 w-full cursor-text p-3 text-sm font-normal normal-case text-slate-800 outline-none" />
+                </div>
+            );
+        }
+
+        function MensajeAviso({ aviso, className = '' }) {
+            const html = sanitizarHtmlAviso(aviso.mensaje, aviso.mensajeFormato === 'html');
+            return <div className={`notice-rich-text ${className}`} dangerouslySetInnerHTML={{ __html: html }} />;
+        }
+
         const guardarEstadoAviso = async (onUpdate, avisoId, estado, actualizadoPor, asesorId = '') => {
             const timestamp = new Date().toISOString();
             const saved = await onUpdate(currentDb => ({
@@ -4001,13 +4315,19 @@ María López	maria.lopez	Z9y8x7" />
             const getAsesorLabel = asesor => `${asesor.grupoLabel} - ${asesor.nombre}`;
             const [draft, setDraft] = useState({ id: '', titulo: '', mensaje: '', destinatario: 'todos', asesorId: '', prioridad: 'normal' });
             const [isSaving, setIsSaving] = useState(false);
+            const [editorResetKey, setEditorResetKey] = useState(0);
 
-            const limpiarDraft = () => setDraft({ id: '', titulo: '', mensaje: '', destinatario: 'todos', asesorId: '', prioridad: 'normal' });
+            const limpiarDraft = () => {
+                setDraft({ id: '', titulo: '', mensaje: '', mensajeFormato: 'html', destinatario: 'todos', asesorId: '', prioridad: 'normal' });
+                setEditorResetKey(key => key + 1);
+            };
 
             const guardarAviso = async () => {
                 const titulo = draft.titulo.trim();
-                const mensaje = draft.mensaje.trim();
-                if (!titulo || !mensaje) {
+                const mensaje = sanitizarHtmlAviso(draft.mensaje, draft.mensajeFormato === 'html');
+                const textoMensaje = document.createElement('div');
+                textoMensaje.innerHTML = mensaje;
+                if (!titulo || !textoMensaje.textContent.trim()) {
                     alert('Escribe un título y el mensaje del aviso.');
                     return;
                 }
@@ -4023,6 +4343,7 @@ María López	maria.lopez	Z9y8x7" />
                     id: draft.id || `AVISO-${Date.now()}`,
                     titulo,
                     mensaje,
+                    mensajeFormato: 'html',
                     destinatario: draft.destinatario,
                     asesorId: draft.destinatario === 'asesor' ? draft.asesorId : '',
                     prioridad: getAvisoPrioridad(draft.prioridad),
@@ -4160,16 +4481,15 @@ María López	maria.lopez	Z9y8x7" />
                                     <option value="urgente">Urgente</option>
                                 </select>
                             </label>
-                            <label className="block text-xs font-bold uppercase tracking-wide text-slate-600">
-                                Mensaje
-                                <textarea
-                                    rows="4"
+                            <div>
+                                <label className="block text-xs font-bold uppercase tracking-wide text-slate-600">Mensaje</label>
+                                <EditorMensajeAviso
                                     value={draft.mensaje}
-                                    onChange={event => setDraft(current => ({ ...current, mensaje: event.target.value }))}
-                                    className="mt-1 w-full resize-y rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-normal normal-case text-slate-800 outline-none focus:border-blue-500 focus:bg-white"
-                                    placeholder="Escribe las indicaciones que debe atender el asesor."
+                                    isHtml={draft.mensajeFormato === 'html'}
+                                    resetKey={editorResetKey}
+                                    onChange={mensaje => setDraft(current => ({ ...current, mensaje, mensajeFormato: 'html' }))}
                                 />
-                            </label>
+                            </div>
                             <div className="flex flex-wrap justify-end gap-3">
                                 {draft.id && <button type="button" onClick={limpiarDraft} className="rounded-xl bg-slate-100 px-5 py-2.5 font-semibold text-slate-600 hover:bg-slate-200">Cancelar edición</button>}
                                 <button type="button" disabled={isSaving} onClick={guardarAviso} className="rounded-xl bg-blue-700 px-5 py-2.5 font-bold text-white hover:bg-blue-800 disabled:cursor-wait disabled:opacity-60">
@@ -4211,7 +4531,7 @@ María López	maria.lopez	Z9y8x7" />
                                                 ? <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase ${getAvisoEstadoClasses(atendidos === estadosAsesores.length && estadosAsesores.length > 0 ? 'atendido' : 'pendiente')}`}>{pendientes} Pendiente(s) · {atendidos} Atendido(s)</span>
                                                 : <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase ${getAvisoEstadoClasses(estadoAviso)}`}>{estadoAviso === 'atendido' ? 'Atendido' : 'Pendiente'}</span>}
                                         </div>
-                                        <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">{aviso.mensaje}</p>
+                                        <MensajeAviso aviso={aviso} className="mt-2 text-sm leading-6 text-slate-600" />
                                         {aviso.actualizadoEn && <p className="mt-3 text-xs text-slate-400">Actualizado: {new Date(aviso.actualizadoEn).toLocaleString('es-MX')}</p>}
                                         {aviso.atendidoPor && <p className="mt-1 text-xs text-slate-500">Atendido por {aviso.atendidoPor}{aviso.atendidoEn ? ` · ${new Date(aviso.atendidoEn).toLocaleString('es-MX')}` : ''}</p>}
                                         {esParaTodos && estadosAsesores.length > 0 && (
@@ -4239,7 +4559,10 @@ María López	maria.lopez	Z9y8x7" />
                                             <option value="pendiente">Pendiente</option>
                                             <option value="atendido">Atendido</option>
                                         </select>}
-                                        <button type="button" onClick={() => setDraft({ id: aviso.id, titulo: aviso.titulo || '', mensaje: aviso.mensaje || '', destinatario: aviso.destinatario === 'asesor' ? 'asesor' : 'todos', asesorId: aviso.asesorId || '', prioridad: getAvisoPrioridad(aviso.prioridad) })} className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-50"><i className="fa-solid fa-pen mr-1"></i>Editar</button>
+                                        <button type="button" onClick={() => {
+                                            setDraft({ id: aviso.id, titulo: aviso.titulo || '', mensaje: aviso.mensaje || '', mensajeFormato: aviso.mensajeFormato || 'plain', destinatario: aviso.destinatario === 'asesor' ? 'asesor' : 'todos', asesorId: aviso.asesorId || '', prioridad: getAvisoPrioridad(aviso.prioridad) });
+                                            setEditorResetKey(key => key + 1);
+                                        }} className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-50"><i className="fa-solid fa-pen mr-1"></i>Editar</button>
                                         <button type="button" onClick={() => eliminarAviso(aviso.id)} className="rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-50"><i className="fa-solid fa-trash mr-1"></i>Eliminar</button>
                                     </div>
                                 </div>
@@ -4514,7 +4837,7 @@ María López	maria.lopez	Z9y8x7" />
                                                         </select>
                                                     </div>
                                                 </div>
-                                                <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700">{aviso.mensaje}</p>
+                                                <MensajeAviso aviso={aviso} className="text-sm leading-6 text-slate-700" />
                                                 {aviso.actualizadoEn && <p className="mt-4 text-xs text-slate-400">Publicado: {new Date(aviso.actualizadoEn).toLocaleString('es-MX')}</p>}
                                             </article>
                                         ))}
@@ -4568,7 +4891,7 @@ María López	maria.lopez	Z9y8x7" />
                                                                 <h3 className="font-bold text-slate-900">{aviso.titulo}</h3>
                                                                 <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase ${getAvisoPrioridadClasses(aviso.prioridad)}`}>Prioridad: {getAvisoPrioridad(aviso.prioridad)}</span>
                                                             </div>
-                                                            <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{aviso.mensaje}</p>
+                                                            <MensajeAviso aviso={aviso} className="mt-2 text-sm leading-6 text-slate-700" />
                                                             {(aviso.actualizadoEn || aviso.creadoEn) && <p className="mt-3 text-xs text-slate-400">Publicado: {new Date(aviso.actualizadoEn || aviso.creadoEn).toLocaleString('es-MX')}</p>}
                                                         </article>
                                                     ))}
